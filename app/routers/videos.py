@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.responses import BaseResponse
 from app.database import get_db
 from app.schemas.video import (
@@ -19,6 +20,7 @@ from app.schemas.video import (
     VideoListResponse,
     VideoResponse,
     VideoStatusResponse,
+    YouTubeChannelVideosResponse,
 )
 from app.services.videos import VideoService
 from app.worker.helpers import is_celery_broker_online
@@ -55,11 +57,52 @@ def list_videos(
         )
 
 
+@router.get(
+    "/youtube/channel",
+    response_model=BaseResponse[YouTubeChannelVideosResponse],
+)
+def get_channel_youtube_videos(
+    channel: str = Query(
+        default=settings.DEFAULT_YOUTUBE_CHANNEL,
+        description="YouTube channel handle or URL (e.g. @chrisindark)",
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Max videos to load"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    db: Session = Depends(get_db),
+):
+    """
+    Fetch raw YouTube videos directly from a channel without saving to database.
+    Annotates each video with whether it already exists in the local database.
+    """
+    try:
+        data = VideoService.get_channel_youtube_videos(
+            db=db,
+            channel_url=channel,
+            limit=limit,
+            offset=offset,
+        )
+        return BaseResponse.success_response(response=data)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.warning("Invalid YouTube channel query: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.exception("Failed to fetch YouTube videos from channel: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not load YouTube channel videos: {e!s}",
+        )
+
+
 @router.post("/sync", response_model=BaseResponse[SyncChannelResponse])
 def sync_channel_videos(request: SyncChannelRequest, db: Session = Depends(get_db)):
     """
-    Fetch the latest videos from a YouTube channel via yt-dlp
-    and upsert them into the database.
+    Sync videos to the database table (either an explicit list of selected videos,
+    or fetched from the YouTube channel). Skips any video that already exists.
     """
     try:
         sync_result = VideoService.sync_channel(
@@ -67,6 +110,7 @@ def sync_channel_videos(request: SyncChannelRequest, db: Session = Depends(get_d
             channel_url=request.channel_url,
             limit=request.limit,
             offset=request.offset,
+            videos=request.videos,
         )
         return BaseResponse.success_response(response=sync_result)
     except HTTPException:

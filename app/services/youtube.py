@@ -59,10 +59,13 @@ class YouTubeService:
             offset,
         )
 
+        start = offset + 1
+        end = offset + limit
+
         ydl_opts = {
             "extract_flat": True,
             # "playlistreverse": True,
-            "playlist_items": f"{offset}-{limit}",
+            "playlist_items": f"{start}-{end}",
             # "playliststart": offset,
             # "playlistend": limit,
             "skip_download": True,

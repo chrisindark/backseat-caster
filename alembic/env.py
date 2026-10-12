@@ -7,7 +7,7 @@ from alembic import context
 # Import models and settings
 from app.config import settings
 from app.database import Base
-from app.models import Video  # noqa: F401
+from app.models import RenderJob, Video  # noqa: F401
 
 config = context.config
 

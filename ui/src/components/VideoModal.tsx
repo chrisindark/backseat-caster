@@ -18,6 +18,7 @@ interface VideoModalProps {
   onClose: () => void;
   onDownload: (videoId: string) => void;
   onDeleteDownload: (videoId: string) => void;
+  onOpenClipStudio?: (video: VideoItem) => void;
   isDownloading: boolean;
 }
 
@@ -33,19 +34,19 @@ export const VideoModal: React.FC<VideoModalProps> = ({
   onClose,
   onDownload,
   onDeleteDownload,
+  onOpenClipStudio,
   isDownloading,
 }) => {
-  if (!video) return null;
-
-  const isDownloaded = video.is_downloaded;
+  const isDownloaded = video?.is_downloaded;
   const isProcessing =
-    video.download_status === "downloading" ||
-    video.download_status === "pending" ||
+    video?.download_status === "downloading" ||
+    video?.download_status === "pending" ||
     isDownloading;
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+      {video && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -191,13 +192,18 @@ export const VideoModal: React.FC<VideoModalProps> = ({
                     <Trash2 className="w-4 h-4" />
                     <span>Delete Local File</span>
                   </button>
-                  <button
-                    onClick={onClose}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-md shadow-emerald-900/40 transition-all cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Ready in Catalog</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        onClose();
+                        if (onOpenClipStudio) onOpenClipStudio(video);
+                      }}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-bold rounded-lg shadow-lg shadow-rose-950/50 transition-all cursor-pointer active:scale-95"
+                    >
+                      <Scissors className="w-4 h-4" />
+                      <span>Open Clip Studio</span>
+                    </button>
+                  </div>
                 </>
               ) : isProcessing ? (
                 <div className="flex items-center gap-3 w-full justify-between">
@@ -233,6 +239,7 @@ export const VideoModal: React.FC<VideoModalProps> = ({
           </div>
         </motion.div>
       </div>
+      )}
     </AnimatePresence>
   );
 };

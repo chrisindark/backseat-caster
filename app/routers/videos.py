@@ -1,10 +1,10 @@
 """Videos API endpoints."""
 
 import logging
-import os
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -23,8 +23,6 @@ from app.schemas.video import (
     YouTubeChannelVideosResponse,
 )
 from app.services.videos import VideoService
-from app.worker.helpers import is_celery_broker_online
-from app.worker.tasks import download_video_celery_task, execute_download_job
 
 logger = logging.getLogger(__name__)
 
@@ -133,15 +131,13 @@ def sync_channel_videos(request: SyncChannelRequest, db: Session = Depends(get_d
 def get_video(video_id: str, db: Session = Depends(get_db)):
     """Retrieve details for a specific video."""
     try:
-        video = VideoService.get_video_by_id(db=db, video_id=video_id)
+        video = VideoService.get_video(db=db, video_id=video_id)
         if not video:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Video with id '{video_id}' not found",
             )
-        return BaseResponse.success_response(
-            response=VideoResponse.model_validate(video)
-        )
+        return BaseResponse.success_response(response=video)
     except HTTPException:
         raise
     except Exception as e:
@@ -164,71 +160,17 @@ def download_video(
     Dispatches to Celery if broker is available, or runs via FastAPI BackgroundTasks.
     """
     try:
-        video = VideoService.get_video_by_id(db=db, video_id=video_id)
-        if not video:
+        task_response = VideoService.start_download(
+            db=db,
+            video_id=video_id,
+            quality=request.quality,
+            background_tasks=background_tasks,
+        )
+        if not task_response:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Video not found in catalog",
             )
-
-        if video.download_status == "downloading":
-            task_response = DownloadTaskResponse(
-                video_id=video_id,
-                download_status=video.download_status,
-                download_progress=video.download_progress,
-                local_file_path=video.local_file_path,
-                message="Download is already in progress.",
-            )
-            return BaseResponse.success_response(response=task_response)
-
-        if (
-            video.is_downloaded
-            and video.local_file_path
-            and os.path.exists(video.local_file_path)
-        ):
-            task_response = DownloadTaskResponse(
-                video_id=video_id,
-                download_status="completed",
-                download_progress=100.0,
-                local_file_path=video.local_file_path,
-                message="Video is already downloaded locally.",
-            )
-            return BaseResponse.success_response(response=task_response)
-
-        # Update initial pending status via service
-        VideoService.mark_download_pending(db=db, video=video)
-
-        task_id = None
-        dispatched_to_celery = False
-
-        if is_celery_broker_online():
-            logger.info("Dispatching to Celery worker for video %s", video_id)
-            try:
-                async_result = download_video_celery_task.delay(
-                    video_id, request.quality
-                )
-                task_id = async_result.id
-                dispatched_to_celery = True
-                logger.info("Dispatched download task %s to Celery worker", task_id)
-            except Exception as celery_err:
-                logger.warning("Celery dispatch failed: %s", celery_err)
-
-        if not dispatched_to_celery:
-            logger.info(
-                "Celery broker is not online, dispatching to background tasks for video %s",
-                video_id,
-            )
-            background_tasks.add_task(execute_download_job, video_id, request.quality)
-            task_id = f"bg-{video_id}"
-
-        task_response = DownloadTaskResponse(
-            video_id=video_id,
-            download_status="pending",
-            download_progress=0.0,
-            task_id=task_id,
-            message="Download queued successfully"
-            + (" via Celery" if dispatched_to_celery else " in background worker"),
-        )
         return BaseResponse.success_response(response=task_response)
     except HTTPException:
         raise
@@ -265,14 +207,12 @@ def get_download_status(video_id: str, db: Session = Depends(get_db)):
 def delete_downloaded_video(video_id: str, db: Session = Depends(get_db)):
     """Delete a downloaded video file from local disk."""
     try:
-        video = VideoService.get_video_by_id(db=db, video_id=video_id)
-        if not video:
+        result = VideoService.delete_downloaded_video(db=db, video_id=video_id)
+        if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Video not found",
             )
-
-        result = VideoService.delete_downloaded_video(db=db, video=video)
         return BaseResponse.success_response(response=result)
     except HTTPException:
         raise
@@ -287,4 +227,42 @@ def delete_downloaded_video(video_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete video download: {e!s}",
+        )
+
+
+@router.get("/{video_id}/stream")
+@router.head("/{video_id}/stream")
+def stream_video(video_id: str, db: Session = Depends(get_db)):
+    """
+    Stream or playback a downloaded source video with HTTP Range request support.
+    Allows seeking to any timestamp for preview and clipping in the frontend modal.
+    """
+    try:
+        video = VideoService.get_video_by_id(db=db, video_id=video_id)
+        if not video:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with id '{video_id}' not found",
+            )
+
+        file_info = VideoService.get_video_file_info(db=db, video_id=video_id)
+        if not file_info:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Downloaded video file for '{video_id}' not found on disk",
+            )
+
+        target_path, media_type, filename = file_info
+        return FileResponse(
+            path=target_path,
+            media_type=media_type,
+            filename=filename,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to stream video %s: %s", video_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stream video: {e!s}",
         )

@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
+from app.models.render_job import RenderJob
 from app.models.video import Video
 
 TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -52,7 +53,7 @@ def test_health_check(client):
     assert data["status_code"] == 200
     assert data["response"]["status"] == "healthy"
     assert data["error_message"] is None
-    assert data["error_code"] == None
+    assert data["error_code"] is None
 
 
 def test_list_empty_videos(client):
@@ -477,12 +478,14 @@ def test_render_job_celery_dispatch(client, db_session, monkeypatch, tmp_path):
     db_session.commit()
 
     # Mock Celery broker as online
-    monkeypatch.setattr("app.routers.renders.is_celery_broker_online", lambda: True)
+    monkeypatch.setattr("app.worker.helpers.is_celery_broker_online", lambda: True)
 
     mock_async_result = MagicMock()
     mock_async_result.id = "celery-task-xyz-789"
     mock_delay = MagicMock(return_value=mock_async_result)
-    monkeypatch.setattr("app.routers.renders.render_clip_celery_task.delay", mock_delay)
+    monkeypatch.setattr(
+        "app.services.renders.render_clip_celery_task.delay", mock_delay
+    )
 
     response = client.post(
         f"{settings.API_PREFIX}/renders",
@@ -670,3 +673,203 @@ def test_sync_channel_with_selected_videos(client, db_session):
     new_v = db_session.query(Video).filter(Video.id == "sync_vid_2").first()
     assert new_v is not None
     assert new_v.title == "Second Video To Add"
+
+
+def test_list_render_jobs(client, db_session):
+    video = Video(
+        id="render_job_vid_1",
+        title="Render Job Parent Video",
+        webpage_url="https://youtube.com/watch?v=render_job_vid_1",
+    )
+    db_session.add(video)
+
+    job1 = RenderJob(
+        id="job_123",
+        clip_id="clip_123",
+        video_id="render_job_vid_1",
+        status="completed",
+        progress=100.0,
+        start_seconds=10.0,
+        duration_seconds=15.0,
+    )
+    job2 = RenderJob(
+        id="job_456",
+        clip_id="clip_456",
+        video_id="render_job_vid_1",
+        status="rendering",
+        progress=45.0,
+        start_seconds=20.0,
+        duration_seconds=30.0,
+    )
+    db_session.add_all([job1, job2])
+    db_session.commit()
+
+    res = client.get(f"{settings.API_PREFIX}/renders/jobs")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["response"]["total"] == 2
+    items = data["response"]["items"]
+    assert len(items) == 2
+    assert items[0]["video_title"] == "Render Job Parent Video"
+
+    # Filter by status
+    res_status = client.get(f"{settings.API_PREFIX}/renders/jobs?status=rendering")
+    assert res_status.status_code == 200
+    assert res_status.json()["response"]["total"] == 1
+    assert res_status.json()["response"]["items"][0]["job_id"] == "job_456"
+
+
+def test_update_upload_selection(client, db_session):
+    job = RenderJob(
+        id="job_upload_sel",
+        clip_id="clip_upload_sel",
+        video_id="sample_vid",
+        status="completed",
+        progress=100.0,
+        start_seconds=0.0,
+        duration_seconds=15.0,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    payload = {
+        "is_selected": True,
+        "preferred_format": "vertical_blur",
+        "title": "Selected Highlight Short",
+        "description": "Epic Marvel Rivals elimination",
+        "tags": ["gaming", "rivals"],
+        "privacy": "unlisted",
+    }
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_upload_sel/upload-selection",
+        json=payload,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["response"]["upload_selection"]["is_selected"] is True
+
+    # Check that database record updated
+    db_job = (
+        db_session.query(RenderJob).filter(RenderJob.id == "job_upload_sel").first()
+    )
+    assert db_job.is_selected_for_upload is True
+    assert db_job.selected_format == "vertical_blur"
+
+
+def test_delete_render(client, db_session):
+    job = RenderJob(
+        id="job_to_del",
+        clip_id="clip_to_del",
+        video_id="sample_vid",
+        status="completed",
+        progress=100.0,
+        start_seconds=0.0,
+        duration_seconds=15.0,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    res = client.delete(f"{settings.API_PREFIX}/renders/clip_to_del")
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert (
+        db_session.query(RenderJob).filter(RenderJob.id == "job_to_del").first() is None
+    )
+
+
+def test_download_celery_dispatch(client, db_session, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.models.video import Video
+
+    video = Video(
+        id="celery_dl_vod_1",
+        title="Celery DL Video",
+        webpage_url="https://www.youtube.com/watch?v=celery_dl_vod_1",
+        is_downloaded=False,
+        download_status="not_downloaded",
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    monkeypatch.setattr("app.worker.helpers.is_celery_broker_online", lambda: True)
+
+    mock_async_result = MagicMock()
+    mock_async_result.id = "celery-dl-task-123"
+    mock_delay = MagicMock(return_value=mock_async_result)
+    monkeypatch.setattr(
+        "app.services.videos.download_video_celery_task.delay", mock_delay
+    )
+
+    response = client.post(
+        f"{settings.API_PREFIX}/videos/celery_dl_vod_1/download",
+        json={"quality": "best"},
+    )
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["success"] is True
+    assert "via Celery" in res_data["response"]["message"]
+    mock_delay.assert_called_once_with("celery_dl_vod_1", "best")
+
+
+def test_worker_tasks_backwards_compatible_imports():
+    from app.services.renders import execute_render_job as svc_render_job
+    from app.services.renders import render_clip_celery_task as svc_render_task
+    from app.services.videos import download_video_celery_task as svc_dl_task
+    from app.services.videos import execute_download_job as svc_dl_job
+    from app.worker.tasks import (
+        download_video_celery_task,
+        execute_download_job,
+        execute_render_job,
+        render_clip_celery_task,
+    )
+
+    assert download_video_celery_task is svc_dl_task
+    assert execute_download_job is svc_dl_job
+    assert render_clip_celery_task is svc_render_task
+    assert execute_render_job is svc_render_job
+
+
+def test_stream_video_not_found(client):
+    """Streaming a non-existent video returns 404."""
+    res = client.get(f"{settings.API_PREFIX}/videos/nonexistent_id/stream")
+    assert res.status_code == 404
+
+
+def test_stream_video_not_downloaded(client, db_session):
+    """Streaming a video that is in DB but not downloaded returns 404."""
+    v = Video(
+        id="not_dl_stream_test",
+        title="Not Downloaded Video",
+        webpage_url="https://youtube.com/watch?v=not_dl_stream_test",
+        is_downloaded=False,
+    )
+    db_session.add(v)
+    db_session.commit()
+
+    res = client.get(f"{settings.API_PREFIX}/videos/not_dl_stream_test/stream")
+    assert res.status_code == 404
+
+
+def test_stream_video_downloaded_success(client, db_session, tmp_path):
+    """Streaming a downloaded video returns 200 and streamable video bytes."""
+    dummy_file = tmp_path / "stream_vod_1.mp4"
+    dummy_file.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00isommp42")
+
+    v = Video(
+        id="stream_vod_1",
+        title="Streamable Video",
+        webpage_url="https://youtube.com/watch?v=stream_vod_1",
+        is_downloaded=True,
+        local_file_path=str(dummy_file),
+        file_size_bytes=len(dummy_file.read_bytes()),
+    )
+    db_session.add(v)
+    db_session.commit()
+
+    res = client.get(f"{settings.API_PREFIX}/videos/stream_vod_1/stream")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("video/mp4")
+    assert len(res.content) == len(dummy_file.read_bytes())

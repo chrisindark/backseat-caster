@@ -1,20 +1,17 @@
 "use client";
 
-import React from "react";
 import { motion } from "framer-motion";
 import {
-  Download,
   CheckCircle2,
-  Clock,
-  Eye,
+  Download,
+  ExternalLink,
+  HardDrive,
   Loader2,
   Play,
-  Film,
-  HardDrive,
-  Trash2,
-  ExternalLink,
   Scissors,
+  Trash2
 } from "lucide-react";
+import React from "react";
 
 import { VideoItem } from "@/types/video";
 
@@ -157,10 +154,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => onSelect(video)}
+                  title="Play video and create clip"
                   className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1"
                 >
                   <Scissors className="w-3 h-3" />
-                  <span>Clip Studio</span>
+                  <span>Create Clip</span>
                 </button>
 
                 <button

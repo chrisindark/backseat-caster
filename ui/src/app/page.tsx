@@ -10,9 +10,11 @@ import {
   checkBackendHealth,
   deleteVideoDownload,
   downloadVideo,
+  fetchVideo,
   fetchVideos,
   syncChannel,
 } from "@/lib/api";
+import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import { VideoItem } from "@/types/video";
 import {
   AlertCircle,
@@ -41,6 +43,7 @@ export default function HomePage() {
   const [backendHealthy, setBackendHealthy] = useState<boolean>(true);
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null);
   const [clipStudioVideo, setClipStudioVideo] = useState<VideoItem | null>(null);
+  const [clipInitialStartTime, setClipInitialStartTime] = useState<number>(0);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -108,7 +111,88 @@ export default function HomePage() {
     }
   }, [channelInput, limit, page, activeFilter, searchQuery, loadVideos]);
 
-  // Initial check & load library videos
+  // Modal handlers with browser history tracking
+  const openVideoModal = useCallback((video: VideoItem) => {
+    setSelectedVideo(video);
+    setClipStudioVideo(null);
+    setQueryParams({ video: video.id, clip: null, start: null });
+  }, []);
+
+  const closeVideoModal = useCallback(() => {
+    setSelectedVideo(null);
+    setQueryParams({ video: null });
+  }, []);
+
+  const openClipStudioModal = useCallback((video: VideoItem, initialStartTime = 0) => {
+    setClipStudioVideo(video);
+    setClipInitialStartTime(initialStartTime);
+    setSelectedVideo(null);
+    setQueryParams({
+      clip: video.id,
+      start: initialStartTime > 0 ? String(initialStartTime) : null,
+      video: null,
+    });
+  }, []);
+
+  const closeClipStudioModal = useCallback(() => {
+    setClipStudioVideo(null);
+    setQueryParams({ clip: null, start: null });
+  }, []);
+
+  const videosRef = useRef<VideoItem[]>(videos);
+  useEffect(() => {
+    videosRef.current = videos;
+  }, [videos]);
+
+  // Sync modal state from browser URL (e.g. on reload or Back/Forward navigation)
+  const syncModalsFromUrl = useCallback(
+    async (itemsList?: VideoItem[]) => {
+      const clipId = getQueryParam("clip") || getQueryParam("clipVideoId");
+      const startParam = getQueryParam("start") || getQueryParam("startTime");
+      const videoId = getQueryParam("video") || getQueryParam("videoId");
+
+      if (clipId) {
+        const parsedStart = startParam ? parseFloat(startParam) || 0 : 0;
+        setClipInitialStartTime(parsedStart);
+        setSelectedVideo(null);
+
+        const list = itemsList || videosRef.current;
+        const found = list.find((v) => v.id === clipId);
+        if (found) {
+          setClipStudioVideo(found);
+        } else {
+          try {
+            const fetched = await fetchVideo(clipId);
+            setClipStudioVideo(fetched);
+          } catch (err) {
+            console.warn("Could not find video for clip modal:", err);
+            setQueryParams({ clip: null, start: null }, { replace: true });
+          }
+        }
+      } else if (videoId) {
+        setClipStudioVideo(null);
+        const list = itemsList || videosRef.current;
+        const found = list.find((v) => v.id === videoId);
+        if (found) {
+          setSelectedVideo(found);
+        } else {
+          try {
+            const fetched = await fetchVideo(videoId);
+            setSelectedVideo(fetched);
+          } catch (err) {
+            console.warn("Could not find video for detail modal:", err);
+            setQueryParams({ video: null }, { replace: true });
+          }
+        }
+      } else {
+        setSelectedVideo(null);
+        setClipStudioVideo(null);
+      }
+    },
+    []
+  );
+
+  // Initial check & load library videos, then restore any active modal from URL
   useEffect(() => {
     console.log("useEffect initial");
     let mounted = true;
@@ -119,21 +203,40 @@ export default function HomePage() {
       }
 
       const healthy = await checkBackendHealth();
+      if (!mounted) return;
       setBackendHealthy(healthy);
 
       if (healthy) {
-        await loadVideos(1, limit, "all", "");
+        const data = await loadVideos(1, limit, "all", "");
+        if (!mounted) return;
+        if (data?.items) {
+          await syncModalsFromUrl(data.items);
+        } else {
+          await syncModalsFromUrl();
+        }
       } else {
         setIsLoading(false);
       }
-      mounted = false;
     }
 
     init();
     return () => {
       mounted = false;
     };
-  }, [limit]);
+  }, [limit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen to browser Back/Forward navigation to sync modal states
+  useEffect(() => {
+    const onPopState = () => {
+      syncModalsFromUrl();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [syncModalsFromUrl]);
+
 
   // Polling loop when videos are downloading
   useEffect(() => {
@@ -308,7 +411,7 @@ export default function HomePage() {
                   key={video.id}
                   video={video}
                   index={idx}
-                  onSelect={setSelectedVideo}
+                  onSelect={openVideoModal}
                   onDownload={handleDownload}
                   onDeleteDownload={handleDeleteDownload}
                   isDownloadingThis={downloadingIds.has(video.id)}
@@ -367,17 +470,20 @@ export default function HomePage() {
       {/* Video Detail Modal */}
       <VideoModal
         video={selectedVideo}
-        onClose={() => setSelectedVideo(null)}
+        onClose={closeVideoModal}
         onDownload={handleDownload}
         onDeleteDownload={handleDeleteDownload}
-        onOpenClipStudio={(vid) => setClipStudioVideo(vid)}
+        onOpenClipStudio={(vid, startTime) => {
+          openClipStudioModal(vid, startTime ?? 0);
+        }}
         isDownloading={selectedVideo ? downloadingIds.has(selectedVideo.id) : false}
       />
 
       {/* Phase 1 Clip Studio & Comparison Modal */}
       <ClipStudioModal
         video={clipStudioVideo}
-        onClose={() => setClipStudioVideo(null)}
+        initialStartTime={clipInitialStartTime}
+        onClose={closeClipStudioModal}
       />
     </div>
   );

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.core.logger import setup_logger
+from app.core.middlewares import CorrelationIdMiddleware
 from app.core.responses import BaseResponse, register_exception_handlers
 from app.routers import renders_router, videos_router
 
@@ -42,6 +43,7 @@ app = FastAPI(
 # Register unified BaseResponse exception handlers
 register_exception_handlers(app)
 
+app.add_middleware(CorrelationIdMiddleware)
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,

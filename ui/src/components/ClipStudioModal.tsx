@@ -1,6 +1,6 @@
 "use client";
 
-import { createRender, fetchRenders, getRenderJobStatus, getStreamUrl } from "@/lib/api";
+import { createRender, fetchRenders, getDownloadedVideoStreamUrl, getRenderJobStatus, getStreamUrl } from "@/lib/api";
 import {
   RenderClipResponse,
   RenderJobResponse,
@@ -15,6 +15,8 @@ import {
   Clock,
   Columns,
   Download,
+  Eye,
+  EyeOff,
   Layers,
   Loader2,
   Monitor,
@@ -22,18 +24,25 @@ import {
   Smartphone,
   Sparkles,
   Volume2,
-  X,
+  X
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 
 interface ClipStudioModalProps {
   video: VideoItem | null;
+  initialStartTime?: number;
   onClose: () => void;
 }
 
 type AudioMode = "gameplay_only" | "voiceover";
 type ViewTab = "vertical_blur" | "vertical_crop" | "landscape" | "comparison";
 
+function formatSeconds(sec: number): string {
+  if (isNaN(sec) || sec < 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
+}
 
 function parseSeconds(val: string): number {
   if (val.includes(":")) {
@@ -47,12 +56,27 @@ function parseSeconds(val: string): number {
   return parseFloat(val) || 0;
 }
 
-export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, onClose }) => {
+export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initialStartTime, onClose }) => {
   // Clip parameters
   const [startSecondsInput, setStartSecondsInput] = useState<string>("0");
   const [durationPreset, setDurationPreset] = useState<number>(15);
   const [customDuration, setCustomDuration] = useState<string>("15");
   const [isCustomDuration, setIsCustomDuration] = useState<boolean>(false);
+
+  // Source video preview & playback
+  const [showSourcePreview, setShowSourcePreview] = useState<boolean>(false);
+  const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(0);
+  const sourceVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Sync initialStartTime when provided
+  useEffect(() => {
+    if (initialStartTime !== undefined && initialStartTime !== null && initialStartTime > 0) {
+      setStartSecondsInput(formatSeconds(initialStartTime));
+    } else {
+      setStartSecondsInput("0");
+    }
+  }, [initialStartTime, video?.id]);
+
 
   // Audio mode
   const [audioMode, setAudioMode] = useState<AudioMode>("gameplay_only");
@@ -287,10 +311,55 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, onClose
                     <Clock className="w-3.5 h-3.5 text-rose-400" />
                     <span>Clip Timing & Duration</span>
                   </span>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    Total VOD: {video.duration_formatted}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      Total VOD: {video.duration_formatted}
+                    </span>
+                    {video.is_downloaded && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSourcePreview((p) => !p)}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition-colors cursor-pointer"
+                      >
+                        {showSourcePreview ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        <span>{showSourcePreview ? "Hide Player" : "Preview Player"}</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Embedded Source Video Scrubber */}
+                {video.is_downloaded && showSourcePreview && (
+                  <div className="p-3 bg-black/60 rounded-xl border border-rose-500/20 flex flex-col gap-2">
+                    <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden">
+                      <video
+                        ref={sourceVideoRef}
+                        src={getDownloadedVideoStreamUrl(video.id)}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        onTimeUpdate={(e) => setSourceCurrentTime(e.currentTarget.currentTime)}
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400">
+                        Current Playhead: <strong className="font-mono text-white">{formatSeconds(sourceCurrentTime)}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sec = Math.floor(sourceCurrentTime);
+                          setStartSecondsInput(formatSeconds(sec));
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded text-xs transition-colors cursor-pointer"
+                      >
+                        <Clock className="w-3 h-3" />
+                        <span>Use Playhead as Start ({formatSeconds(sourceCurrentTime)})</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Start Time Input */}
                 <div className="grid grid-cols-2 gap-3">

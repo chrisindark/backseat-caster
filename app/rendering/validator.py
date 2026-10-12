@@ -1,4 +1,5 @@
 """Input and boundary validation for clip rendering requests."""
+
 from pathlib import Path
 from typing import Optional
 from app.rendering.probe import MediaProbeResult
@@ -6,6 +7,7 @@ from app.rendering.probe import MediaProbeResult
 
 class ValidationError(ValueError):
     """Raised when render parameters violate validation constraints."""
+
     pass
 
 
@@ -19,10 +21,14 @@ def validate_render_parameters(
 ):
     """Validate render parameters against media probe and filesystem state."""
     if start_seconds < 0:
-        raise ValidationError(f"Invalid start time: {start_seconds}s. Start time must be >= 0.")
+        raise ValidationError(
+            f"Invalid start time: {start_seconds}s. Start time must be >= 0."
+        )
 
     if duration_seconds <= 0:
-        raise ValidationError(f"Invalid duration: {duration_seconds}s. Duration must be strictly positive.")
+        raise ValidationError(
+            f"Invalid duration: {duration_seconds}s. Duration must be strictly positive."
+        )
 
     # Check bounds against source video duration (allowing 0.25s tolerance for audio/video container drift)
     requested_end = start_seconds + duration_seconds

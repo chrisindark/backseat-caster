@@ -18,8 +18,9 @@ dist/
 eggs/
 .eggs/
 
-lib/
-lib64/
+/lib/
+/lib64/
+!ui/src/lib/
 parts/
 sdist/
 var/
@@ -57,6 +58,8 @@ data/*.db-shm
 !.env.example
 
 # Frontend build artifacts & dependencies
+.next/
+
 ui/node_modules/
 ui/.next/
 ui/out/

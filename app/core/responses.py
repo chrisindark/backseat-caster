@@ -1,5 +1,7 @@
 """Standardized API response models and exception handling."""
 
+from __future__ import annotations
+
 import logging
 from typing import Generic, TypeVar
 

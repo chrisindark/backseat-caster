@@ -3,7 +3,8 @@
 import { Navbar } from "@/components/Navbar";
 import { YouTubePreviewModal } from "@/components/YouTubePreviewModal";
 import { YouTubeVideoCard } from "@/components/YouTubeVideoCard";
-import { checkBackendHealth, fetchYouTubeChannelVideos, syncChannel } from "@/lib/api";
+import { checkBackendHealth, fetchVideo, fetchYouTubeChannelVideos, syncChannel } from "@/lib/api";
+import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import { YouTubeChannelVideoItem } from "@/types/video";
 import {
   AlertCircle,
@@ -20,7 +21,7 @@ import {
   Tv
 } from "lucide-react";
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 export default function YouTubeChannelPage() {
   const [channelInput, setChannelInput] = useState<string>("@chrisindark");
@@ -47,6 +48,85 @@ export default function YouTubeChannelPage() {
     skipped?: number;
   } | null>(null);
 
+  const videosRef = useRef<YouTubeChannelVideoItem[]>(videos);
+  useEffect(() => {
+    videosRef.current = videos;
+  }, [videos]);
+
+  // Modal handlers with browser history tracking
+  const openPreviewModal = useCallback((video: YouTubeChannelVideoItem) => {
+    setPreviewVideo(video);
+    setQueryParams({ preview: video.id });
+  }, []);
+
+  const closePreviewModal = useCallback(() => {
+    setPreviewVideo(null);
+    setQueryParams({ preview: null });
+  }, []);
+
+  const syncPreviewFromUrl = useCallback(
+    async (currentVideos?: YouTubeChannelVideoItem[]) => {
+      const previewId = getQueryParam("preview") || getQueryParam("videoId");
+      if (!previewId) {
+        setPreviewVideo(null);
+        return;
+      }
+
+      const list = currentVideos || videosRef.current;
+      const found = list.find((v) => v.id === previewId);
+      if (found) {
+        setPreviewVideo(found);
+      } else {
+        // Attempt to fetch from local database
+        try {
+          const dbVid = await fetchVideo(previewId);
+          if (dbVid) {
+            setPreviewVideo({
+              id: dbVid.id,
+              title: dbVid.title,
+              description: dbVid.description,
+              thumbnail_url: dbVid.thumbnail_url,
+              duration: dbVid.duration,
+              duration_formatted: dbVid.duration_formatted,
+              channel_name: dbVid.channel_name,
+              channel_id: dbVid.channel_id,
+              channel_url: dbVid.channel_url,
+              view_count: dbVid.view_count,
+              published_at: dbVid.published_at,
+              webpage_url: dbVid.webpage_url,
+              is_in_database: true,
+              is_downloaded: dbVid.is_downloaded,
+              download_status: dbVid.download_status,
+            });
+            return;
+          }
+        } catch {
+          // not found in local DB
+        }
+
+        // Fallback preview item so embedded player still functions
+        setPreviewVideo({
+          id: previewId,
+          title: "YouTube Video Preview",
+          description: null,
+          thumbnail_url: `https://i.ytimg.com/vi/${previewId}/hqdefault.jpg`,
+          duration: 0,
+          duration_formatted: "00:00",
+          channel_name: null,
+          channel_id: null,
+          channel_url: null,
+          view_count: 0,
+          published_at: null,
+          webpage_url: `https://www.youtube.com/watch?v=${previewId}`,
+          is_in_database: false,
+          is_downloaded: false,
+          download_status: "not_downloaded",
+        });
+      }
+    },
+    []
+  );
+
   // Load initial channel videos
   const loadChannelVideos = useCallback(
     async (targetChannel: string, batchSize: number) => {
@@ -65,12 +145,14 @@ export default function YouTubeChannelPage() {
         setChannelUrl(data.channel_url || "");
         setActiveChannel(targetChannel);
         setHasMore(data.videos.length >= batchSize && data.has_more);
+        return data.videos;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         setSyncFeedback({
           type: "error",
           message: `Failed to load videos for ${targetChannel}: ${msg}`,
         });
+        return null;
       } finally {
         setIsLoading(false);
       }
@@ -86,7 +168,10 @@ export default function YouTubeChannelPage() {
       if (!mounted) return;
       setBackendHealthy(healthy);
       if (healthy) {
-        await loadChannelVideos(channelInput, limit);
+        const loaded = await loadChannelVideos(channelInput, limit);
+        if (mounted && loaded) {
+          await syncPreviewFromUrl(loaded);
+        }
       } else {
         setIsLoading(false);
       }
@@ -96,6 +181,18 @@ export default function YouTubeChannelPage() {
       mounted = false;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen to browser Back/Forward navigation to sync modal states
+  useEffect(() => {
+    const onPopState = () => {
+      syncPreviewFromUrl();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [syncPreviewFromUrl]);
 
   // Handle Fetch / Change Channel
   const handleFetchChannel = (e?: React.FormEvent) => {
@@ -537,7 +634,7 @@ export default function YouTubeChannelPage() {
                     index={idx}
                     isSelected={selectedIds.has(video.id)}
                     onToggleSelect={handleToggleSelect}
-                    onPreview={(vid) => setPreviewVideo(vid)}
+                    onPreview={openPreviewModal}
                   />
                 ))}
               </div>
@@ -603,7 +700,7 @@ export default function YouTubeChannelPage() {
         video={previewVideo}
         isSelected={previewVideo ? selectedIds.has(previewVideo.id) : false}
         onToggleSelect={handleToggleSelect}
-        onClose={() => setPreviewVideo(null)}
+        onClose={closePreviewModal}
       />
     </div>
   );

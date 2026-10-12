@@ -13,7 +13,9 @@ import {
   HardDrive,
   Trash2,
   ExternalLink,
+  Scissors,
 } from "lucide-react";
+
 import { VideoItem } from "@/types/video";
 
 interface VideoCardProps {
@@ -155,10 +157,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => onSelect(video)}
-                  className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-lg border border-emerald-500/30 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1"
                 >
-                  Ready to Clip
+                  <Scissors className="w-3 h-3" />
+                  <span>Clip Studio</span>
                 </button>
+
                 <button
                   onClick={() => onDeleteDownload(video.id)}
                   title="Delete local file"

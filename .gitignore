@@ -38,6 +38,8 @@ htmlcov/
 # Databases, journal files, and downloaded media
 data/downloads/*
 !data/downloads/.gitkeep
+data/renders/*
+!data/renders/.gitkeep
 data/*.db
 data/*.sqlite
 data/*.sqlite3

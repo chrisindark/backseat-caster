@@ -66,6 +66,23 @@ class VideoListResponse(BaseModel):
     channel_url: str | None = None
 
 
+class YouTubeChannelVideoItem(VideoBase):
+    is_in_database: bool = False
+    is_downloaded: bool = False
+    download_status: str = "not_downloaded"
+
+
+class YouTubeChannelVideosResponse(BaseModel):
+    channel_title: str
+    channel_id: str | None = None
+    channel_url: str
+    limit: int
+    offset: int
+    total_loaded: int = 0
+    has_more: bool = True
+    videos: list[YouTubeChannelVideoItem]
+
+
 class SyncChannelRequest(BaseModel):
     channel_url: str | None = Field(
         None, description="YouTube channel handle, URL, or ID (e.g., @MarvelRivals)"
@@ -81,6 +98,10 @@ class SyncChannelRequest(BaseModel):
         ge=0,
         description="Number of videos to skip from the beginning of the channel",
     )
+    videos: list[VideoBase] | None = Field(
+        None,
+        description="Explicit list of selected video items to add to database",
+    )
 
 
 class SyncChannelResponse(BaseModel):
@@ -89,7 +110,8 @@ class SyncChannelResponse(BaseModel):
     channel_url: str
     total_found: int
     new_added: int
-    updated: int
+    updated: int = 0
+    skipped: int = 0
     message: str
 
 

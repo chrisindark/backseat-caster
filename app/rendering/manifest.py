@@ -1,0 +1,74 @@
+"""Manifest generator for rendered clips."""
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from app.rendering.probe import MediaProbeResult
+
+
+def write_manifest(
+    output_dir: Path,
+    clip_id: str,
+    source_probe: MediaProbeResult,
+    start_seconds: float,
+    duration_seconds: float,
+    outputs: dict[str, dict[str, Any]],
+    narration_path: Path | None = None,
+    render_duration: float | None = None,
+    api_prefix: str = "/api/v1",
+    crop_preset: str | None = None,
+    crop_blur_padding: float | None = None,
+) -> Path:
+    """Generate and write manifest.json into the clip output directory."""
+    manifest_data = {
+        "clip_id": clip_id,
+        "landscape_path": f"{api_prefix}/renders/{clip_id}/stream/landscape",
+        "vertical_blur_path": f"{api_prefix}/renders/{clip_id}/stream/vertical_blur",
+        "vertical_crop_path": f"{api_prefix}/renders/{clip_id}/stream/vertical_crop",
+        "manifest_path": f"{api_prefix}/renders/{clip_id}/stream/manifest",
+        "source_file": source_probe.file_path,
+        "source": {
+            "path": source_probe.file_path,
+            "duration": source_probe.duration,
+            "width": source_probe.width,
+            "height": source_probe.height,
+            "fps": source_probe.fps,
+            "video_codec": source_probe.video_codec,
+            "has_audio": source_probe.has_audio,
+            "audio_codec": source_probe.audio_codec,
+            "file_size_bytes": source_probe.file_size_bytes,
+        },
+        "source_metadata": {
+            "duration": source_probe.duration,
+            "width": source_probe.width,
+            "height": source_probe.height,
+            "fps": source_probe.fps,
+            "video_codec": source_probe.video_codec,
+            "has_audio": source_probe.has_audio,
+            "audio_codec": source_probe.audio_codec,
+            "file_size_bytes": source_probe.file_size_bytes,
+        },
+        "request": {
+            "start_seconds": start_seconds,
+            "duration_seconds": duration_seconds,
+            "has_narration": narration_path is not None,
+            "narration_file": str(narration_path) if narration_path else None,
+            "crop_preset": crop_preset or "third_person",
+            "crop_blur_padding": crop_blur_padding
+            if crop_blur_padding is not None
+            else 0.3333,
+        },
+        "outputs": outputs,
+        "created_at": datetime.now(UTC).isoformat(),
+        "render_duration_seconds": round(render_duration, 2)
+        if render_duration is not None
+        else None,
+    }
+
+    manifest_path = output_dir / "manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest_data, f, indent=2)
+
+    return manifest_path

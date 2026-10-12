@@ -15,6 +15,7 @@ __pycache__/
 *.sqlite
 *.sqlite3
 downloads/
+renders/
 
 # OS files
 .DS_Store

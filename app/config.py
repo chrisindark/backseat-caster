@@ -36,6 +36,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
+    RENDERS_DIR: str = "./data/renders"
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
@@ -51,6 +53,12 @@ class Settings(BaseSettings):
     @property
     def downloads_path(self) -> Path:
         path = Path(self.DOWNLOADS_DIR).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def renders_path(self) -> Path:
+        path = Path(self.RENDERS_DIR).resolve()
         path.mkdir(parents=True, exist_ok=True)
         return path
 

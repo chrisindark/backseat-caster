@@ -1,5 +1,6 @@
 "use client";
 
+import { ClipStudioModal } from "@/components/ClipStudioModal";
 import { Navbar } from "@/components/Navbar";
 import { Pagination } from "@/components/Pagination";
 import { StatsBar } from "@/components/StatsBar";
@@ -16,10 +17,12 @@ import { VideoItem } from "@/types/video";
 import {
   AlertCircle,
   CheckCircle2,
+  Compass,
   Film,
   RefreshCw,
-  Tv
+  Tv,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export default function HomePage() {
@@ -37,8 +40,10 @@ export default function HomePage() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [backendHealthy, setBackendHealthy] = useState<boolean>(true);
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null);
+  const [clipStudioVideo, setClipStudioVideo] = useState<VideoItem | null>(null);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -80,12 +85,35 @@ export default function HomePage() {
     [page, limit, activeFilter, searchQuery]
   );
 
-  // Initial check & auto-sync if empty
-   useEffect(() => {
+  // Handle Sync channel action
+  const handleSync = useCallback(async () => {
+    console.log("handleSync");
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      const offset = limit * (page - 1);
+      const res = await syncChannel(channelInput || "@chrisindark", limit, offset);
+      setSyncMessage(res.message);
+      if (res.channel_title) {
+        setChannelTitle(res.channel_title);
+      }
+      await loadVideos(1, limit, activeFilter, searchQuery);
+      setPage(1);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSyncMessage(`Sync failed: ${message}`);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncMessage(null), 5000);
+    }
+  }, [channelInput, limit, page, activeFilter, searchQuery, loadVideos]);
+
+  // Initial check & load library videos
+  useEffect(() => {
+    console.log("useEffect initial");
     let mounted = true;
 
     async function init() {
-      console.log("init");
       if (!mounted) {
         return;
       }
@@ -94,25 +122,22 @@ export default function HomePage() {
       setBackendHealthy(healthy);
 
       if (healthy) {
-        const data = await loadVideos(1, limit, "all", "");
-        // If DB is empty, automatically trigger initial sync
-        if (data && data.total === 0) {
-          handleSync();
-        }
+        await loadVideos(1, limit, "all", "");
       } else {
         setIsLoading(false);
       }
-      mounted = false
+      mounted = false;
     }
 
     init();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [limit]);
 
   // Polling loop when videos are downloading
   useEffect(() => {
+    console.log("useEffect polling");
     const hasActiveDownloads =
       downloadingIds.size > 0 ||
       videos.some(
@@ -140,28 +165,6 @@ export default function HomePage() {
     };
   }, [downloadingIds, videos, loadVideos]);
 
-  // Handle Sync channel action
-  const handleSync = async () => {
-    console.log("handleSync");
-    setIsSyncing(true);
-    setSyncMessage(null);
-    try {
-      const offset = limit * (page-1)
-      const res = await syncChannel(channelInput || "@chrisindark", limit, offset);
-      setSyncMessage(res.message);
-      if (res.channel_title) {
-        setChannelTitle(res.channel_title);
-      }
-      await loadVideos(1, limit, activeFilter, searchQuery);
-      setPage(1);
-    } catch (err: any) {
-      setSyncMessage(`Sync failed: ${err.message}`);
-    } finally {
-      setIsSyncing(false);
-      setTimeout(() => setSyncMessage(null), 5000);
-    }
-  };
-
   // Handle video download trigger
   const handleDownload = async (videoId: string) => {
     console.log("handleDownload");
@@ -169,8 +172,9 @@ export default function HomePage() {
     try {
       await downloadVideo(videoId);
       // await loadVideos();
-    } catch (err: any) {
-      alert(`Could not start download: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Could not start download: ${message}`);
       setDownloadingIds((prev) => {
         const next = new Set(prev);
         next.delete(videoId);
@@ -188,8 +192,9 @@ export default function HomePage() {
         setSelectedVideo(null);
       }
       await loadVideos();
-    } catch (err: any) {
-      alert(`Could not delete: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Could not delete: ${message}`);
     }
   };
 
@@ -323,14 +328,23 @@ export default function HomePage() {
                   ? `No videos match the "${activeFilter}" filter.`
                   : "No videos catalogued yet. Sync your YouTube channel to browse and download gameplay VODs."}
               </p>
-              <button
-                onClick={handleSync}
-                disabled={isSyncing}
-                className="flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg shadow-lg shadow-rose-900/40 cursor-pointer"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
-                <span>{isSyncing ? "Syncing Videos..." : "Sync Channel Videos Now"}</span>
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <Link
+                  href="/youtube"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg shadow-lg shadow-rose-900/40 transition-all cursor-pointer"
+                >
+                  <Compass className="w-4 h-4" />
+                  <span>Browse YouTube Channel</span>
+                </Link>
+                <button
+                  onClick={handleSync}
+                  disabled={isSyncing}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-lg border border-white/10 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
+                  <span>{isSyncing ? "Syncing Videos..." : "Sync Default Channel"}</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -356,8 +370,16 @@ export default function HomePage() {
         onClose={() => setSelectedVideo(null)}
         onDownload={handleDownload}
         onDeleteDownload={handleDeleteDownload}
+        onOpenClipStudio={(vid) => setClipStudioVideo(vid)}
         isDownloading={selectedVideo ? downloadingIds.has(selectedVideo.id) : false}
+      />
+
+      {/* Phase 1 Clip Studio & Comparison Modal */}
+      <ClipStudioModal
+        video={clipStudioVideo}
+        onClose={() => setClipStudioVideo(null)}
       />
     </div>
   );
+
 }

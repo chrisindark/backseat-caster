@@ -51,3 +51,22 @@ def get_db():
     """Dependency to yield a database session."""
     with SessionLocal() as db:
         yield db
+
+
+def get_task_db_session():
+    """Retrieve database session for background/Celery tasks, respecting FastAPI dependency overrides."""
+    try:
+        import sys
+
+        main_mod = sys.modules.get("app.main")
+        if main_mod and hasattr(main_mod, "app"):
+            fastapi_app = main_mod.app
+            if (
+                hasattr(fastapi_app, "dependency_overrides")
+                and get_db in fastapi_app.dependency_overrides
+            ):
+                gen = fastapi_app.dependency_overrides[get_db]()
+                return next(gen)
+    except Exception:
+        pass
+    return SessionLocal()

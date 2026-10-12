@@ -66,7 +66,27 @@ class RenderJobResponse(BaseModel):
     render_duration_seconds: float | None = None
     error_message: str | None = None
     celery_task_id: str | None = None
+    video_title: str | None = None
+    video_thumbnail_url: str | None = None
+    channel_name: str | None = None
+    is_selected_for_upload: bool = False
+    selected_format: str | None = None
+    upload_metadata: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     completed_at: str | None = None
     message: str | None = None
+
+
+class UploadSelectionRequest(BaseModel):
+    is_selected: bool
+    preferred_format: str | None = Field(
+        "vertical_blur",
+        description="Preferred format for publishing: 'vertical_blur', 'vertical_crop', or 'landscape'",
+    )
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    privacy: str | None = Field(
+        "private", description="'private', 'unlisted', or 'public'"
+    )

@@ -1,4 +1,5 @@
 """FFprobe media inspector and metadata extraction."""
+
 import json
 import logging
 import subprocess
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class MediaProbeResult(BaseModel):
     """Metadata extracted from media file via ffprobe."""
+
     file_path: str
     duration: float
     width: int
@@ -44,19 +46,27 @@ def probe_media(file_path: Path | str) -> MediaProbeResult:
 
     cmd = [
         "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration,size",
-        "-show_entries", "stream=codec_type,codec_name,width,height,r_frame_rate,sample_rate,channels",
-        "-of", "json",
-        str(path)
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration,size",
+        "-show_entries",
+        "stream=codec_type,codec_name,width,height,r_frame_rate,sample_rate,channels",
+        "-of",
+        "json",
+        str(path),
     ]
 
     try:
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        proc = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+        )
         data = json.loads(proc.stdout)
     except subprocess.CalledProcessError as e:
         logger.error("FFprobe execution failed on %s: %s", path, e.stderr)
-        raise RuntimeError(f"FFprobe failed to inspect {path}: {e.stderr.strip()}") from e
+        raise RuntimeError(
+            f"FFprobe failed to inspect {path}: {e.stderr.strip()}"
+        ) from e
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse FFprobe JSON output for {path}") from e
 
@@ -86,8 +96,16 @@ def probe_media(file_path: Path | str) -> MediaProbeResult:
 
     has_audio = audio_stream is not None
     audio_codec = str(audio_stream.get("codec_name")) if audio_stream else None
-    audio_sample_rate = int(audio_stream.get("sample_rate")) if audio_stream and audio_stream.get("sample_rate") else None
-    audio_channels = int(audio_stream.get("channels")) if audio_stream and audio_stream.get("channels") else None
+    audio_sample_rate = (
+        int(audio_stream.get("sample_rate"))
+        if audio_stream and audio_stream.get("sample_rate")
+        else None
+    )
+    audio_channels = (
+        int(audio_stream.get("channels"))
+        if audio_stream and audio_stream.get("channels")
+        else None
+    )
 
     return MediaProbeResult(
         file_path=str(path),

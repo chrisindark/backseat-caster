@@ -2,15 +2,21 @@
 
 import logging
 import math
+import mimetypes
 import os
+from pathlib import Path
+from typing import Any
 
+from fastapi import BackgroundTasks
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database import get_task_db_session
 from app.models.video import Video
 from app.schemas.video import (
     DeleteVideoResponse,
+    DownloadTaskResponse,
     SyncChannelResponse,
     VideoBase,
     VideoListResponse,
@@ -20,6 +26,8 @@ from app.schemas.video import (
     YouTubeChannelVideosResponse,
 )
 from app.services.youtube import YouTubeService
+from app.worker.celery_app import celery_app
+from app.worker.helpers import is_celery_broker_online
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +39,44 @@ class VideoService:
     def get_video_by_id(db: Session, video_id: str) -> Video | None:
         """Fetch a single video from the database by its ID."""
         return db.query(Video).filter(Video.id == video_id).first()
+
+    @staticmethod
+    def get_video_file_info(db: Session, video_id: str) -> tuple[Path, str, str] | None:
+        """
+        Locate the local file path for a downloaded video.
+        Returns a tuple of (Path, media_type, filename) or None if not found.
+        """
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return None
+
+        candidate_path: Path | None = None
+        if video.local_file_path and os.path.exists(video.local_file_path):
+            candidate_path = Path(video.local_file_path)
+        else:
+            # Check in settings.downloads_path for {video_id}.mp4 or other extensions
+            expected_file = settings.downloads_path / f"{video_id}.mp4"
+            if expected_file.exists():
+                candidate_path = expected_file
+            else:
+                matches = list(settings.downloads_path.glob(f"{video_id}.*"))
+                video_matches = [
+                    m
+                    for m in matches
+                    if m.suffix.lower()
+                    in [".mp4", ".mkv", ".webm", ".mov", ".ts", ".m4v"]
+                ]
+                if video_matches:
+                    candidate_path = video_matches[0]
+
+        if not candidate_path or not candidate_path.exists():
+            return None
+
+        media_type, _ = mimetypes.guess_type(str(candidate_path))
+        if not media_type:
+            media_type = "video/mp4"
+
+        return candidate_path, media_type, candidate_path.name
 
     @staticmethod
     def list_videos(
@@ -66,9 +112,9 @@ class VideoService:
 
         if status and status != "all":
             if status == "downloaded":
-                query = query.filter(Video.is_downloaded == True)
+                query = query.filter(Video.is_downloaded is True)
             elif status == "not_downloaded":
-                query = query.filter(Video.is_downloaded == False)
+                query = query.filter(Video.is_downloaded is False)
             elif status in ["downloading", "pending"]:
                 query = query.filter(
                     Video.download_status.in_(["downloading", "pending"])
@@ -319,17 +365,110 @@ class VideoService:
         )
 
     @staticmethod
-    def delete_downloaded_video(db: Session, video: Video) -> DeleteVideoResponse:
+    def get_video(db: Session, video_id: str) -> VideoResponse | None:
+        """Fetch a single video from the database by its ID, validated as VideoResponse."""
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return None
+        return VideoResponse.model_validate(video)
+
+    @staticmethod
+    def start_download(
+        db: Session,
+        video_id: str,
+        quality: str | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> DownloadTaskResponse | None:
+        """
+        Initiate video download. Checks catalog existence and current download state,
+        marks pending in database, and dispatches task to Celery or FastAPI BackgroundTasks.
+        """
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return None
+
+        if video.download_status == "downloading":
+            return DownloadTaskResponse(
+                video_id=video_id,
+                download_status=video.download_status,
+                download_progress=video.download_progress,
+                local_file_path=video.local_file_path,
+                message="Download is already in progress.",
+            )
+
+        if (
+            video.is_downloaded
+            and video.local_file_path
+            and os.path.exists(video.local_file_path)
+        ):
+            return DownloadTaskResponse(
+                video_id=video_id,
+                download_status="completed",
+                download_progress=100.0,
+                local_file_path=video.local_file_path,
+                message="Video is already downloaded locally.",
+            )
+
+        VideoService.mark_download_pending(db=db, video=video)
+
+        task_id = None
+        dispatched_to_celery = False
+
+        if is_celery_broker_online():
+            logger.info("Dispatching to Celery worker for video %s", video_id)
+            try:
+                async_result = download_video_celery_task.delay(video_id, quality)
+                task_id = async_result.id
+                dispatched_to_celery = True
+                logger.info("Dispatched download task %s to Celery worker", task_id)
+            except Exception as celery_err:
+                logger.warning("Celery dispatch failed: %s", celery_err)
+
+        if not dispatched_to_celery:
+            logger.info(
+                "Celery broker is not online, dispatching to background tasks for video %s",
+                video_id,
+            )
+            if background_tasks:
+                background_tasks.add_task(execute_download_job, video_id, quality)
+            else:
+                execute_download_job(video_id, quality)
+            task_id = f"bg-{video_id}"
+
+        return DownloadTaskResponse(
+            video_id=video_id,
+            download_status="pending",
+            download_progress=0.0,
+            task_id=task_id,
+            message="Download queued successfully"
+            + (" via Celery" if dispatched_to_celery else " in background worker"),
+        )
+
+    @staticmethod
+    def delete_downloaded_video(
+        db: Session,
+        video_id: str | None = None,
+        video: Video | None = None,
+    ) -> DeleteVideoResponse | None:
         """Remove local downloaded video file from disk and reset download state in database."""
-        if video.local_file_path and os.path.exists(video.local_file_path):
-            os.remove(video.local_file_path)
+        target_video = video
+        if target_video is None and video_id is not None:
+            target_video = db.query(Video).filter(Video.id == video_id).first()
+
+        if not target_video:
+            return None
+
+        if target_video.local_file_path and os.path.exists(
+            target_video.local_file_path
+        ):
+            os.remove(target_video.local_file_path)
 
         try:
-            video.is_downloaded = False
-            video.download_status = "not_downloaded"
-            video.download_progress = 0.0
-            video.local_file_path = None
-            video.file_size_bytes = None
+            target_video.is_downloaded = False
+            target_video.download_status = "not_downloaded"
+            target_video.download_progress = 0.0
+            target_video.local_file_path = None
+            target_video.file_size_bytes = None
             db.commit()
         except Exception:
             db.rollback()
@@ -337,5 +476,128 @@ class VideoService:
 
         return DeleteVideoResponse(
             status="success",
-            message=f"Local file for video {video.id} deleted",
+            message=f"Local file for video {target_video.id} deleted",
         )
+
+    @staticmethod
+    def execute_download_job(
+        video_id: str,
+        quality: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        celery_task_instance=None,
+        db_session: Session | None = None,
+    ) -> dict[str, Any]:
+        """Core download execution logic using VideoService, shared by Celery and background workers."""
+        is_external_session = db_session is not None
+        db = db_session if db_session is not None else get_task_db_session()
+        video = None
+        last_reported_progress = 0.0
+
+        try:
+            video = VideoService.get_video_by_id(db, video_id)
+            if not video:
+                logger.error("Video ID %s not found in database", video_id)
+                return {"status": "failed", "error": f"Video {video_id} not found"}
+
+            video.download_status = "downloading"
+            video.download_progress = 1.0
+            video.error_message = None
+            db.commit()
+
+            def on_progress(data: dict[str, Any]):
+                nonlocal last_reported_progress
+                pct = data.get("progress", 0.0)
+                if pct - last_reported_progress >= 5.0 or pct >= 99.0:
+                    last_reported_progress = pct
+                    try:
+                        video.download_progress = pct
+                        db.commit()
+                        if celery_task_instance:
+                            celery_task_instance.update_state(
+                                state="PROGRESS",
+                                meta={"progress": pct, "speed": data.get("speed")},
+                            )
+                    except Exception as commit_err:
+                        logger.warning(
+                            "Error committing progress update: %s", commit_err
+                        )
+
+            result = YouTubeService.download_video(
+                video_id=video_id, quality=quality, progress_callback=on_progress
+            )
+
+            video.download_status = "completed"
+            video.download_progress = 100.0
+            video.is_downloaded = True
+            video.local_file_path = result["local_file_path"]
+            video.file_size_bytes = result["file_size_bytes"]
+            video.error_message = None
+            db.commit()
+
+            logger.info(
+                "Successfully downloaded video %s to %s",
+                video_id,
+                result["local_file_path"],
+            )
+            return {
+                "status": "completed",
+                "video_id": video_id,
+                "file_path": result["local_file_path"],
+                "file_size": result["file_size_bytes"],
+            }
+
+        except Exception as e:
+            logger.exception("Failed downloading video %s", video_id)
+            try:
+                if video:
+                    video.download_status = "failed"
+                    video.error_message = str(e)
+                    db.commit()
+            except Exception as e2:
+                logger.error("Error committing download job failure: %s", e2)
+            return {"status": "failed", "video_id": video_id, "error": str(e)}
+        finally:
+            import sys
+
+            main_mod = sys.modules.get("app.main")
+            fastapi_app = getattr(main_mod, "app", None) if main_mod else None
+            from app.database import get_db
+
+            is_overridden = bool(
+                fastapi_app
+                and hasattr(fastapi_app, "dependency_overrides")
+                and get_db in fastapi_app.dependency_overrides
+            )
+            if not is_external_session and not is_overridden:
+                db.close()
+
+
+def execute_download_job(
+    video_id: str,
+    quality: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+    celery_task_instance=None,
+    db_session: Session | None = None,
+) -> dict[str, Any]:
+    """Execute download job via VideoService."""
+    return VideoService.execute_download_job(
+        video_id=video_id,
+        quality=quality,
+        celery_task_instance=celery_task_instance,
+        db_session=db_session,
+    )
+
+
+@celery_app.task(bind=True, name="download_video_task")
+def download_video_celery_task(
+    self,
+    video_id: str,
+    quality: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+):
+    """Celery task for video download."""
+    logger.info(
+        "Celery task started: downloading video %s (task_id: %s)",
+        video_id,
+        self.request.id,
+    )
+    return VideoService.execute_download_job(
+        video_id=video_id, quality=quality, celery_task_instance=self
+    )

@@ -1,4 +1,5 @@
 """Video SQLAlchemy model."""
+
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime
 from app.database import Base
@@ -10,6 +11,7 @@ def utc_now():
 
 class Video(Base):
     """Represents a YouTube video item and its local download/rendering status."""
+
     __tablename__ = "videos"
 
     id = Column(String(64), primary_key=True, index=True)  # YouTube Video ID
@@ -30,9 +32,7 @@ class Video(Base):
     local_file_path = Column(String(1024), nullable=True)
     file_size_bytes = Column(Integer, nullable=True)
     download_status = Column(
-        String(32),
-        default="not_downloaded",
-        index=True
+        String(32), default="not_downloaded", index=True
     )  # not_downloaded, pending, downloading, completed, failed
     download_progress = Column(Float, default=0.0)
     error_message = Column(Text, nullable=True)

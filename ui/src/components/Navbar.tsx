@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@radix-ui/themes";
-import { Compass, Film, Radio, RefreshCw, Search } from "lucide-react";
+import { Compass, Film, Layers, Radio, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React from "react";
@@ -73,6 +73,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Compass className="w-3.5 h-3.5" />
               <span>YouTube Explorer</span>
+            </Link>
+            <Link
+              href="/renders"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                pathname?.startsWith("/renders")
+                  ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Renders & Jobs</span>
             </Link>
           </nav>
 

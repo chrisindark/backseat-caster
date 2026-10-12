@@ -145,12 +145,34 @@ export interface RenderJobResponse {
   render_duration_seconds?: number | null;
   error_message?: string | null;
   celery_task_id?: string | null;
+  video_title?: string | null;
+  video_thumbnail_url?: string | null;
+  channel_name?: string | null;
+  is_selected_for_upload?: boolean;
+  selected_format?: string | null;
+  upload_metadata?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   completed_at?: string | null;
   message?: string | null;
 }
 
+export interface RenderJobListResponse {
+  items: RenderJobResponse[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface UploadSelectionPayload {
+  is_selected: boolean;
+  preferred_format?: "vertical_blur" | "vertical_crop" | "landscape" | string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  privacy?: "private" | "unlisted" | "public" | string;
+  updated_at?: string;
+}
 
 export interface RenderManifestOutput {
   path: string;
@@ -170,6 +192,11 @@ export interface RenderManifest {
   vertical_blur_path?: string;
   vertical_crop_path?: string;
   manifest_path?: string;
+  video_id?: string;
+  video_title?: string;
+  video_thumbnail_url?: string;
+  channel_name?: string;
+  upload_selection?: UploadSelectionPayload;
   source: {
     path: string;
     duration: number;
@@ -182,7 +209,14 @@ export interface RenderManifest {
     start_seconds: number;
     duration_seconds: number;
   };
-  audio_config: {
+  request?: {
+    start_seconds: number;
+    duration_seconds: number;
+    has_narration?: boolean;
+    crop_preset?: string;
+    crop_blur_padding?: number;
+  };
+  audio_config?: {
     has_narration: boolean;
     narration_path: string | null;
     ducking_applied: boolean;
@@ -193,8 +227,8 @@ export interface RenderManifest {
     vertical_blur?: RenderManifestOutput;
     vertical_crop?: RenderManifestOutput;
   };
-  render_stats: {
+  render_stats?: {
     total_render_seconds: number;
   };
+  render_duration_seconds?: number;
 }
-

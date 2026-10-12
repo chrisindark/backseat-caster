@@ -21,7 +21,7 @@ class RenderJob(Base):
         String(64),
         primary_key=True,
         index=True,
-        default=uuid.uuid4(),
+        default=str(uuid.uuid4()),
     )
     clip_id = Column(String(128), index=True, nullable=False)
     video_id = Column(String(64), index=True, nullable=False)
@@ -53,6 +53,11 @@ class RenderJob(Base):
     celery_task_id = Column(String(128), nullable=True)
     error_message = Column(Text, nullable=True)
 
+    # Upload staging / selection
+    is_selected_for_upload = Column(Boolean, default=False)
+    selected_format = Column(String(64), nullable=True)
+    upload_metadata = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     completed_at = Column(DateTime, nullable=True)
@@ -79,6 +84,9 @@ class RenderJob(Base):
             "render_duration_seconds": self.render_duration_seconds,
             "error_message": self.error_message,
             "celery_task_id": self.celery_task_id,
+            "is_selected_for_upload": bool(self.is_selected_for_upload),
+            "selected_format": self.selected_format,
+            "upload_metadata": self.upload_metadata,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat()

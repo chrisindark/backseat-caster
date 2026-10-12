@@ -8,7 +8,7 @@ celery_app = Celery(
     "backseatcaster_worker",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.worker.tasks"],
+    include=["app.services.videos", "app.services.renders"],
 )
 
 celery_app.conf.update(

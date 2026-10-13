@@ -40,6 +40,8 @@ class RenderJob(Base):
     crop_blur_padding = Column(Float, default=0.3333)
     modes = Column(String(256), nullable=True)
     overwrite = Column(Boolean, default=True)
+    normalize_audio = Column(Boolean, default=True)
+    target_lufs = Column(Float, default=-14.0)
 
     # Outputs
     output_dir = Column(String(1024), nullable=True)
@@ -84,6 +86,10 @@ class RenderJob(Base):
             "encoder": self.encoder,
             "crop_preset": self.crop_preset,
             "crop_blur_padding": self.crop_blur_padding,
+            "normalize_audio": bool(self.normalize_audio)
+            if self.normalize_audio is not None
+            else True,
+            "target_lufs": self.target_lufs if self.target_lufs is not None else -14.0,
             "modes": [m.strip() for m in self.modes.split(",") if m.strip()]
             if self.modes
             else [],

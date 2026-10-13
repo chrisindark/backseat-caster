@@ -37,23 +37,56 @@ import {
   Video,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ViewMode = "gallery" | "jobs";
 type StatusFilter = "all" | "completed" | "active" | "failed" | "selected";
 
-export default function RendersPage() {
+function RendersContent() {
+  const searchParams = useSearchParams();
+  const initialView = (searchParams.get("view") as ViewMode) || (getQueryParam("view") as ViewMode) || "gallery";
+  const initialStatus = (searchParams.get("status") as StatusFilter) || (getQueryParam("status") as StatusFilter) || "all";
+  const initialVideoId = searchParams.get("video_id") || getQueryParam("video_id") || "all";
+  const initialSearch = searchParams.get("q") || getQueryParam("q") || "";
+
   const [renders, setRenders] = useState<RenderManifest[]>([]);
   const [jobs, setJobs] = useState<RenderJobResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [backendHealthy, setBackendHealthy] = useState<boolean>(true);
 
-  // View & Filters
-  const [viewMode, setViewMode] = useState<ViewMode>("gallery");
-  const [selectedVideoId, setSelectedVideoId] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  // View & Filters (synchronized with search parameters)
+  const [viewMode, setViewModeState] = useState<ViewMode>(
+    initialView === "jobs" ? "jobs" : "gallery"
+  );
+  const [selectedVideoId, setSelectedVideoIdState] = useState<string>(initialVideoId);
+  const [statusFilter, setStatusFilterState] = useState<StatusFilter>(
+    ["all", "completed", "active", "failed", "selected"].includes(initialStatus)
+      ? initialStatus
+      : "all"
+  );
+  const [searchQuery, setSearchQueryState] = useState<string>(initialSearch);
+
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeState(mode);
+    setQueryParams({ view: mode === "gallery" ? null : mode }, { replace: true });
+  }, []);
+
+  const setStatusFilter = useCallback((status: StatusFilter) => {
+    setStatusFilterState(status);
+    setQueryParams({ status: status === "all" ? null : status }, { replace: true });
+  }, []);
+
+  const setSelectedVideoId = useCallback((vid: string) => {
+    setSelectedVideoIdState(vid);
+    setQueryParams({ video_id: vid === "all" ? null : vid }, { replace: true });
+  }, []);
+
+  const setSearchQuery = useCallback((q: string) => {
+    setSearchQueryState(q);
+    setQueryParams({ q: q.trim() ? q.trim() : null }, { replace: true });
+  }, []);
 
   // Bulk selection & deletion
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
@@ -196,10 +229,20 @@ export default function RendersPage() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Listen to browser Back/Forward navigation to sync modal states
+  // Listen to browser Back/Forward navigation to sync modal & tab filter states
   useEffect(() => {
     const onPopState = () => {
       syncModalsFromUrl();
+      const v = (getQueryParam("view") as ViewMode) || "gallery";
+      const s = (getQueryParam("status") as StatusFilter) || "all";
+      const vid = getQueryParam("video_id") || "all";
+      const q = getQueryParam("q") || "";
+      setViewModeState(v === "jobs" ? "jobs" : "gallery");
+      setStatusFilterState(
+        ["all", "completed", "active", "failed", "selected"].includes(s) ? s : "all"
+      );
+      setSelectedVideoIdState(vid);
+      setSearchQueryState(q);
     };
 
     window.addEventListener("popstate", onPopState);
@@ -1000,5 +1043,20 @@ export default function RendersPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function RendersPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="min-h-screen bg-[#090a0f] flex flex-col items-center justify-center">
+          <Loader2 className="w-8 h-8 text-rose-500 animate-spin mb-3" />
+          <p className="text-xs text-slate-400 font-medium">Loading Renders Dashboard...</p>
+        </div>
+      }
+    >
+      <RendersContent />
+    </React.Suspense>
   );
 }

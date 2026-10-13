@@ -79,7 +79,7 @@ class RenderConfig(BaseModel):
     libx264_crf: int = 21  # Visually lossless relative to source
     libx264_preset: str = "medium"
 
-    # Audio Mixing
+    # Audio Mixing & Loudness Normalization
     unducked_game_gain: float = Field(
         1.0, description="Volume of game audio when no voiceover is used"
     )
@@ -90,10 +90,37 @@ class RenderConfig(BaseModel):
     audio_bitrate: str = "192k"
     audio_sample_rate: int = 48000
     limiter_enabled: bool = True
+    normalize_audio: bool = Field(
+        True,
+        description="Enable EBU R128 audio loudness normalization (YouTube Shorts standard)",
+    )
+    target_lufs: float = Field(
+        -14.0,
+        description="Integrated loudness target in LUFS (-14 LUFS standard for YouTube Shorts)",
+    )
+    loudnorm_true_peak: float = Field(
+        -1.5,
+        description="Maximum True Peak level in dBTP",
+    )
+    loudnorm_lra: float = Field(
+        11.0,
+        description="Target loudness range in LU",
+    )
 
     # Output defaults
     default_output_root: Path = settings.renders_path
     api_prefix: str = settings.API_PREFIX
+
+    # Duration Boundary Clamping
+    clamp_to_duration: bool = Field(
+        True,
+        description="Automatically clamp clip duration to source video duration instead of raising ValidationError",
+    )
+    min_clip_duration: float = Field(
+        0.5,
+        ge=0.1,
+        description="Minimum allowable clip duration in seconds",
+    )
 
     @model_validator(mode="before")
     @classmethod

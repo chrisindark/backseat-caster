@@ -183,6 +183,8 @@ class RenderService:
             ),
             modes=",".join(clean_modes),
             overwrite=request.overwrite,
+            normalize_audio=request.normalize_audio,
+            target_lufs=request.target_lufs,
         )
         db.add(job)
         db.commit()
@@ -345,6 +347,10 @@ class RenderService:
             encoder=job.encoder or "auto",
             crop_preset=job.crop_preset or "third_person",
             crop_blur_padding=job.crop_blur_padding,
+            normalize_audio=bool(job.normalize_audio)
+            if job.normalize_audio is not None
+            else True,
+            target_lufs=job.target_lufs if job.target_lufs is not None else -14.0,
             output_dir=job.output_dir,
             landscape_path=job.landscape_path
             or (
@@ -897,6 +903,10 @@ class RenderService:
                 crop_blur_padding=job.crop_blur_padding
                 if job.crop_blur_padding is not None
                 else 0.3333,
+                normalize_audio=bool(job.normalize_audio)
+                if job.normalize_audio is not None
+                else True,
+                target_lufs=job.target_lufs if job.target_lufs is not None else -14.0,
                 api_prefix=settings.API_PREFIX,
             )
             engine = RenderEngine(config=config)
@@ -931,9 +941,15 @@ class RenderService:
                 crop_blur_padding=job.crop_blur_padding,
                 modes=job_modes,
                 progress_callback=on_progress,
+                normalize_audio=bool(job.normalize_audio)
+                if job.normalize_audio is not None
+                else True,
+                target_lufs=job.target_lufs if job.target_lufs is not None else -14.0,
             )
 
             prefix = settings.API_PREFIX
+            if result.clamped and result.effective_duration_seconds > 0:
+                job.duration_seconds = result.effective_duration_seconds
             job.status = "completed"
             job.progress = 100.0
             job.output_dir = str(out_dir)

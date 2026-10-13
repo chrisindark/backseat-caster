@@ -134,6 +134,43 @@ def test_validation_bounds(synthetic_assets, tmp_path):
         )
 
 
+def test_validation_clamping(synthetic_assets, tmp_path):
+    """Test that clamp_duration clamps duration to source video bounds safely."""
+    probe = probe_media(synthetic_assets["video"])
+    assert probe.duration == pytest.approx(3.0, abs=0.1)
+
+    # Clamping from 1.0s with duration 100s -> effective 2.0s
+    clamped_dur = validate_render_parameters(
+        probe,
+        start_seconds=1.0,
+        duration_seconds=100.0,
+        output_dir=tmp_path,
+        clamp_duration=True,
+    )
+    assert clamped_dur == pytest.approx(2.0, abs=0.1)
+
+    # Start time at or exceeding duration must still raise ValidationError
+    with pytest.raises(ValidationError, match="exceeds source video duration"):
+        validate_render_parameters(
+            probe,
+            start_seconds=3.5,
+            duration_seconds=1.0,
+            output_dir=tmp_path,
+            clamp_duration=True,
+        )
+
+    # Remaining duration below min_duration threshold must raise ValidationError
+    with pytest.raises(ValidationError, match="shorter than minimum allowable"):
+        validate_render_parameters(
+            probe,
+            start_seconds=2.8,
+            duration_seconds=1.0,
+            output_dir=tmp_path,
+            clamp_duration=True,
+            min_duration=0.5,
+        )
+
+
 def test_validation_overwrite_protection(synthetic_assets, tmp_path):
     """Test that existing files prevent silent overwrite unless explicit flag is passed."""
     probe = probe_media(synthetic_assets["video"])
@@ -204,18 +241,20 @@ def test_filters_generation():
 
 def test_audio_filters_unducked_vs_ducked():
     """Verify pure game audio has no ducking, and narration mix has ducking + limiter."""
-    # Mode 1: No narration -> No ducking
+    # Mode 1: No narration -> No ducking, with loudnorm
     unducked_graph, label = build_audio_filter_graph(
         start_seconds=0,
         duration_seconds=5,
         has_source_audio=True,
         has_narration=False,
+        normalize_audio=True,
     )
     assert "atrim=" in unducked_graph
     assert "volume=" not in unducked_graph  # Zero volume attenuation!
     assert "alimiter" not in unducked_graph
+    assert "loudnorm=I=-14.0:TP=-1.5:LRA=11.0" in unducked_graph
 
-    # Mode 2: With narration -> Ducking + Limiter
+    # Mode 2: With narration -> Ducking + Limiter + loudnorm
     ducked_graph, label = build_audio_filter_graph(
         start_seconds=0,
         duration_seconds=5,
@@ -223,10 +262,37 @@ def test_audio_filters_unducked_vs_ducked():
         has_narration=True,
         ducked_game_gain=0.30,
         narration_gain=1.0,
+        normalize_audio=True,
     )
     assert "volume=0.30" in ducked_graph
     assert "amix=" in ducked_graph
     assert "alimiter=" in ducked_graph
+    assert "loudnorm=I=-14.0:TP=-1.5:LRA=11.0" in ducked_graph
+
+
+def test_audio_normalization_ebu_r128():
+    """Verify EBU R128 loudness normalization toggles and custom LUFS targets."""
+    # Disabled normalization
+    off_graph, _ = build_audio_filter_graph(
+        start_seconds=0,
+        duration_seconds=5,
+        has_source_audio=True,
+        has_narration=False,
+        normalize_audio=False,
+    )
+    assert "loudnorm" not in off_graph
+
+    # Custom LUFS target (-16 LUFS podcast standard)
+    custom_graph, _ = build_audio_filter_graph(
+        start_seconds=0,
+        duration_seconds=5,
+        has_source_audio=True,
+        has_narration=True,
+        normalize_audio=True,
+        target_lufs=-16.0,
+        loudnorm_true_peak=-1.0,
+    )
+    assert "loudnorm=I=-16.0:TP=-1.0:LRA=11.0" in custom_graph
 
 
 def test_render_clip_integration(synthetic_assets, tmp_path):
@@ -488,3 +554,40 @@ def test_render_all_six_modes(synthetic_assets, tmp_path):
     assert manifest_data["modes"] == all_modes
     for m in all_modes:
         assert m in manifest_data["outputs"]
+
+
+def test_render_clip_clamping_integration(synthetic_assets, tmp_path):
+    """Verify that requesting a clip longer than source video duration auto-clamps safely."""
+    config = RenderConfig(
+        preferred_encoder="libx264",
+        libx264_crf=20,
+        libx264_preset="ultrafast",
+        clamp_to_duration=True,
+    )
+    engine = RenderEngine(config=config)
+    output_dir = tmp_path / "clip_clamped"
+
+    # Synthetic asset is ~3.0s. Request 100s from 0.0s.
+    result = engine.render_clip(
+        source_path=synthetic_assets["video"],
+        start_seconds=0.0,
+        duration_seconds=100.0,
+        output_dir=output_dir,
+        modes=["landscape"],
+        overwrite=True,
+    )
+
+    assert result.clamped is True
+    assert result.requested_duration_seconds == 100.0
+    assert result.effective_duration_seconds == pytest.approx(3.0, abs=0.1)
+    assert (output_dir / "landscape.mp4").exists()
+
+    manifest_path = output_dir / "manifest.json"
+    import json
+
+    with open(manifest_path) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["request"]["clamped"] is True
+    assert manifest_data["request"]["requested_duration_seconds"] == 100.0
+    assert manifest_data["request"]["duration_seconds"] == pytest.approx(3.0, abs=0.1)

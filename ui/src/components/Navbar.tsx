@@ -18,7 +18,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  channelInput = "@chrisindark",
+  channelInput = "",
   onChannelInputChange,
   onSync,
   isSyncing = false,

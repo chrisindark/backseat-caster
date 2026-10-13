@@ -8,10 +8,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.core.dependencies import DependencyContainer
 from app.core.logger import setup_logger
 from app.core.middlewares import CorrelationIdMiddleware
 from app.core.responses import BaseResponse, register_exception_handlers
-from app.routers import renders_router, videos_router, youtube_router
+from app.routers import (
+    health_router,
+    highlights_router,
+    renders_router,
+    videos_router,
+    youtube_router,
+)
 
 # Initialize the custom colored logger with correlation ID
 setup_logger()
@@ -21,12 +28,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await DependencyContainer.initialize()
     # Ensure local storage directories exist
     settings.ensure_directories()
     logger.info(
-        "BackseatCaster API initialized. Downloads: %s, Renders: %s",
+        "BackseatCaster API initialized. Downloads: %s, Renders: %s, Highlights: %s",
         settings.downloads_path,
         settings.renders_path,
+        settings.highlights_path,
     )
     yield
     logger.info("BackseatCaster API shutting down.")
@@ -52,6 +61,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Correlation-ID", "X-Request-ID"],
 )
 
 
@@ -68,21 +78,12 @@ def root():
     )
 
 
-@app.get(f"{settings.API_PREFIX}/health", response_model=BaseResponse[dict])
-def health_check():
-    return BaseResponse.success_response(
-        response={
-            "status": "healthy",
-            "version": settings.VERSION,
-            "downloads_dir": str(settings.downloads_path),
-        }
-    )
-
-
 # Register routers
+app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(videos_router, prefix=settings.API_PREFIX)
 app.include_router(renders_router, prefix=settings.API_PREFIX)
 app.include_router(youtube_router, prefix=settings.API_PREFIX)
+app.include_router(highlights_router, prefix=settings.API_PREFIX)
 
 
 if __name__ == "__main__":

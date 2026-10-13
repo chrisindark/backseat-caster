@@ -24,9 +24,9 @@ import Link from "next/link";
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 export default function YouTubeChannelPage() {
-  const [channelInput, setChannelInput] = useState<string>("@chrisindark");
-  const [activeChannel, setActiveChannel] = useState<string>("@chrisindark");
-  const [channelTitle, setChannelTitle] = useState<string>("chrisindark");
+  const [channelInput, setChannelInput] = useState<string>("");
+  const [activeChannel, setActiveChannel] = useState<string>("");
+  const [channelTitle, setChannelTitle] = useState<string>("");
   const [channelUrl, setChannelUrl] = useState<string>("");
 
   const [videos, setVideos] = useState<YouTubeChannelVideoItem[]>([]);

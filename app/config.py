@@ -23,13 +23,15 @@ class Settings(BaseSettings):
     PORT: int = 8000
     API_PREFIX: str = "/api/v1"
 
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_TTL: int = "3600"
     DATABASE_URL: str = "sqlite:///./data/backseatcaster.db"
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_TIMEOUT: float = 30.0
     DB_POOL_RECYCLE: int = 1800
     DOWNLOADS_DIR: str = "./data/downloads"
-    DEFAULT_YOUTUBE_CHANNEL: str = "@chrisindark"
+    DEFAULT_YOUTUBE_CHANNEL: str = ""
 
     # Celery configuration
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
@@ -41,6 +43,7 @@ class Settings(BaseSettings):
     ]
 
     RENDERS_DIR: str = "./data/renders"
+    HIGHLIGHTS_DIR: str = "./data/highlights"
 
     # YouTube API & OAuth configuration
     YOUTUBE_CLIENT_SECRETS_FILE: str = "./data/client_secrets.json"
@@ -71,6 +74,10 @@ class Settings(BaseSettings):
         return Path(self.RENDERS_DIR).resolve()
 
     @property
+    def highlights_path(self) -> Path:
+        return Path(self.HIGHLIGHTS_DIR).resolve()
+
+    @property
     def youtube_token_path(self) -> Path:
         return Path(self.YOUTUBE_TOKEN_FILE).resolve()
 
@@ -82,6 +89,7 @@ class Settings(BaseSettings):
         """Ensure all runtime directories and parent folders exist."""
         self.downloads_path.mkdir(parents=True, exist_ok=True)
         self.renders_path.mkdir(parents=True, exist_ok=True)
+        self.highlights_path.mkdir(parents=True, exist_ok=True)
         self.youtube_token_path.parent.mkdir(parents=True, exist_ok=True)
         self.youtube_client_secrets_path.parent.mkdir(parents=True, exist_ok=True)
 

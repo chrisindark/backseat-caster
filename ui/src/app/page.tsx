@@ -35,8 +35,8 @@ function HomeContent() {
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
-  const [channelTitle, setChannelTitle] = useState<string>("chrisindark");
-  const [channelInput, setChannelInput] = useState<string>("@chrisindark");
+  const [channelTitle, setChannelTitle] = useState<string>("");
+  const [channelInput, setChannelInput] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>(initialSearch);
   const [activeFilter, setActiveFilter] = useState<string>(initialFilter);
   const [page, setPage] = useState<number>(initialPage);
@@ -137,7 +137,7 @@ function HomeContent() {
     setSyncMessage(null);
     try {
       const offset = limit * (page - 1);
-      const res = await syncChannel(channelInput || "@chrisindark", limit, offset);
+      const res = await syncChannel(channelInput || "", limit, offset);
       setSyncMessage(res.message);
       if (res.channel_title) {
         setChannelTitle(res.channel_title);

@@ -12,6 +12,7 @@ celery_app = Celery(
         "app.services.videos",
         "app.services.renders",
         "app.services.youtube_uploader",
+        "app.services.highlight.service",
     ],
 )
 
@@ -23,9 +24,9 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_time_limit=1800,
-    broker_connection_retry=False,
-    broker_connection_retry_on_startup=False,
-    broker_connection_max_retries=0,
+    broker_connection_retry=True,
+    broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=3,
 )
 
 

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -39,8 +40,34 @@ class Video(Base):
     download_progress = Column(Float, default=0.0)
     error_message = Column(Text, nullable=True)
 
+    # Highlight candidate mining state
+    highlight_status = Column(
+        String(32), default="idle", index=True
+    )  # idle, pending, scanning, completed, failed
+    highlight_progress = Column(Float, default=0.0)
+    highlight_stage = Column(String(128), default="")
+    highlight_error = Column(Text, nullable=True)
+    highlight_task_id = Column(String(128), nullable=True)
+
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    highlight_candidates = relationship(
+        "HighlightCandidate",
+        primaryjoin="Video.id == HighlightCandidate.video_id",
+        foreign_keys="HighlightCandidate.video_id",
+        back_populates="video",
+        cascade="all, delete-orphan",
+        order_by="desc(HighlightCandidate.score)",
+    )
+    highlight_runs = relationship(
+        "HighlightRun",
+        primaryjoin="Video.id == HighlightRun.video_id",
+        foreign_keys="HighlightRun.video_id",
+        back_populates="video",
+        cascade="all, delete-orphan",
+        order_by="desc(HighlightRun.created_at)",
+    )
 
     def to_dict(self):
         return {
@@ -62,6 +89,11 @@ class Video(Base):
             "download_status": self.download_status,
             "download_progress": self.download_progress,
             "error_message": self.error_message,
+            "highlight_status": self.highlight_status or "idle",
+            "highlight_progress": self.highlight_progress or 0.0,
+            "highlight_stage": self.highlight_stage or "",
+            "highlight_error": self.highlight_error,
+            "highlight_task_id": self.highlight_task_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

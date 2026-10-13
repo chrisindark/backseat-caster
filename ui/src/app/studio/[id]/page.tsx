@@ -1,18 +1,22 @@
 "use client";
 
+import { HighlightCandidatesDrawer } from "@/components/HighlightCandidatesDrawer";
 import { Navbar } from "@/components/Navbar";
 import {
   checkBackendHealth,
   createRender,
+  fetchHighlightCandidates,
   fetchRenders,
   fetchVideo,
   getDownloadedVideoStreamUrl,
+  getHighlightStatus,
   getRenderJobStatus,
   getStreamUrl,
 } from "@/lib/api";
 import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import {
   ClippingMode,
+  HighlightCandidateItem,
   RenderClipResponse,
   RenderJobResponse,
   RenderManifest,
@@ -45,7 +49,6 @@ import { useParams, useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 type AudioMode = "gameplay_only" | "voiceover";
-type ViewTab = "comparison" | "vertical_blur" | "vertical_crop" | "landscape";
 
 interface ModeConfig {
   id: ClippingMode;
@@ -152,6 +155,7 @@ function StudioWorkspace() {
 
   const videoId = typeof params?.id === "string" ? params.id : Array.isArray(params?.id) ? params.id[0] : "";
   const initialStartFromQuery = searchParams.get("start") ? parseFloat(searchParams.get("start")!) || 0 : 0;
+  const initialDurationFromQuery = searchParams.get("duration") ? parseFloat(searchParams.get("duration")!) || 0 : 0;
 
   const [video, setVideo] = useState<VideoItem | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -162,13 +166,15 @@ function StudioWorkspace() {
   const [startSecondsInput, setStartSecondsInput] = useState<string>(
     initialStartFromQuery > 0 ? formatSeconds(initialStartFromQuery) : "0"
   );
-  const [durationPreset, setDurationPreset] = useState<number>(15);
-  const [customDuration, setCustomDuration] = useState<string>("15");
-  const [isCustomDuration, setIsCustomDuration] = useState<boolean>(false);
+  const initialDur = initialDurationFromQuery > 0 ? Math.round(initialDurationFromQuery) : 15;
+  const isPresetDur = [10, 15, 30, 60].includes(initialDur);
+  const [durationPreset, setDurationPreset] = useState<number>(isPresetDur ? initialDur : 15);
+  const [customDuration, setCustomDuration] = useState<string>(String(initialDur));
+  const [isCustomDuration, setIsCustomDuration] = useState<boolean>(!isPresetDur && initialDur > 0);
 
-  // Source video playback & scrubber
+  // Source video playback & scrubber (initialize playhead to start param)
   const [showSourcePreview, setShowSourcePreview] = useState<boolean>(true);
-  const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(0);
+  const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(initialStartFromQuery);
   const sourceVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // Audio mode & normalization
@@ -206,20 +212,73 @@ function StudioWorkspace() {
     setQueryParams({ tab: tab === "comparison" ? null : tab }, { replace: true });
   }, []);
 
-  // Listen to browser Back/Forward navigation to sync tab
+  // Listen to browser Back/Forward navigation to sync tab and timing parameters
   useEffect(() => {
     const handlePopState = () => {
       const tabFromUrl = getQueryParam("tab");
       if (tabFromUrl) {
         setActiveTabState(tabFromUrl);
       }
+      const startFromUrl = getQueryParam("start");
+      if (startFromUrl !== null) {
+        const parsedStart = Math.max(0, parseFloat(startFromUrl) || 0);
+        setStartSecondsInput(formatSeconds(parsedStart));
+        setSourceCurrentTime(parsedStart);
+        if (sourceVideoRef.current) {
+          try {
+            sourceVideoRef.current.currentTime = parsedStart;
+          } catch {
+            // ignore if not ready
+          }
+        }
+      }
+      const durFromUrl = getQueryParam("duration");
+      if (durFromUrl !== null) {
+        const parsedDur = Math.round(parseFloat(durFromUrl) || 0);
+        if (parsedDur > 0) {
+          const isPreset = [10, 15, 30, 60].includes(parsedDur);
+          setDurationPreset(isPreset ? parsedDur : 15);
+          setCustomDuration(String(parsedDur));
+          setIsCustomDuration(!isPreset);
+        }
+      }
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  // Ensure video player seeks to the target timestamp once the video element and metadata are ready
+  useEffect(() => {
+    if (sourceVideoRef.current && initialStartFromQuery > 0) {
+      const vid = sourceVideoRef.current;
+      const applySeek = () => {
+        try {
+          vid.currentTime = initialStartFromQuery;
+        } catch {
+          // ignore
+        }
+      };
+      if (vid.readyState >= 1) {
+        applySeek();
+      } else {
+        vid.addEventListener("loadedmetadata", applySeek, { once: true });
+        return () => {
+          vid.removeEventListener("loadedmetadata", applySeek);
+        };
+      }
+    }
+  }, [video, initialStartFromQuery]);
+
   // Existing renders cache
   const [existingRenders, setExistingRenders] = useState<RenderManifest[]>([]);
+
+  // AI Highlight Mining Drawer & Status
+  const [isHighlightDrawerOpen, setIsHighlightDrawerOpen] = useState<boolean>(false);
+  const [highlightCount, setHighlightCount] = useState<number>(0);
+  const [isHighlightScanning, setIsHighlightScanning] = useState<boolean>(false);
+  const [highlightScanProgress, setHighlightScanProgress] = useState<number>(0);
+  const [highlightScanStage, setHighlightScanStage] = useState<string>("");
+  const [appliedHighlightNotification, setAppliedHighlightNotification] = useState<string | null>(null);
 
   const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -364,10 +423,92 @@ function StudioWorkspace() {
         console.warn("Could not load render history:", err);
       });
 
+    // Initial highlight scan status check & count
+    getHighlightStatus(videoId)
+      .then((statusRes) => {
+        if (!mounted) return;
+        if (statusRes.status === "scanning" || statusRes.status === "pending") {
+          setIsHighlightScanning(true);
+          setHighlightScanProgress(statusRes.progress || 10);
+          setHighlightScanStage(statusRes.stage || "Scanning video highlights...");
+        }
+        if (statusRes.candidate_count !== undefined) {
+          setHighlightCount(statusRes.candidate_count);
+        }
+      })
+      .catch(() => {});
+
+    fetchHighlightCandidates(videoId)
+      .then((candRes) => {
+        if (!mounted) return;
+        if (candRes.candidates) {
+          setHighlightCount(candRes.candidates.length);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       mounted = false;
     };
   }, [videoId, extractOutputs]);
+
+  // Polling loop when highlight scanning is active
+  useEffect(() => {
+    if (!isHighlightScanning || !videoId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const statusRes = await getHighlightStatus(videoId);
+        setHighlightScanProgress(statusRes.progress || 10);
+        setHighlightScanStage(statusRes.stage || "Scanning audio excitement & HUD...");
+
+        if (statusRes.status === "completed") {
+          setIsHighlightScanning(false);
+          const candRes = await fetchHighlightCandidates(videoId);
+          setHighlightCount(candRes.candidates?.length || 0);
+          setAppliedHighlightNotification(
+            `Highlight scan complete! ${candRes.candidates?.length || 0} action clips mined.`
+          );
+          setTimeout(() => setAppliedHighlightNotification(null), 5000);
+        } else if (statusRes.status === "failed") {
+          setIsHighlightScanning(false);
+        }
+      } catch {
+        // ignore
+      }
+    }, 1800);
+
+    return () => clearInterval(interval);
+  }, [isHighlightScanning, videoId]);
+
+  const handleApplyHighlight = (candidate: HighlightCandidateItem) => {
+    const startSec = candidate.start_seconds;
+    setStartSecondsInput(formatSeconds(startSec));
+    const dur = Math.round(candidate.duration_seconds);
+    const isPreset = [10, 15, 30, 60].includes(dur);
+    setDurationPreset(isPreset ? dur : 15);
+    setIsCustomDuration(!isPreset);
+    setCustomDuration(String(dur));
+    setSourceCurrentTime(startSec);
+    if (sourceVideoRef.current) {
+      sourceVideoRef.current.currentTime = startSec;
+    }
+    setQueryParams({ start: String(startSec), duration: String(dur) }, { replace: true });
+    const titleStr = candidate.suggested_title || candidate.event_type.replace("_", " ").toUpperCase();
+    setAppliedHighlightNotification(`Applied "${titleStr}" (${dur}s) to Studio timeline!`);
+    setTimeout(() => {
+      setAppliedHighlightNotification(null);
+    }, 4000);
+  };
+
+  const handleQuickRenderHighlight = (candidate: HighlightCandidateItem) => {
+    handleApplyHighlight(candidate);
+    setIsHighlightDrawerOpen(false);
+    // Smooth scroll down to render controls and start render
+    setTimeout(() => {
+      handleStartRender();
+    }, 300);
+  };
 
   const handleStartRender = async () => {
     if (!video) return;
@@ -531,12 +672,37 @@ function StudioWorkspace() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-3 text-xs flex-wrap">
             {video && (
               <span className="text-slate-400 truncate max-w-sm">
                 <strong className="text-slate-200">{video.title}</strong> ({video.duration_formatted})
               </span>
             )}
+
+            {/* AI Highlights Action Button */}
+            {video?.is_downloaded && (
+              <button
+                type="button"
+                onClick={() => setIsHighlightDrawerOpen(true)}
+                className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-rose-600/25 via-purple-600/30 to-rose-600/25 hover:from-rose-600/40 hover:to-purple-600/40 text-white rounded-lg border border-rose-500/40 text-xs font-bold transition-all shadow-md shadow-rose-950/40 cursor-pointer active:scale-95"
+              >
+                {isHighlightScanning ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                    <span>Scanning ({Math.round(highlightScanProgress)}%)...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+                    <span>
+                      AI Highlights
+                      {highlightCount > 0 ? ` (${highlightCount})` : ""}
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
+
             <Link
               href="/renders"
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-white/10 transition-colors font-medium"
@@ -546,6 +712,50 @@ function StudioWorkspace() {
             </Link>
           </div>
         </div>
+
+        {/* Live Highlight Scan Progress Banner */}
+        {isHighlightScanning && (
+          <div className="mb-6 p-4 bg-gradient-to-r from-rose-950/50 via-purple-950/40 to-black border border-rose-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2.5 rounded-xl bg-rose-600/20 text-rose-400 border border-rose-500/30 shrink-0">
+                <Loader2 className="w-4 h-4 animate-spin" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-white">AI Highlight Mining In Progress</span>
+                  <span className="font-mono text-xs text-rose-400 font-bold">{Math.round(highlightScanProgress)}%</span>
+                </div>
+                <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                  {highlightScanStage || "Scanning audio energy spikes and Marvel Rivals HUD..."}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsHighlightDrawerOpen(true)}
+              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer shrink-0 transition-transform active:scale-95"
+            >
+              Open Drawer
+            </button>
+          </div>
+        )}
+
+        {/* Highlight Applied Toast Alert */}
+        {appliedHighlightNotification && (
+          <div className="mb-6 p-3.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300 shadow-lg">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium">{appliedHighlightNotification}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAppliedHighlightNotification(null)}
+              className="text-slate-400 hover:text-white text-xs ml-2 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Loading state */}
         {isLoading ? (
@@ -613,7 +823,15 @@ function StudioWorkspace() {
                         controls
                         playsInline
                         preload="metadata"
+                        onLoadedMetadata={(e) => {
+                          const target = sourceCurrentTime > 0 ? sourceCurrentTime : parseSeconds(startSecondsInput);
+                          if (target > 0) {
+                            e.currentTarget.currentTime = target;
+                            setSourceCurrentTime(target);
+                          }
+                        }}
                         onTimeUpdate={(e) => setSourceCurrentTime(e.currentTarget.currentTime)}
+                        onSeeked={(e) => setSourceCurrentTime(e.currentTarget.currentTime)}
                         className="w-full h-full object-contain"
                       />
                     </div>
@@ -628,8 +846,10 @@ function StudioWorkspace() {
                       <button
                         type="button"
                         onClick={() => {
-                          const sec = Math.floor(sourceCurrentTime);
+                          const currentVal = sourceVideoRef.current ? sourceVideoRef.current.currentTime : sourceCurrentTime;
+                          const sec = Math.floor(currentVal);
                           setStartSecondsInput(formatSeconds(sec));
+                          setSourceCurrentTime(sec);
                         }}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg text-xs transition-colors cursor-pointer active:scale-95 shadow-md shadow-rose-950/40"
                       >
@@ -639,8 +859,10 @@ function StudioWorkspace() {
                       <button
                         type="button"
                         onClick={() => {
+                          const target = parseSeconds(startSecondsInput);
+                          setSourceCurrentTime(target);
                           if (sourceVideoRef.current) {
-                            sourceVideoRef.current.currentTime = parseSeconds(startSecondsInput);
+                            sourceVideoRef.current.currentTime = target;
                           }
                         }}
                         className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg border border-white/10 cursor-pointer"
@@ -673,6 +895,7 @@ function StudioWorkspace() {
                                 const current = parseSeconds(startSecondsInput);
                                 const next = Math.max(0, current + delta);
                                 setStartSecondsInput(formatSeconds(next));
+                                setSourceCurrentTime(next);
                                 if (sourceVideoRef.current) {
                                   sourceVideoRef.current.currentTime = next;
                                 }
@@ -1367,6 +1590,16 @@ function StudioWorkspace() {
                 </div>
               </div>
             )}
+            {/* Highlight Mining Slide-over Drawer */}
+            <HighlightCandidatesDrawer
+              isOpen={isHighlightDrawerOpen}
+              videoId={videoId}
+              videoTitle={video?.title}
+              onClose={() => setIsHighlightDrawerOpen(false)}
+              onApplyToStudio={handleApplyHighlight}
+              onQuickRender={handleQuickRenderHighlight}
+              onCandidatesCountChange={(count) => setHighlightCount(count)}
+            />
           </div>
         )}
       </main>
@@ -1374,7 +1607,7 @@ function StudioWorkspace() {
   );
 }
 
-export default function StudioPage(_props: { params: Promise<{ id: string }> }) {
+export default function StudioPage() {
   return (
     <React.Suspense
       fallback={

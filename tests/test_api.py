@@ -1021,18 +1021,43 @@ def test_stream_video_downloaded_success(client, db_session, tmp_path):
 
 
 def test_correlation_id_middleware(client):
-    """CorrelationIdMiddleware sets and propagates X-Correlation-ID header."""
-    # 1. Without header -> auto-generated UUID returned
-    res = client.get(f"{settings.API_PREFIX}/health")
+    """CorrelationIdMiddleware sets and propagates X-Correlation-ID and X-Request-ID headers."""
+    # 1. Without headers -> auto-generated UUID returned for both
+    res = client.get(f"{settings.API_PREFIX}/health?check=1")
     assert "x-correlation-id" in res.headers
+    assert "x-request-id" in res.headers
     assert len(res.headers["x-correlation-id"]) > 0
+    # When neither header is supplied, correlation_id defaults to request_id
+    assert res.headers["x-correlation-id"] == res.headers["x-request-id"]
 
-    # 2. With client header -> echoed back
+    # 2. With client correlation header -> echoed back
     custom_id = "test-corr-id-12345"
     res2 = client.get(
         f"{settings.API_PREFIX}/health", headers={"x-correlation-id": custom_id}
     )
     assert res2.headers.get("x-correlation-id") == custom_id
+    assert "x-request-id" in res2.headers
+
+    # 3. With distinct client request header
+    custom_req_id = "test-req-id-67890"
+    res3 = client.get(
+        f"{settings.API_PREFIX}/health",
+        headers={
+            "x-correlation-id": custom_id,
+            "x-request-id": custom_req_id,
+        },
+    )
+    assert res3.headers.get("x-correlation-id") == custom_id
+    assert res3.headers.get("x-request-id") == custom_req_id
+
+    # 4. CORS exposed headers check on CORS preflight / request
+    cors_res = client.get(
+        f"{settings.API_PREFIX}/health",
+        headers={"Origin": "http://localhost:3000"},
+    )
+    exposed = cors_res.headers.get("access-control-expose-headers", "")
+    assert "X-Correlation-ID" in exposed
+    assert "X-Request-ID" in exposed
 
 
 def test_bulk_delete_renders_sync(client, db_session, tmp_path, monkeypatch):

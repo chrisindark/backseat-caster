@@ -1,16 +1,18 @@
 "use client";
 
+import { HighlightCandidatesDrawer } from "@/components/HighlightCandidatesDrawer";
 import { Navbar } from "@/components/Navbar";
 import {
   checkBackendHealth,
   deleteVideoDownload,
   downloadVideo,
+  fetchHighlightCandidates,
   fetchRenders,
   fetchVideo,
   getDownloadedVideoStreamUrl,
   getVideoStatus,
 } from "@/lib/api";
-import { RenderManifest, VideoItem } from "@/types/video";
+import { HighlightCandidateItem, RenderManifest, VideoItem } from "@/types/video";
 import {
   AlertCircle,
   ArrowLeft,
@@ -18,17 +20,18 @@ import {
   CheckCircle2,
   Clock,
   Download,
-  Eye,
   ExternalLink,
+  Eye,
   Film,
   HardDrive,
   Loader2,
   Play,
   Scissors,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 function formatBytes(bytes?: number | null): string {
@@ -64,6 +67,7 @@ function parseSeconds(val: string): number {
 }
 
 function VideoDetailContent() {
+  const router = useRouter();
   const params = useParams();
   const videoId = typeof params?.id === "string" ? params.id : Array.isArray(params?.id) ? params.id[0] : "";
 
@@ -81,6 +85,10 @@ function VideoDetailContent() {
   // Downloads & renders
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [renders, setRenders] = useState<RenderManifest[]>([]);
+
+  // AI Highlights Drawer
+  const [isHighlightDrawerOpen, setIsHighlightDrawerOpen] = useState<boolean>(false);
+  const [highlightCount, setHighlightCount] = useState<number>(0);
 
   // Reload video after user actions
   const reloadVideo = useCallback(async () => {
@@ -130,6 +138,13 @@ function VideoDetailContent() {
       .catch((err) => {
         console.warn("Could not load renders:", err);
       });
+
+    fetchHighlightCandidates(videoId)
+      .then((candRes) => {
+        if (!mounted) return;
+        if (candRes.candidates) setHighlightCount(candRes.candidates.length);
+      })
+      .catch(() => {});
 
     return () => {
       mounted = false;
@@ -257,13 +272,26 @@ function VideoDetailContent() {
               </a>
             )}
             {isDownloaded && (
-              <Link
-                href={`/studio/${videoId}${clipStartTime > 0 ? `?start=${clipStartTime}` : ""}`}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shadow-md shadow-rose-950/40 transition-all cursor-pointer"
-              >
-                <Scissors className="w-3.5 h-3.5" />
-                <span>Open in Clip Studio</span>
-              </Link>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsHighlightDrawerOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600/30 via-purple-600/30 to-rose-600/30 hover:from-rose-600/50 hover:to-purple-600/50 text-white text-xs font-bold rounded-lg border border-rose-500/40 shadow-sm transition-all cursor-pointer active:scale-95"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+                  <span>
+                    AI Highlights
+                    {highlightCount > 0 ? ` (${highlightCount})` : ""}
+                  </span>
+                </button>
+                <Link
+                  href={`/studio/${videoId}${clipStartTime > 0 ? `?start=${clipStartTime}` : ""}`}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shadow-md shadow-rose-950/40 transition-all cursor-pointer"
+                >
+                  <Scissors className="w-3.5 h-3.5" />
+                  <span>Open in Clip Studio</span>
+                </Link>
+              </>
             )}
           </div>
         </div>
@@ -501,6 +529,17 @@ function VideoDetailContent() {
                 {/* Primary Action Button */}
                 {isDownloaded ? (
                   <div className="flex flex-col gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsHighlightDrawerOpen(true)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-purple-600/30 via-rose-600/30 to-purple-600/30 hover:from-purple-600/50 hover:to-rose-600/50 border border-rose-500/40 text-white text-xs font-bold rounded-xl shadow-lg cursor-pointer transition-transform active:scale-95"
+                    >
+                      <Sparkles className="w-4 h-4 text-rose-400" />
+                      <span>
+                        Browse AI Highlights
+                        {highlightCount > 0 ? ` (${highlightCount})` : ""}
+                      </span>
+                    </button>
                     <Link
                       href={`/studio/${videoId}${clipStartTime > 0 ? `?start=${clipStartTime}` : ""}`}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-950/60 cursor-pointer transition-transform active:scale-95"
@@ -590,6 +629,20 @@ function VideoDetailContent() {
             </div>
           </div>
         )}
+
+        {/* AI Highlight Mining Drawer */}
+        <HighlightCandidatesDrawer
+          isOpen={isHighlightDrawerOpen}
+          videoId={videoId}
+          videoTitle={video?.title}
+          onClose={() => setIsHighlightDrawerOpen(false)}
+          onApplyToStudio={(cand: HighlightCandidateItem) => {
+            const dur = Math.round(cand.duration_seconds);
+            setIsHighlightDrawerOpen(false);
+            router.push(`/studio/${videoId}?start=${cand.start_seconds}&duration=${dur}`);
+          }}
+          onCandidatesCountChange={(count) => setHighlightCount(count)}
+        />
       </main>
     </div>
   );

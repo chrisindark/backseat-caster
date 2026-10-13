@@ -2,6 +2,7 @@
 
 import { createRender, fetchRenders, getDownloadedVideoStreamUrl, getRenderJobStatus, getStreamUrl } from "@/lib/api";
 import {
+  ClippingMode,
   RenderClipResponse,
   RenderJobResponse,
   RenderManifest,
@@ -11,6 +12,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   Clock,
   Columns,
@@ -20,12 +22,15 @@ import {
   Layers,
   Loader2,
   Monitor,
+  Play,
   Scissors,
+  Sliders,
   Smartphone,
   Sparkles,
   Volume2,
   X
 } from "lucide-react";
+import { useScrollLock } from "@/lib/useScrollLock";
 import React, { useEffect, useRef, useState } from "react";
 
 interface ClipStudioModalProps {
@@ -35,30 +40,115 @@ interface ClipStudioModalProps {
 }
 
 type AudioMode = "gameplay_only" | "voiceover";
-type ViewTab = "vertical_blur" | "vertical_crop" | "landscape" | "comparison";
+
+interface ModeConfig {
+  id: ClippingMode;
+  title: string;
+  badge: string;
+  badgeColor: string;
+  aspectRatio: "16:9" | "9:16";
+  isVertical: boolean;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const CLIPPING_MODES: ModeConfig[] = [
+  {
+    id: "landscape",
+    title: "16:9 Landscape Master",
+    badge: "1920×1080 • Desktop",
+    badgeColor: "bg-blue-500/10 text-blue-300 border-blue-500/20",
+    aspectRatio: "16:9",
+    isVertical: false,
+    description: "Original 16:9 widescreen master without crop or blur padding. Standard for YouTube longform & desktop.",
+    icon: Monitor,
+  },
+  {
+    id: "vertical_blur",
+    title: "Full Blurred Background",
+    badge: "1080×1920 • 9:16 Shorts",
+    badgeColor: "bg-purple-500/10 text-purple-300 border-purple-500/20",
+    aspectRatio: "9:16",
+    isVertical: true,
+    description: "100% horizontal gameplay preserved in center with smooth blurred upper and lower background padding.",
+    icon: Smartphone,
+  },
+  {
+    id: "third_person",
+    title: "Third-Person Wide Crop",
+    badge: "Recommended • 33% Blur",
+    badgeColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+    aspectRatio: "9:16",
+    isVertical: true,
+    description: "Expanded 911px middle window (33.3% blur padding) tuned for third-person hero/character motion.",
+    icon: Sparkles,
+  },
+  {
+    id: "direct_crop",
+    title: "Direct Center Crop",
+    badge: "0% Blur • Full Bleed",
+    badgeColor: "bg-amber-500/10 text-amber-300 border-amber-500/20",
+    aspectRatio: "9:16",
+    isVertical: true,
+    description: "Tight 607px center crop filling the entire 9:16 canvas. No blurred padding; maximum screen immersion.",
+    icon: Scissors,
+  },
+  {
+    id: "cinematic",
+    title: "Cinematic Balanced",
+    badge: "25% Blur • 810px View",
+    badgeColor: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+    aspectRatio: "9:16",
+    isVertical: true,
+    description: "Balanced 25% subtle top/bottom blur with an 810px center gameplay frame for cinematic perspective.",
+    icon: Columns,
+  },
+  {
+    id: "custom",
+    title: "Custom Blur Padding",
+    badge: "User Configured",
+    badgeColor: "bg-cyan-500/10 text-cyan-300 border-cyan-500/20",
+    aspectRatio: "9:16",
+    isVertical: true,
+    description: "Custom blur padding (0%–60%). Use interactive slider to calibrate framing for your exact HUD/game.",
+    icon: Layers,
+  },
+];
 
 function formatSeconds(sec: number): string {
   if (isNaN(sec) || sec < 0) return "0:00";
-  const m = Math.floor(sec / 60);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
+  if (h > 0) {
+    return `${h}:${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
+  }
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
 function parseSeconds(val: string): number {
+  if (!val) return 0;
   if (val.includes(":")) {
-    const parts = val.split(":");
+    const parts = val.split(":").map((p) => parseFloat(p) || 0);
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
     if (parts.length === 2) {
-      const min = parseFloat(parts[0]) || 0;
-      const sec = parseFloat(parts[1]) || 0;
-      return min * 60 + sec;
+      return parts[0] * 60 + parts[1];
     }
   }
   return parseFloat(val) || 0;
 }
 
 export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initialStartTime, onClose }) => {
+  useScrollLock(Boolean(video));
+
   // Clip parameters
-  const [startSecondsInput, setStartSecondsInput] = useState<string>("0");
+  const [startSecondsInput, setStartSecondsInput] = useState<string>(() =>
+    initialStartTime !== undefined && initialStartTime !== null && initialStartTime > 0
+      ? formatSeconds(initialStartTime)
+      : "0"
+  );
   const [durationPreset, setDurationPreset] = useState<number>(15);
   const [customDuration, setCustomDuration] = useState<string>("15");
   const [isCustomDuration, setIsCustomDuration] = useState<boolean>(false);
@@ -67,23 +157,61 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   const [showSourcePreview, setShowSourcePreview] = useState<boolean>(false);
   const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(0);
   const sourceVideoRef = useRef<HTMLVideoElement | null>(null);
+  const isMountedRef = useRef<boolean>(true);
 
-  // Sync initialStartTime when provided
+  // Comparison playback element refs
+  const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
+  const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
+
   useEffect(() => {
-    if (initialStartTime !== undefined && initialStartTime !== null && initialStartTime > 0) {
-      setStartSecondsInput(formatSeconds(initialStartTime));
-    } else {
-      setStartSecondsInput("0");
-    }
-  }, [initialStartTime, video?.id]);
+    isMountedRef.current = true;
+    const sourceEl = sourceVideoRef.current;
+    const leftEl = compareLeftVideoRef.current;
+    const rightEl = compareRightVideoRef.current;
+    return () => {
+      isMountedRef.current = false;
+      if (sourceEl) sourceEl.pause();
+      if (leftEl) leftEl.pause();
+      if (rightEl) rightEl.pause();
+    };
+  }, []);
 
+  // Listen to Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  // Sync initialStartTime when prop changes using state comparison during render
+  const currentInitKey = `${video?.id ?? ""}:${initialStartTime ?? 0}`;
+  const [prevInitKey, setPrevInitKey] = useState<string>(currentInitKey);
+  if (prevInitKey !== currentInitKey) {
+    setPrevInitKey(currentInitKey);
+    const formatted =
+      initialStartTime !== undefined && initialStartTime !== null && initialStartTime > 0
+        ? formatSeconds(initialStartTime)
+        : "0";
+    if (startSecondsInput !== formatted) {
+      setStartSecondsInput(formatted);
+    }
+  }
 
   // Audio mode
   const [audioMode, setAudioMode] = useState<AudioMode>("gameplay_only");
   const [narrationPath, setNarrationPath] = useState<string>("");
 
-  // Crop layout preset
-  const [cropPreset, setCropPreset] = useState<"third_person" | "direct_crop" | "cinematic">("third_person");
+  // Clipping modes multi-select
+  const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
+    "landscape",
+    "vertical_blur",
+    "third_person",
+  ]);
+  const [customBlurPadding, setCustomBlurPadding] = useState<number>(0.33);
 
   // Rendering state
   const [isRendering, setIsRendering] = useState<boolean>(false);
@@ -92,20 +220,52 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderResult, setRenderResult] = useState<RenderClipResponse | null>(null);
 
-  // Active view tab for results
-  const [activeTab, setActiveTab] = useState<ViewTab>("comparison");
+  // Rendered outputs map: mode -> stream URL
+  const [renderedOutputs, setRenderedOutputs] = useState<Record<string, string>>({});
 
-  // Video playback states
-  const [videoBlurUrl, setVideoBlurUrl] = useState<string | null>(null);
-  const [videoCropUrl, setVideoCropUrl] = useState<string | null>(null);
-  const [videoLandscapeUrl, setVideoLandscapeUrl] = useState<string | null>(null);
+  // Active view tab for results
+  const [activeTab, setActiveTab] = useState<string>("comparison");
+  const [leftCompareMode, setLeftCompareMode] = useState<string>("vertical_blur");
+  const [rightCompareMode, setRightCompareMode] = useState<string>("third_person");
 
   // Previous completed renders for this video
   const [existingRenders, setExistingRenders] = useState<RenderManifest[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
 
-  const blurVideoRef = useRef<HTMLVideoElement | null>(null);
-  const cropVideoRef = useRef<HTMLVideoElement | null>(null);
+  const toggleMode = (mode: ClippingMode) => {
+    setSelectedModes((prev) =>
+      prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
+    );
+  };
+
+  const handleSelectAllModes = () => {
+    setSelectedModes(["landscape", "vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
+  };
+
+  const handleSelectAllShorts = () => {
+    setSelectedModes(["vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
+  };
+
+  const handleSelectDefaultTriple = () => {
+    setSelectedModes(["landscape", "vertical_blur", "third_person"]);
+  };
+
+  // Synchronized playback controls for compare mode
+  const handlePlayBoth = () => {
+    if (compareLeftVideoRef.current && compareRightVideoRef.current) {
+      compareLeftVideoRef.current.currentTime = 0;
+      compareRightVideoRef.current.currentTime = 0;
+      compareLeftVideoRef.current.play().catch(() => {});
+      compareRightVideoRef.current.play().catch(() => {});
+    }
+  };
+
+  const handlePauseBoth = () => {
+    if (compareLeftVideoRef.current && compareRightVideoRef.current) {
+      compareLeftVideoRef.current.pause();
+      compareRightVideoRef.current.pause();
+    }
+  };
 
   // Load existing renders for this video on mount
   useEffect(() => {
@@ -124,13 +284,45 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
         setExistingRenders(matched);
         if (matched.length > 0) {
           const latest = matched[0];
-          setVideoBlurUrl(latest.vertical_blur_path || latest.outputs?.vertical_blur?.path || getStreamUrl(latest.clip_id, "vertical_blur"));
-          setVideoCropUrl(latest.vertical_crop_path || latest.outputs?.vertical_crop?.path || getStreamUrl(latest.clip_id, "vertical_crop"));
-          setVideoLandscapeUrl(latest.landscape_path || latest.outputs?.landscape?.path || getStreamUrl(latest.clip_id, "landscape"));
+          const newOutputs: Record<string, string> = {};
+          if (latest.outputs) {
+            for (const [m, out] of Object.entries(latest.outputs)) {
+              if (out && typeof out === "object" && out.path) {
+                newOutputs[m] = getStreamUrl(latest.clip_id, m);
+              }
+            }
+          }
+          if (latest.modes && latest.modes.length > 0) {
+            for (const m of latest.modes) {
+              newOutputs[m] = getStreamUrl(latest.clip_id, m);
+            }
+          }
+          if (latest.vertical_blur_path && !newOutputs.vertical_blur) {
+            newOutputs.vertical_blur = getStreamUrl(latest.clip_id, "vertical_blur");
+          }
+          if (latest.vertical_crop_path && !newOutputs.vertical_crop && !newOutputs.third_person && !newOutputs.direct_crop && !newOutputs.cinematic && !newOutputs.custom) {
+            const cropPreset = latest.request?.crop_preset || "third_person";
+            newOutputs[cropPreset] = getStreamUrl(latest.clip_id, cropPreset);
+            newOutputs.vertical_crop = getStreamUrl(latest.clip_id, "vertical_crop");
+          }
+          if (latest.landscape_path && !newOutputs.landscape) {
+            newOutputs.landscape = getStreamUrl(latest.clip_id, "landscape");
+          }
+
+          setRenderedOutputs(newOutputs);
+
+          const vertKeys = Object.keys(newOutputs).filter((k) => k !== "landscape");
+          if (vertKeys.length >= 2) {
+            setActiveTab("comparison");
+            setLeftCompareMode(vertKeys[0]);
+            setRightCompareMode(vertKeys[1]);
+          } else if (vertKeys.length === 1) {
+            setActiveTab(vertKeys[0]);
+          } else if (newOutputs.landscape) {
+            setActiveTab("landscape");
+          }
         } else {
-          setVideoBlurUrl(null);
-          setVideoCropUrl(null);
-          setVideoLandscapeUrl(null);
+          setRenderedOutputs({});
         }
       } catch (err: unknown) {
         if (!isCancelled) console.warn("Could not load render history:", err);
@@ -143,20 +335,39 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
     return () => {
       isCancelled = true;
     };
-  }, [video?.id]);
+  }, [video]);
 
-  const activeDuration = isCustomDuration ? parseFloat(customDuration) || 15 : durationPreset;
+  const activeDuration = Math.max(
+    1,
+    isCustomDuration ? parseSeconds(customDuration) || 15 : durationPreset
+  );
 
   const handleStartRender = async () => {
     if (!video) return;
+    if (selectedModes.length === 0) {
+      setRenderError("Please select at least 1 clipping mode to render.");
+      return;
+    }
     setRenderError(null);
+
+    const rawStartSec = parseSeconds(startSecondsInput);
+    const startSec = Math.max(0, rawStartSec);
+
+    if (video.duration > 0 && startSec >= video.duration) {
+      setRenderError(`Start time (${formatSeconds(startSec)}) exceeds video duration (${video.duration_formatted}).`);
+      return;
+    }
+
     setIsRendering(true);
     setRenderProgress(5);
-    setRenderStatusStage("Queuing render job...");
-
-    const startSec = parseSeconds(startSecondsInput);
+    setRenderStatusStage(`Queuing render job for ${selectedModes.length} modes...`);
 
     try {
+      const cropPresetForCompat =
+        selectedModes.find((m) =>
+          ["third_person", "direct_crop", "cinematic", "custom"].includes(m)
+        ) || "third_person";
+
       const res = await createRender({
         video_id: video.id,
         start_seconds: startSec,
@@ -164,8 +375,12 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
         narration_path: audioMode === "voiceover" && narrationPath.trim() ? narrationPath.trim() : null,
         encoder: "auto",
         overwrite: true,
-        crop_preset: cropPreset,
+        crop_preset: cropPresetForCompat,
+        crop_blur_padding: selectedModes.includes("custom") ? customBlurPadding : undefined,
+        modes: selectedModes,
       });
+
+      if (!isMountedRef.current) return;
 
       let completedJob: RenderJobResponse | RenderClipResponse = res;
 
@@ -176,27 +391,26 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
         const timeoutMs = 10 * 60 * 1000; // 10 minutes max
         const pollIntervalMs = 1200; // 1.2s poll interval
 
-        while (true) {
+        while (isMountedRef.current) {
           if (Date.now() - startTime > timeoutMs) {
             throw new Error("Render job timed out. Check server logs or worker status.");
           }
 
           await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          if (!isMountedRef.current) return;
 
           const jobStatus = await getRenderJobStatus(targetId);
+          if (!isMountedRef.current) return;
+
           const prog = jobStatus.progress || 0;
           setRenderProgress(prog);
 
           if (prog < 20) {
             setRenderStatusStage("Analyzing source video & extracting frames...");
-          } else if (prog < 45) {
-            setRenderStatusStage("Rendering Landscape 16:9 Master...");
-          } else if (prog < 70) {
-            setRenderStatusStage("Rendering Vertical Blur Shorts...");
-          } else if (prog < 90) {
-            setRenderStatusStage("Rendering Vertical Crop Shorts...");
+          } else if (prog < 75) {
+            setRenderStatusStage(`Rendering ${selectedModes.length} clipping modes in single pass...`);
           } else if (prog < 100) {
-            setRenderStatusStage("Generating audit manifest & outputs...");
+            setRenderStatusStage("Writing manifest and final media outputs...");
           }
 
           if (jobStatus.status === "completed") {
@@ -212,46 +426,79 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
         }
       }
 
-      setRenderResult(completedJob as RenderClipResponse);
-      const blurUrl = completedJob.vertical_blur_path || getStreamUrl(completedJob.clip_id, "vertical_blur");
-      const cropUrl = completedJob.vertical_crop_path || getStreamUrl(completedJob.clip_id, "vertical_crop");
-      const landUrl = completedJob.landscape_path || getStreamUrl(completedJob.clip_id, "landscape");
+      if (!isMountedRef.current) return;
 
-      setVideoBlurUrl(blurUrl);
-      setVideoCropUrl(cropUrl);
-      setVideoLandscapeUrl(landUrl);
-      setActiveTab("comparison");
+      setRenderResult(completedJob as RenderClipResponse);
+
+      const newOutputs: Record<string, string> = {};
+      if (completedJob.outputs) {
+        for (const m of Object.keys(completedJob.outputs)) {
+          newOutputs[m] = getStreamUrl(completedJob.clip_id, m);
+        }
+      }
+      if (completedJob.modes && completedJob.modes.length > 0) {
+        for (const m of completedJob.modes) {
+          newOutputs[m] = getStreamUrl(completedJob.clip_id, m);
+        }
+      }
+      if (completedJob.vertical_blur_path && !newOutputs.vertical_blur) {
+        newOutputs.vertical_blur = getStreamUrl(completedJob.clip_id, "vertical_blur");
+      }
+      if (completedJob.vertical_crop_path && !newOutputs.vertical_crop) {
+        newOutputs.vertical_crop = getStreamUrl(completedJob.clip_id, "vertical_crop");
+      }
+      if (completedJob.landscape_path && !newOutputs.landscape) {
+        newOutputs.landscape = getStreamUrl(completedJob.clip_id, "landscape");
+      }
+
+      setRenderedOutputs(newOutputs);
+
+      const vertKeys = Object.keys(newOutputs).filter((k) => k !== "landscape");
+      if (vertKeys.length >= 2) {
+        setActiveTab("comparison");
+        setLeftCompareMode(vertKeys[0]);
+        setRightCompareMode(vertKeys[1]);
+      } else if (vertKeys.length === 1) {
+        setActiveTab(vertKeys[0]);
+      } else if (newOutputs.landscape) {
+        setActiveTab("landscape");
+      }
 
       // Refresh history
       const histData = await fetchRenders();
+      if (!isMountedRef.current) return;
       setExistingRenders(
         histData.items.filter(
           (item) => (item.source?.path || "").includes(video.id) || item.clip_id.includes(video.id)
         )
       );
     } catch (err: unknown) {
+      if (!isMountedRef.current) return;
       console.error("Render failed:", err);
       const message = err instanceof Error ? err.message : "Failed to render clip. Check server logs.";
       setRenderError(message);
     } finally {
-      setIsRendering(false);
+      if (isMountedRef.current) {
+        setIsRendering(false);
+      }
     }
   };
 
-
-  const hasOutputs = Boolean(videoBlurUrl && videoCropUrl);
+  const hasOutputs = Object.keys(renderedOutputs).length > 0;
+  const availableOutputKeys = Object.keys(renderedOutputs);
+  const verticalOutputKeys = availableOutputKeys.filter((k) => k !== "landscape");
 
   return (
     <AnimatePresence>
       {video && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto overscroll-contain">
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/85 backdrop-blur-md"
+            className="fixed inset-0 bg-black/85 backdrop-blur-md touch-none"
           />
 
           {/* Modal Window */}
@@ -260,10 +507,10 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-5xl bg-[#10121a] border border-rose-500/20 rounded-2xl shadow-2xl shadow-rose-950/20 overflow-hidden z-10 my-6 flex flex-col max-h-[92vh]"
+            className="relative w-full max-w-5xl bg-[#10121a] border border-rose-500/20 rounded-2xl shadow-2xl shadow-rose-950/20 overflow-hidden z-10 my-auto flex flex-col max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)]"
           >
             {/* Header */}
-            <div className="p-5 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-rose-950/40 via-purple-950/20 to-transparent">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-rose-950/40 via-purple-950/20 to-transparent shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-rose-600/20 border border-rose-500/30 text-rose-400">
                   <Scissors className="w-5 h-5" />
@@ -301,7 +548,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
           </div>
 
           {/* Scrollable Content Body */}
-          <div className="p-6 overflow-y-auto flex flex-col gap-6 space-y-2">
+          <div className="p-6 overflow-y-auto flex-1 min-h-0 flex flex-col gap-6 space-y-2 overscroll-contain">
             {/* Top Config Row: Settings Grid */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
               {/* Left Column: Timing & Presets (7 cols) */}
@@ -515,89 +762,163 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
               </div>
             </div>
 
-            {/* Vertical Crop Framing / Composition Preset Selector */}
+            {/* Clipping Modes & Framing Presets (Multi-Select 6 Options) */}
             <div className="bg-[#141724] border border-white/5 rounded-xl p-4 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <Scissors className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Vertical Crop Framing (Third-Person View Tuning)</span>
-                </span>
-                <span className="text-[11px] text-slate-400">
-                  Customizes <code className="text-rose-400 font-mono">vertical_crop.mp4</code>
-                </span>
+              {/* Section Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                      <Scissors className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Clipping Modes & Composition Presets</span>
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
+                      selectedModes.length > 0
+                        ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+                        : "bg-red-500/20 text-red-300 border-red-500/40"
+                    }`}>
+                      {selectedModes.length} of 6 selected
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Select which formats to render simultaneously. Multiple modes are processed in a single fast FFmpeg pass.
+                  </p>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllModes}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                  >
+                    All 6 Modes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectAllShorts}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                  >
+                    All Shorts (5)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectDefaultTriple}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                  >
+                    Default Triple (3)
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* Preset 1: Third-Person Wide (Recommended) */}
-                <button
-                  type="button"
-                  onClick={() => setCropPreset("third_person")}
-                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
-                    cropPreset === "third_person"
-                      ? "bg-rose-950/30 border-rose-500/50 text-white shadow-lg shadow-rose-950/20"
-                      : "bg-black/30 border-white/5 text-slate-400 hover:bg-black/50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Third-Person Wide
-                    </span>
-                    <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 font-semibold">
-                      Recommended
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-300 leading-snug">
-                    33.3% blurred top/bottom bars. Middle gameplay window expands 50% wider (911px) to capture character motion and actions.
-                  </span>
-                </button>
+              {/* 6 Modes Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {CLIPPING_MODES.map((mode) => {
+                  const isSelected = selectedModes.includes(mode.id);
+                  const Icon = mode.icon;
+                  return (
+                    <div
+                      key={mode.id}
+                      onClick={() => toggleMode(mode.id)}
+                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 select-none ${
+                        isSelected
+                          ? "bg-rose-950/30 border-rose-500/60 text-white shadow-lg shadow-rose-950/20"
+                          : "bg-black/30 border-white/5 text-slate-400 hover:bg-black/50 hover:border-white/10"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1.5 rounded-lg border ${
+                            isSelected
+                              ? "bg-rose-500/20 border-rose-500/40 text-rose-300"
+                              : "bg-white/5 border-white/5 text-slate-400"
+                          }`}>
+                            <Icon className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className={`text-xs font-bold block ${isSelected ? "text-white" : "text-slate-300"}`}>
+                              {mode.title}
+                            </span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border inline-block mt-0.5 ${mode.badgeColor}`}>
+                              {mode.id === "custom" ? `${Math.round(customBlurPadding * 100)}% Blur Padding` : mode.badge}
+                            </span>
+                          </div>
+                        </div>
 
-                {/* Preset 2: Direct Center Crop */}
-                <button
-                  type="button"
-                  onClick={() => setCropPreset("direct_crop")}
-                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
-                    cropPreset === "direct_crop"
-                      ? "bg-rose-950/30 border-rose-500/50 text-white shadow-lg shadow-rose-950/20"
-                      : "bg-black/30 border-white/5 text-slate-400 hover:bg-black/50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-200">
-                      Direct Center Crop
-                    </span>
-                    <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
-                      Full 9:16 Bleed
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 leading-snug">
-                    0% blur. Traditional tight vertical strip (607px wide) filling the entire 1080x1920 canvas.
-                  </span>
-                </button>
+                        <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                          isSelected
+                            ? "bg-rose-600 border-rose-500 text-white"
+                            : "border-white/20 bg-black/40 text-transparent"
+                        }`}>
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        </div>
+                      </div>
 
-                {/* Preset 3: Cinematic Balanced */}
-                <button
-                  type="button"
-                  onClick={() => setCropPreset("cinematic")}
-                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
-                    cropPreset === "cinematic"
-                      ? "bg-rose-950/30 border-rose-500/50 text-white shadow-lg shadow-rose-950/20"
-                      : "bg-black/30 border-white/5 text-slate-400 hover:bg-black/50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-200">
-                      Cinematic Balanced
-                    </span>
-                    <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
-                      25% Blur
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 leading-snug">
-                    25% subtle top/bottom blur with an 810px center gameplay frame for balanced landscape visibility.
-                  </span>
-                </button>
+                      <p className="text-[11px] text-slate-400 leading-snug line-clamp-3">
+                        {mode.description}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
+
+              {/* Custom Blur Padding Slider (Visible when custom is selected) */}
+              {selectedModes.includes("custom") && (
+                <div className="mt-1 p-3.5 bg-black/40 border border-cyan-500/25 rounded-xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sliders className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-white">
+                        Custom Blur Padding Calibration
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-bold">
+                        {Math.round(customBlurPadding * 100)}% ({customBlurPadding.toFixed(2)})
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono">
+                      Gameplay Width:{" "}
+                      <strong className="text-cyan-300">
+                        {Math.round(607 / (1 - customBlurPadding))}px
+                      </strong>{" "}
+                      / 1080px
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-mono text-slate-400">0% (Tight)</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="0.60"
+                      step="0.01"
+                      value={customBlurPadding}
+                      onChange={(e) => setCustomBlurPadding(parseFloat(e.target.value))}
+                      className="flex-1 accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[10px] font-mono text-slate-400">60% (Wide)</span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>
+                      A higher percentage displays more horizontal width of your original gameplay by adding blurred padding at top and bottom.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomBlurPadding(0.33)}
+                      className="text-cyan-400 hover:text-cyan-300 text-[10px] underline ml-2 shrink-0 cursor-pointer"
+                    >
+                      Reset to 33%
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedModes.length === 0 && (
+                <div className="p-2.5 bg-red-950/30 border border-red-500/30 rounded-lg text-xs text-red-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>Select at least 1 clipping mode above to enable rendering.</span>
+                </div>
+              )}
             </div>
 
             {/* Quality & Output Guarantee Banner */}
@@ -605,10 +926,8 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-rose-400" />
                 <span className="text-slate-300">
-                  <strong className="text-white">Simultaneous Triple Export:</strong> Generates{" "}
-                  <span className="text-rose-400">1. Blurred Portrait</span>,{" "}
-                  <span className="text-rose-400">2. Cropped Portrait</span>, and{" "}
-                  <span className="text-rose-400">3. 16:9 Landscape</span> so you can test and compare.
+                  <strong className="text-white">Single-Pass Multi-Export:</strong> Renders{" "}
+                  <span className="text-rose-400">{selectedModes.length} chosen format{selectedModes.length !== 1 ? "s" : ""}</span> in a consolidated FFmpeg filtergraph pipeline.
                 </span>
               </div>
               <div className="flex items-center gap-2 font-mono text-[11px] text-slate-400">
@@ -654,33 +973,41 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                   <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
                     <CheckCircle2 className="w-4 h-4" />
                     Render finished in {renderResult.render_duration_seconds?.toFixed(1)}s using{" "}
-                    {renderResult.encoder_used}!
+                    {renderResult.encoder_used}! ({renderResult.modes?.length || selectedModes.length} modes ready)
+                  </span>
+                ) : selectedModes.length === 0 ? (
+                  <span className="text-rose-400 font-medium">
+                    Choose at least 1 mode to begin render.
                   </span>
                 ) : (
-                  <span>Ready to render clip from local source video.</span>
+                  <span>Ready to render {selectedModes.length} mode{selectedModes.length > 1 ? "s" : ""} from source video.</span>
                 )}
               </div>
 
               <button
                 type="button"
                 onClick={handleStartRender}
-                disabled={isRendering}
-                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-950/60 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                disabled={isRendering || selectedModes.length === 0}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-950/60 transition-all cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isRendering ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
                     <span>Rendering ({Math.round(renderProgress)}%)...</span>
                   </>
+                ) : selectedModes.length === 0 ? (
+                  <>
+                    <Scissors className="w-4 h-4" />
+                    <span>Select Modes to Render</span>
+                  </>
                 ) : (
                   <>
                     <Scissors className="w-4 h-4" />
-                    <span>Render Dual Shorts + Landscape</span>
+                    <span>Render {selectedModes.length} Selected Mode{selectedModes.length > 1 ? "s" : ""}</span>
                   </>
                 )}
               </button>
             </div>
-
 
             {renderError && (
               <div className="p-3 bg-rose-950/40 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
@@ -694,194 +1021,196 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
               <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-4">
                 {/* View Tabs */}
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-1 p-1 bg-black/40 border border-white/5 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("comparison")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                        activeTab === "comparison"
-                          ? "bg-rose-600 text-white shadow-sm"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      <Columns className="w-3.5 h-3.5" />
-                      <span>Side-by-Side Comparison</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("vertical_blur")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                        activeTab === "vertical_blur"
-                          ? "bg-rose-600 text-white shadow-sm"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      <Smartphone className="w-3.5 h-3.5" />
-                      <span>Blurred Background (9:16)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("vertical_crop")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                        activeTab === "vertical_crop"
-                          ? "bg-rose-600 text-white shadow-sm"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      <Scissors className="w-3.5 h-3.5" />
-                      <span>Direct Center Crop (9:16)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("landscape")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                        activeTab === "landscape"
-                          ? "bg-rose-600 text-white shadow-sm"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      <Monitor className="w-3.5 h-3.5" />
-                      <span>16:9 Landscape</span>
-                    </button>
+                  <div className="flex items-center gap-1 p-1 bg-black/40 border border-white/5 rounded-xl overflow-x-auto max-w-full">
+                    {/* If 2 or more vertical formats exist, offer side-by-side comparison */}
+                    {verticalOutputKeys.length >= 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("comparison")}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer shrink-0 ${
+                          activeTab === "comparison"
+                            ? "bg-rose-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Columns className="w-3.5 h-3.5" />
+                        <span>Side-by-Side Comparison</span>
+                      </button>
+                    )}
+
+                    {/* Dynamic tabs for each rendered output */}
+                    {availableOutputKeys.map((modeKey) => {
+                      const detail = CLIPPING_MODES.find((m) => m.id === modeKey);
+                      const title = detail?.title || modeKey.replace("_", " ");
+                      const Icon = detail?.icon || (modeKey === "landscape" ? Monitor : Smartphone);
+
+                      return (
+                        <button
+                          key={modeKey}
+                          type="button"
+                          onClick={() => setActiveTab(modeKey)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer shrink-0 ${
+                            activeTab === modeKey
+                              ? "bg-rose-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{title}</span>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   <span className="text-xs text-slate-400 font-mono">
-                    Check output quality before selecting your short style
+                    {availableOutputKeys.length} output format{availableOutputKeys.length > 1 ? "s" : ""} ready
                   </span>
                 </div>
 
-                {/* Viewport Display */}
-                {activeTab === "comparison" && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-black/30 p-5 rounded-2xl border border-white/5">
-                    {/* Left: Blurred Top & Bottom */}
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="flex items-center justify-between w-full max-w-[280px] text-xs">
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-rose-400" />
-                          <span>Full Width + Blurred Bars</span>
-                        </span>
-                        <a
-                          href={videoBlurUrl!}
-                          download="vertical_blur.mp4"
-                          className="flex items-center gap-1 text-slate-400 hover:text-white text-[11px]"
+                {/* Side-by-Side Comparison */}
+                {activeTab === "comparison" && verticalOutputKeys.length >= 2 && (
+                  <div className="bg-black/30 p-5 rounded-2xl border border-white/5 flex flex-col gap-4">
+                    {/* Comparison selectors & Play controls */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pb-3 border-b border-white/5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400">Compare:</span>
+                        <select
+                          value={leftCompareMode}
+                          onChange={(e) => setLeftCompareMode(e.target.value)}
+                          className="px-2.5 py-1 bg-black/60 border border-white/10 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-rose-500 cursor-pointer"
                         >
-                          <Download className="w-3 h-3" />
-                          <span>Save MP4</span>
-                        </a>
-                      </div>
-                      <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
-                        <video
-                          ref={blurVideoRef}
-                          src={videoBlurUrl!}
-                          controls
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <p className="text-[11px] text-slate-400 text-center max-w-[280px]">
-                        Preserves 100% of horizontal gameplay frame with aesthetic blurred top and bottom padding.
-                      </p>
-                    </div>
-
-                    {/* Right: Center Crop 9:16 */}
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="flex items-center justify-between w-full max-w-[280px] text-xs">
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <Scissors className="w-3.5 h-3.5 text-rose-400" />
-                          <span>Direct Center Crop (9:16)</span>
-                        </span>
-                        <a
-                          href={videoCropUrl!}
-                          download="vertical_crop.mp4"
-                          className="flex items-center gap-1 text-slate-400 hover:text-white text-[11px]"
+                          {verticalOutputKeys.map((k) => (
+                            <option key={k} value={k}>
+                              Left: {CLIPPING_MODES.find((m) => m.id === k)?.title || k}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-xs text-slate-400 font-bold">vs</span>
+                        <select
+                          value={rightCompareMode}
+                          onChange={(e) => setRightCompareMode(e.target.value)}
+                          className="px-2.5 py-1 bg-black/60 border border-white/10 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-rose-500 cursor-pointer"
                         >
-                          <Download className="w-3 h-3" />
-                          <span>Save MP4</span>
-                        </a>
+                          {verticalOutputKeys.map((k) => (
+                            <option key={k} value={k}>
+                              Right: {CLIPPING_MODES.find((m) => m.id === k)?.title || k}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
-                        <video
-                          ref={cropVideoRef}
-                          src={videoCropUrl!}
-                          controls
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handlePlayBoth}
+                          className="flex items-center gap-1.5 px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shadow-md transition-all active:scale-95 cursor-pointer"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-white" />
+                          <span>Play Both</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePauseBoth}
+                          className="px-3 py-1 bg-black/50 hover:bg-black/80 text-slate-300 text-xs font-medium rounded-lg border border-white/10 transition-colors cursor-pointer"
+                        >
+                          Pause
+                        </button>
                       </div>
-                      <p className="text-[11px] text-slate-400 text-center max-w-[280px]">
-                        Fills the entire mobile screen with center action; cropped sides for maximum focus.
-                      </p>
+                    </div>
+
+                    {/* Dual Players */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Left Player */}
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="flex items-center justify-between w-full max-w-[280px] text-xs">
+                          <span className="font-bold text-white truncate max-w-[190px]">
+                            {CLIPPING_MODES.find((m) => m.id === leftCompareMode)?.title || leftCompareMode}
+                          </span>
+                          {renderedOutputs[leftCompareMode] && (
+                            <a
+                              href={renderedOutputs[leftCompareMode]}
+                              download={`${leftCompareMode}.mp4`}
+                              className="flex items-center gap-1 text-slate-400 hover:text-white text-[11px]"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Save MP4</span>
+                            </a>
+                          )}
+                        </div>
+                        <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
+                          <video
+                            ref={compareLeftVideoRef}
+                            src={renderedOutputs[leftCompareMode]}
+                            controls
+                            playsInline
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 text-center max-w-[280px]">
+                          {CLIPPING_MODES.find((m) => m.id === leftCompareMode)?.description || ""}
+                        </p>
+                      </div>
+
+                      {/* Right Player */}
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="flex items-center justify-between w-full max-w-[280px] text-xs">
+                          <span className="font-bold text-white truncate max-w-[190px]">
+                            {CLIPPING_MODES.find((m) => m.id === rightCompareMode)?.title || rightCompareMode}
+                          </span>
+                          {renderedOutputs[rightCompareMode] && (
+                            <a
+                              href={renderedOutputs[rightCompareMode]}
+                              download={`${rightCompareMode}.mp4`}
+                              className="flex items-center gap-1 text-slate-400 hover:text-white text-[11px]"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Save MP4</span>
+                            </a>
+                          )}
+                        </div>
+                        <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
+                          <video
+                            ref={compareRightVideoRef}
+                            src={renderedOutputs[rightCompareMode]}
+                            controls
+                            playsInline
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 text-center max-w-[280px]">
+                          {CLIPPING_MODES.find((m) => m.id === rightCompareMode)?.description || ""}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {activeTab === "vertical_blur" && (
+                {/* Dedicated Single Player Tab for any selected mode */}
+                {activeTab !== "comparison" && renderedOutputs[activeTab] && (
                   <div className="flex flex-col items-center justify-center p-6 bg-black/30 rounded-2xl border border-white/5 gap-3">
-                    <div className="w-[320px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl">
+                    <div className={`bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl ${
+                      activeTab === "landscape"
+                        ? "w-full max-w-2xl aspect-video"
+                        : "w-[320px] aspect-[9/16]"
+                    }`}>
                       <video
-                        src={videoBlurUrl!}
+                        src={renderedOutputs[activeTab]}
                         controls
                         playsInline
-                        className="w-full h-full object-cover"
+                        className={`w-full h-full ${activeTab === "landscape" ? "object-contain" : "object-cover"}`}
                       />
                     </div>
                     <div className="flex items-center gap-3 text-xs text-slate-300">
-                      <span>1080×1920 • Blurred Background</span>
+                      <span>
+                        {activeTab === "landscape" ? "1920×1080 • Standard Landscape Master" : "1080×1920 • 9:16 Shorts Format"}
+                      </span>
                       <a
-                        href={videoBlurUrl!}
-                        download="vertical_blur.mp4"
+                        href={renderedOutputs[activeTab]}
+                        download={`${activeTab}.mp4`}
                         className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold"
                       >
                         <Download className="w-3.5 h-3.5" />
-                        <span>Download vertical_blur.mp4</span>
-                      </a>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === "vertical_crop" && (
-                  <div className="flex flex-col items-center justify-center p-6 bg-black/30 rounded-2xl border border-white/5 gap-3">
-                    <div className="w-[320px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl">
-                      <video
-                        src={videoCropUrl!}
-                        controls
-                        playsInline
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-slate-300">
-                      <span>1080×1920 • Direct Center Crop</span>
-                      <a
-                        href={videoCropUrl!}
-                        download="vertical_crop.mp4"
-                        className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download vertical_crop.mp4</span>
-                      </a>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === "landscape" && (
-                  <div className="flex flex-col items-center justify-center p-6 bg-black/30 rounded-2xl border border-white/5 gap-3">
-                    <div className="w-full max-w-2xl aspect-video bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl">
-                      <video
-                        src={videoLandscapeUrl!}
-                        controls
-                        playsInline
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-slate-300">
-                      <span>1920×1080 • Standard Landscape Master</span>
-                      <a
-                        href={videoLandscapeUrl!}
-                        download="landscape.mp4"
-                        className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download landscape.mp4</span>
+                        <span>Download {activeTab}.mp4</span>
                       </a>
                     </div>
                   </div>

@@ -40,7 +40,7 @@ def normalize_channel_url(channel_input: str) -> str:
     return f"https://www.youtube.com/@{clean.lstrip('@')}/videos"
 
 
-class YouTubeService:
+class YtdlpService:
     """Service for interacting with YouTube via yt-dlp."""
 
     @staticmethod

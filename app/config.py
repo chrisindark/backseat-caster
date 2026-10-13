@@ -38,6 +38,14 @@ class Settings(BaseSettings):
 
     RENDERS_DIR: str = "./data/renders"
 
+    # YouTube API & OAuth configuration
+    YOUTUBE_CLIENT_SECRETS_FILE: str = "./data/client_secrets.json"
+    YOUTUBE_TOKEN_FILE: str = "./data/youtube_token.json"
+    YOUTUBE_CLIENT_ID: str | None = None
+    YOUTUBE_CLIENT_SECRET: str | None = None
+    YOUTUBE_REFRESH_TOKEN: str | None = None
+    YOUTUBE_REDIRECT_URI: str = "http://localhost:8000/api/v1/youtube/auth/callback"
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
@@ -52,15 +60,26 @@ class Settings(BaseSettings):
 
     @property
     def downloads_path(self) -> Path:
-        path = Path(self.DOWNLOADS_DIR).resolve()
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+        return Path(self.DOWNLOADS_DIR).resolve()
 
     @property
     def renders_path(self) -> Path:
-        path = Path(self.RENDERS_DIR).resolve()
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+        return Path(self.RENDERS_DIR).resolve()
+
+    @property
+    def youtube_token_path(self) -> Path:
+        return Path(self.YOUTUBE_TOKEN_FILE).resolve()
+
+    @property
+    def youtube_client_secrets_path(self) -> Path:
+        return Path(self.YOUTUBE_CLIENT_SECRETS_FILE).resolve()
+
+    def ensure_directories(self) -> None:
+        """Ensure all runtime directories and parent folders exist."""
+        self.downloads_path.mkdir(parents=True, exist_ok=True)
+        self.renders_path.mkdir(parents=True, exist_ok=True)
+        self.youtube_token_path.parent.mkdir(parents=True, exist_ok=True)
+        self.youtube_client_secrets_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 settings = Settings()

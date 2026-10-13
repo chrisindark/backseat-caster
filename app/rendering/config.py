@@ -13,6 +13,21 @@ CROP_PADDING_PRESETS: dict[str, float] = {
     "direct_crop": 0.0,  # 0% blur (traditional 100% full-height center crop)
 }
 
+ALL_CLIPPING_MODES: list[str] = [
+    "landscape",
+    "vertical_blur",
+    "third_person",
+    "direct_crop",
+    "cinematic",
+    "custom",
+]
+
+DEFAULT_CLIPPING_MODES: list[str] = [
+    "landscape",
+    "vertical_blur",
+    "third_person",
+]
+
 QUALITY_PRESETS: dict[str, dict[str, Any]] = {
     "high": {  # Balanced broadcast/studio fidelity (~35-40 MB/min, matches 1080p source)
         "videotoolbox_bitrate": "5M",

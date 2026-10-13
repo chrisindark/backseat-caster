@@ -21,10 +21,17 @@ from app.schemas.render import (
     RenderClipRequest,
     RenderClipResponse,
     RenderJobResponse,
+    RenderJobUpdateRequest,
     UploadSelectionRequest,
 )
+from app.worker import helpers
 from app.worker.celery_app import celery_app
-from app.worker.helpers import is_celery_broker_online
+
+
+def is_celery_broker_online() -> bool:
+    """Check whether Celery broker is online, delegating dynamically to helpers."""
+    return helpers.is_celery_broker_online()
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,29 +46,45 @@ class RenderService:
         """Ensure manifest contains streamable paths for media and manifest endpoints."""
         cid = clip_id or manifest.get("clip_id") or ""
         prefix = settings.API_PREFIX
-        landscape_stream = f"{prefix}/renders/{cid}/stream/landscape"
-        vert_blur_stream = f"{prefix}/renders/{cid}/stream/vertical_blur"
-        vert_crop_stream = f"{prefix}/renders/{cid}/stream/vertical_crop"
         manifest_stream = f"{prefix}/renders/{cid}/stream/manifest"
-
-        manifest["landscape_path"] = landscape_stream
-        manifest["vertical_blur_path"] = vert_blur_stream
-        manifest["vertical_crop_path"] = vert_crop_stream
         manifest["manifest_path"] = manifest_stream
 
         outputs = manifest.get("outputs", {})
         if isinstance(outputs, dict):
-            if "landscape" in outputs and isinstance(outputs["landscape"], dict):
-                outputs["landscape"]["path"] = landscape_stream
-            if "vertical_blur" in outputs and isinstance(
-                outputs["vertical_blur"], dict
-            ):
-                outputs["vertical_blur"]["path"] = vert_blur_stream
-            if "vertical_crop" in outputs and isinstance(
-                outputs["vertical_crop"], dict
-            ):
-                outputs["vertical_crop"]["path"] = vert_crop_stream
+            for mode_key, mode_meta in outputs.items():
+                if isinstance(mode_meta, dict):
+                    mode_meta["path"] = f"{prefix}/renders/{cid}/stream/{mode_key}"
             manifest["outputs"] = outputs
+
+        # Legacy top-level paths for backwards compatibility
+        if "landscape" in outputs or "landscape_path" not in manifest:
+            manifest["landscape_path"] = f"{prefix}/renders/{cid}/stream/landscape"
+
+        if "vertical_blur" in outputs or "vertical_blur_path" not in manifest:
+            manifest["vertical_blur_path"] = (
+                f"{prefix}/renders/{cid}/stream/vertical_blur"
+            )
+
+        crop_candidates = [
+            m
+            for m in (
+                "vertical_crop",
+                "third_person",
+                "direct_crop",
+                "cinematic",
+                "custom",
+            )
+            if m in outputs
+        ]
+        if crop_candidates:
+            primary_crop = crop_candidates[0]
+            manifest["vertical_crop_path"] = (
+                f"{prefix}/renders/{cid}/stream/{primary_crop}"
+            )
+        elif "vertical_crop_path" not in manifest:
+            manifest["vertical_crop_path"] = (
+                f"{prefix}/renders/{cid}/stream/vertical_crop"
+            )
 
         if "source" not in manifest and "source_file" in manifest:
             source_meta = manifest.get("source_metadata", {})
@@ -113,6 +136,29 @@ class RenderService:
             Path(request.narration_path).resolve() if request.narration_path else None
         )
 
+        resolved_modes = request.modes
+        if not resolved_modes:
+            resolved_modes = [
+                "landscape",
+                "vertical_blur",
+                request.crop_preset or "third_person",
+            ]
+
+        clean_modes: list[str] = []
+        for m in resolved_modes:
+            if m not in clean_modes and m in (
+                "landscape",
+                "vertical_blur",
+                "third_person",
+                "direct_crop",
+                "cinematic",
+                "custom",
+                "vertical_crop",
+            ):
+                clean_modes.append(m)
+        if not clean_modes:
+            clean_modes = ["landscape", "vertical_blur", "third_person"]
+
         job_id = uuid.uuid4()
         job = RenderJob(
             id=str(job_id),
@@ -135,6 +181,7 @@ class RenderService:
                 if request.crop_blur_padding is not None
                 else 0.3333
             ),
+            modes=",".join(clean_modes),
             overwrite=request.overwrite,
         )
         db.add(job)
@@ -142,6 +189,31 @@ class RenderService:
         db.refresh(job)
 
         prefix = settings.API_PREFIX
+        stream_outputs = {
+            m: f"{prefix}/renders/{clip_id}/stream/{m}" for m in clean_modes
+        }
+
+        # Resolve primary crop mode stream url for backwards compatibility
+        primary_crop = next(
+            (
+                m
+                for m in clean_modes
+                if m
+                in (
+                    "third_person",
+                    "direct_crop",
+                    "cinematic",
+                    "custom",
+                    "vertical_crop",
+                )
+            ),
+            None,
+        )
+        vert_crop_stream = (
+            f"{prefix}/renders/{clip_id}/stream/{primary_crop}"
+            if primary_crop
+            else None
+        )
 
         if request.sync:
             RenderService.execute_render_job(job.id, db_session=db)
@@ -155,15 +227,24 @@ class RenderService:
                 progress=job.progress,
                 output_dir=job.output_dir or str(out_dir),
                 landscape_path=job.landscape_path
-                or f"{prefix}/renders/{clip_id}/stream/landscape",
+                or (
+                    f"{prefix}/renders/{clip_id}/stream/landscape"
+                    if "landscape" in clean_modes
+                    else None
+                ),
                 vertical_blur_path=job.vertical_blur_path
-                or f"{prefix}/renders/{clip_id}/stream/vertical_blur",
-                vertical_crop_path=job.vertical_crop_path
-                or f"{prefix}/renders/{clip_id}/stream/vertical_crop",
+                or (
+                    f"{prefix}/renders/{clip_id}/stream/vertical_blur"
+                    if "vertical_blur" in clean_modes
+                    else None
+                ),
+                vertical_crop_path=job.vertical_crop_path or vert_crop_stream,
                 manifest_path=job.manifest_path
                 or f"{prefix}/renders/{clip_id}/stream/manifest",
                 encoder_used=job.encoder_used,
                 render_duration_seconds=job.render_duration_seconds,
+                modes=clean_modes,
+                outputs=stream_outputs,
                 message="Clip rendered successfully (synchronous).",
             )
 
@@ -202,10 +283,16 @@ class RenderService:
             status="pending",
             progress=0.0,
             output_dir=str(out_dir),
-            landscape_path=f"{prefix}/renders/{clip_id}/stream/landscape",
-            vertical_blur_path=f"{prefix}/renders/{clip_id}/stream/vertical_blur",
-            vertical_crop_path=f"{prefix}/renders/{clip_id}/stream/vertical_crop",
+            landscape_path=f"{prefix}/renders/{clip_id}/stream/landscape"
+            if "landscape" in clean_modes
+            else None,
+            vertical_blur_path=f"{prefix}/renders/{clip_id}/stream/vertical_blur"
+            if "vertical_blur" in clean_modes
+            else None,
+            vertical_crop_path=vert_crop_stream,
             manifest_path=f"{prefix}/renders/{clip_id}/stream/manifest",
+            modes=clean_modes,
+            outputs=stream_outputs,
             message="Render job queued successfully"
             + (" via Celery" if dispatched_to_celery else " in background worker"),
         )
@@ -236,6 +323,16 @@ class RenderService:
     ) -> RenderJobResponse:
         """Construct RenderJobResponse schema from database model and related Video metadata."""
         prefix = settings.API_PREFIX
+        job_modes = (
+            [m.strip() for m in job.modes.split(",") if m.strip()]
+            if job.modes
+            else (["landscape", "vertical_blur", job.crop_preset or "third_person"])
+        )
+        stream_outputs = {}
+        if job.status == "completed":
+            for m in job_modes:
+                stream_outputs[m] = f"{prefix}/renders/{job.clip_id}/stream/{m}"
+
         return RenderJobResponse(
             job_id=job.id,
             clip_id=job.clip_id,
@@ -252,13 +349,13 @@ class RenderService:
             landscape_path=job.landscape_path
             or (
                 f"{prefix}/renders/{job.clip_id}/stream/landscape"
-                if job.status == "completed"
+                if job.status == "completed" and "landscape" in job_modes
                 else None
             ),
             vertical_blur_path=job.vertical_blur_path
             or (
                 f"{prefix}/renders/{job.clip_id}/stream/vertical_blur"
-                if job.status == "completed"
+                if job.status == "completed" and "vertical_blur" in job_modes
                 else None
             ),
             vertical_crop_path=job.vertical_crop_path
@@ -283,6 +380,16 @@ class RenderService:
             is_selected_for_upload=bool(job.is_selected_for_upload),
             selected_format=job.selected_format,
             upload_metadata=job.upload_metadata,
+            modes=job_modes,
+            outputs=stream_outputs,
+            youtube_video_id=job.youtube_video_id,
+            youtube_upload_status=job.youtube_upload_status or "not_uploaded",
+            youtube_upload_progress=job.youtube_upload_progress or 0.0,
+            youtube_upload_url=job.youtube_upload_url,
+            youtube_uploaded_at=job.youtube_uploaded_at.isoformat()
+            if job.youtube_uploaded_at
+            else None,
+            youtube_upload_error=job.youtube_upload_error,
             created_at=job.created_at.isoformat() if job.created_at else None,
             updated_at=job.updated_at.isoformat() if job.updated_at else None,
             completed_at=job.completed_at.isoformat() if job.completed_at else None,
@@ -369,6 +476,39 @@ class RenderService:
                 execute_render_job(job.id)
 
         return RenderService.get_render_status(db=db, target_id=job.id)
+
+    @staticmethod
+    def update_render_job(
+        db: Session,
+        job_id: str,
+        request: RenderJobUpdateRequest,
+    ) -> RenderJobResponse | None:
+        """Update fields on an existing RenderJob record."""
+        job = (
+            db.query(RenderJob)
+            .filter((RenderJob.id == job_id) | (RenderJob.clip_id == job_id))
+            .first()
+        )
+        if not job:
+            return None
+
+        update_data = request.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(job, field, value)
+
+        job.updated_at = datetime.now(UTC)
+        if job.status == "completed" and not job.completed_at:
+            job.completed_at = datetime.now(UTC)
+
+        db.commit()
+        db.refresh(job)
+
+        return RenderService.get_render_status(db=db, target_id=job.id)
+
+    @staticmethod
+    def delete_render_job(db: Session, job_id: str) -> dict[str, Any] | None:
+        """Delete a render job by ID, including disk files and DB records."""
+        return RenderService.delete_render(db=db, clip_id=job_id)
 
     @staticmethod
     def get_render_status(db: Session, target_id: str) -> RenderJobResponse | None:
@@ -528,6 +668,16 @@ class RenderService:
         )
         deleted_jobs_count = len(jobs)
         for j in jobs:
+            if not deleted_files and j.clip_id:
+                alt_dir = renders_root / j.clip_id
+                if alt_dir.exists() and alt_dir.is_dir():
+                    shutil.rmtree(alt_dir)
+                    deleted_files = True
+            if not deleted_files and j.output_dir:
+                out_p = Path(j.output_dir)
+                if out_p.exists() and out_p.is_dir():
+                    shutil.rmtree(out_p)
+                    deleted_files = True
             db.delete(j)
         db.commit()
 
@@ -543,6 +693,54 @@ class RenderService:
         }
 
     @staticmethod
+    def bulk_delete_renders(db: Session, clip_ids: list[str]) -> dict[str, Any]:
+        """Bulk delete rendered clips and their associated RenderJob records from disk and DB."""
+        renders_root = settings.renders_path
+        deleted_clip_ids: list[str] = []
+        failed_clip_ids: list[str] = []
+        not_found_clip_ids: list[str] = []
+
+        for cid in clip_ids:
+            try:
+                clip_dir = renders_root / cid
+                deleted_files = False
+                if clip_dir.exists() and clip_dir.is_dir():
+                    shutil.rmtree(clip_dir)
+                    deleted_files = True
+
+                jobs = (
+                    db.query(RenderJob)
+                    .filter((RenderJob.clip_id == cid) | (RenderJob.id == cid))
+                    .all()
+                )
+                deleted_jobs_count = len(jobs)
+                for j in jobs:
+                    db.delete(j)
+
+                if deleted_files or deleted_jobs_count > 0:
+                    deleted_clip_ids.append(cid)
+                else:
+                    not_found_clip_ids.append(cid)
+            except Exception as e:
+                logger.error("Failed to delete render %s: %s", cid, e)
+                failed_clip_ids.append(cid)
+
+        try:
+            db.commit()
+        except Exception as commit_err:
+            logger.error("Failed to commit bulk delete transaction: %s", commit_err)
+            db.rollback()
+
+        return {
+            "deleted_clip_ids": deleted_clip_ids,
+            "failed_clip_ids": failed_clip_ids,
+            "not_found_clip_ids": not_found_clip_ids,
+            "deleted_count": len(deleted_clip_ids),
+            "total_requested": len(clip_ids),
+            "message": f"Successfully deleted {len(deleted_clip_ids)} of {len(clip_ids)} render(s)",
+        }
+
+    @staticmethod
     def update_upload_selection(
         db: Session, clip_id: str, request: UploadSelectionRequest
     ) -> dict[str, Any]:
@@ -555,13 +753,13 @@ class RenderService:
             "title": request.title,
             "description": request.description,
             "tags": request.tags or [],
-            "privacy": request.privacy or "private",
+            "privacy": request.privacy or "public",
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
         if manifest_file.exists():
             try:
-                with open(manifest_file, "r") as f:
+                with open(manifest_file) as f:
                     manifest_data = json.load(f)
                 manifest_data["upload_selection"] = upload_dict
                 with open(manifest_file, "w") as f:
@@ -611,10 +809,19 @@ class RenderService:
         Raises ValueError if video_type is invalid.
         Raises FileNotFoundError if media file is missing.
         """
-        valid_types = ("landscape", "vertical_blur", "vertical_crop", "manifest")
+        valid_types = (
+            "landscape",
+            "vertical_blur",
+            "vertical_crop",
+            "third_person",
+            "direct_crop",
+            "cinematic",
+            "custom",
+            "manifest",
+        )
         if video_type not in valid_types:
             raise ValueError(
-                f"Invalid video type '{video_type}'. Must be 'landscape', 'vertical_blur', 'vertical_crop', or 'manifest'."
+                f"Invalid video type '{video_type}'. Must be one of {valid_types}."
             )
 
         renders_root = settings.renders_path
@@ -624,6 +831,14 @@ class RenderService:
             filename = f"{clip_id}_manifest.json"
         else:
             target_path = renders_root / clip_id / f"{video_type}.mp4"
+            # Fallback for vertical_crop if vertical_crop.mp4 is not present but a specific preset is
+            if video_type == "vertical_crop" and not target_path.exists():
+                for alt in ("third_person", "direct_crop", "cinematic", "custom"):
+                    candidate = renders_root / clip_id / f"{alt}.mp4"
+                    if candidate.exists():
+                        target_path = candidate
+                        break
+
             media_type = "video/mp4"
             filename = f"{clip_id}_{video_type}.mp4"
 
@@ -698,6 +913,12 @@ class RenderService:
                 except Exception as prog_err:
                     logger.warning("Error recording render job progress: %s", prog_err)
 
+            job_modes = (
+                [m.strip() for m in job.modes.split(",") if m.strip()]
+                if job.modes
+                else None
+            )
+
             result = engine.render_clip(
                 source_path=source_file,
                 start_seconds=job.start_seconds,
@@ -708,6 +929,7 @@ class RenderService:
                 overwrite=job.overwrite,
                 crop_preset=job.crop_preset,
                 crop_blur_padding=job.crop_blur_padding,
+                modes=job_modes,
                 progress_callback=on_progress,
             )
 
@@ -715,13 +937,9 @@ class RenderService:
             job.status = "completed"
             job.progress = 100.0
             job.output_dir = str(out_dir)
-            job.landscape_path = f"{prefix}/renders/{job.clip_id}/stream/landscape"
-            job.vertical_blur_path = (
-                f"{prefix}/renders/{job.clip_id}/stream/vertical_blur"
-            )
-            job.vertical_crop_path = (
-                f"{prefix}/renders/{job.clip_id}/stream/vertical_crop"
-            )
+            job.landscape_path = result.landscape_path or None
+            job.vertical_blur_path = result.vertical_blur_path or None
+            job.vertical_crop_path = result.vertical_crop_path or None
             job.manifest_path = f"{prefix}/renders/{job.clip_id}/stream/manifest"
             job.encoder_used = result.encoder_used
             job.render_duration_seconds = result.render_duration_seconds
@@ -791,3 +1009,44 @@ def render_clip_celery_task(self, job_id: str):
         self.request.id,
     )
     return RenderService.execute_render_job(job_id=job_id, celery_task_instance=self)
+
+
+def execute_bulk_delete_job(
+    clip_ids: list[str],
+    celery_task_instance=None,
+    db_session: Session | None = None,
+) -> dict[str, Any]:
+    """Execute bulk render deletion outside a request context."""
+    db = db_session
+    is_external_session = db_session is not None
+    if db is None:
+        db = get_task_db_session()
+
+    try:
+        result = RenderService.bulk_delete_renders(db=db, clip_ids=clip_ids)
+        return result
+    finally:
+        import sys
+
+        main_mod = sys.modules.get("app.main")
+        fastapi_app = getattr(main_mod, "app", None) if main_mod else None
+        from app.database import get_db
+
+        is_overridden = bool(
+            fastapi_app
+            and hasattr(fastapi_app, "dependency_overrides")
+            and get_db in fastapi_app.dependency_overrides
+        )
+        if not is_external_session and not is_overridden:
+            db.close()
+
+
+@celery_app.task(bind=True, name="bulk_delete_renders_task")
+def bulk_delete_renders_celery_task(self, clip_ids: list[str]):
+    """Celery task for bulk deleting render clips."""
+    logger.info(
+        "Celery task started: bulk deleting %d renders (task_id: %s)",
+        len(clip_ids),
+        self.request.id,
+    )
+    return execute_bulk_delete_job(clip_ids=clip_ids, celery_task_instance=self)

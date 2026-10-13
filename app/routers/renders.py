@@ -3,19 +3,27 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.responses import BaseResponse
 from app.database import get_db
 from app.schemas.render import (
+    BulkDeleteRendersRequest,
+    BulkDeleteRendersResponse,
     RenderClipRequest,
     RenderClipResponse,
     RenderJobResponse,
+    RenderJobUpdateRequest,
     UploadSelectionRequest,
 )
-from app.services.renders import RenderService
+from app.services.renders import (
+    RenderService,
+    bulk_delete_renders_celery_task,
+    execute_bulk_delete_job,
+    is_celery_broker_online,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +64,22 @@ def create_render(
         raise HTTPException(
             status_code=500, detail=f"Failed to create render job: {e!s}"
         )
+
+
+@router.post(
+    "/jobs",
+    response_model=BaseResponse[RenderClipResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+def create_render_job(
+    request: RenderClipRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger rendering of a local gameplay clip (RESTful alias for POST /renders).
+    """
+    return create_render(request=request, background_tasks=background_tasks, db=db)
 
 
 @router.get("/jobs", response_model=BaseResponse[dict[str, Any]])
@@ -130,6 +154,53 @@ def get_render_job(job_id: str, db: Session = Depends(get_db)):
         )
 
 
+@router.patch("/jobs/{job_id}", response_model=BaseResponse[RenderJobResponse])
+@router.put("/jobs/{job_id}", response_model=BaseResponse[RenderJobResponse])
+def update_render_job(
+    job_id: str,
+    request: RenderJobUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Update fields on a specific render job."""
+    try:
+        updated = RenderService.update_render_job(db=db, job_id=job_id, request=request)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Render job '{job_id}' not found",
+            )
+        return BaseResponse.success_response(response=updated)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update render job %s: %s", job_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update render job: {e!s}",
+        )
+
+
+@router.delete("/jobs/{job_id}", response_model=BaseResponse[dict[str, Any]])
+def delete_render_job(job_id: str, db: Session = Depends(get_db)):
+    """Delete a specific render job and its associated files."""
+    try:
+        result = RenderService.delete_render_job(db=db, job_id=job_id)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Render job '{job_id}' not found",
+            )
+        return BaseResponse.success_response(response=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete render job %s: %s", job_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete render job: {e!s}",
+        )
+
+
 @router.get("/{clip_id}/status", response_model=BaseResponse[RenderJobResponse])
 def get_clip_render_status(clip_id: str, db: Session = Depends(get_db)):
     """Check status and progress for a clip by clip_id or job_id."""
@@ -164,6 +235,58 @@ def list_renders(
     except Exception as e:
         logger.exception("Failed to list renders: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to list renders: {e!s}")
+
+
+@router.post("/bulk-delete", response_model=BaseResponse[BulkDeleteRendersResponse])
+@router.delete("/bulk", response_model=BaseResponse[BulkDeleteRendersResponse])
+@router.delete("", response_model=BaseResponse[BulkDeleteRendersResponse])
+def bulk_delete_renders(
+    request: BulkDeleteRendersRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Bulk delete rendered clips and their associated database job records.
+    Supports synchronous deletion or asynchronous background / Celery task dispatch.
+    """
+    try:
+        if request.sync:
+            result = RenderService.bulk_delete_renders(db=db, clip_ids=request.clip_ids)
+            return BaseResponse.success_response(response=result)
+
+        if is_celery_broker_online():
+            task = bulk_delete_renders_celery_task.delay(request.clip_ids)
+            return BaseResponse.success_response(
+                response={
+                    "deleted_clip_ids": [],
+                    "failed_clip_ids": [],
+                    "not_found_clip_ids": [],
+                    "deleted_count": 0,
+                    "total_requested": len(request.clip_ids),
+                    "task_id": task.id,
+                    "message": f"Dispatched bulk delete for {len(request.clip_ids)} render(s) via Celery",
+                }
+            )
+
+        background_tasks.add_task(execute_bulk_delete_job, clip_ids=request.clip_ids)
+        return BaseResponse.success_response(
+            response={
+                "deleted_clip_ids": [],
+                "failed_clip_ids": [],
+                "not_found_clip_ids": [],
+                "deleted_count": 0,
+                "total_requested": len(request.clip_ids),
+                "task_id": None,
+                "message": f"Queued bulk delete for {len(request.clip_ids)} render(s) in background worker",
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to execute bulk delete: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to execute bulk delete: {e!s}"
+        )
 
 
 @router.delete("/{clip_id}", response_model=BaseResponse[dict[str, Any]])

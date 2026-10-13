@@ -11,7 +11,7 @@ from app.config import settings
 from app.core.logger import setup_logger
 from app.core.middlewares import CorrelationIdMiddleware
 from app.core.responses import BaseResponse, register_exception_handlers
-from app.routers import renders_router, videos_router
+from app.routers import renders_router, videos_router, youtube_router
 
 # Initialize the custom colored logger with correlation ID
 setup_logger()
@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ensure local storage directories exist
-    settings.downloads_path.mkdir(parents=True, exist_ok=True)
-    settings.renders_path.mkdir(parents=True, exist_ok=True)
+    settings.ensure_directories()
     logger.info(
         "BackseatCaster API initialized. Downloads: %s, Renders: %s",
         settings.downloads_path,
@@ -83,6 +82,7 @@ def health_check():
 # Register routers
 app.include_router(videos_router, prefix=settings.API_PREFIX)
 app.include_router(renders_router, prefix=settings.API_PREFIX)
+app.include_router(youtube_router, prefix=settings.API_PREFIX)
 
 
 if __name__ == "__main__":

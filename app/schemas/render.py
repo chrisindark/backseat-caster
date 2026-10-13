@@ -1,5 +1,15 @@
 from pydantic import BaseModel, Field
 
+VALID_RENDER_MODES = {
+    "landscape",
+    "vertical_blur",
+    "third_person",
+    "direct_crop",
+    "cinematic",
+    "custom",
+    "vertical_crop",
+}
+
 
 class RenderClipRequest(BaseModel):
     video_id: str
@@ -23,6 +33,10 @@ class RenderClipRequest(BaseModel):
         le=0.6,
         description="Custom top/bottom blur padding ratio (0.0 to 0.6). If omitted, uses crop_preset value.",
     )
+    modes: list[str] | None = Field(
+        None,
+        description="List of modes to render: 'landscape', 'vertical_blur', 'third_person', 'direct_crop', 'cinematic', 'custom'. Defaults to ['landscape', 'vertical_blur', crop_preset or 'third_person'].",
+    )
     sync: bool = Field(
         False,
         description="If True, wait for render to finish synchronously before returning.",
@@ -42,6 +56,8 @@ class RenderClipResponse(BaseModel):
     encoder_used: str | None = None
     render_duration_seconds: float | None = None
     error_message: str | None = None
+    modes: list[str] = Field(default_factory=list)
+    outputs: dict[str, str] = Field(default_factory=dict)
     message: str
 
 
@@ -72,6 +88,14 @@ class RenderJobResponse(BaseModel):
     is_selected_for_upload: bool = False
     selected_format: str | None = None
     upload_metadata: str | None = None
+    modes: list[str] = Field(default_factory=list)
+    outputs: dict[str, str] = Field(default_factory=dict)
+    youtube_video_id: str | None = None
+    youtube_upload_status: str | None = "not_uploaded"
+    youtube_upload_progress: float | None = 0.0
+    youtube_upload_url: str | None = None
+    youtube_uploaded_at: str | None = None
+    youtube_upload_error: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     completed_at: str | None = None
@@ -88,5 +112,79 @@ class UploadSelectionRequest(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     privacy: str | None = Field(
-        "private", description="'private', 'unlisted', or 'public'"
+        "public", description="'private', 'unlisted', or 'public'"
+    )
+
+
+class BulkDeleteRendersRequest(BaseModel):
+    clip_ids: list[str] = Field(
+        ..., min_length=1, description="List of clip IDs or job IDs to delete"
+    )
+    sync: bool = Field(
+        True,
+        description="Whether to perform deletion synchronously or dispatch to background task / Celery",
+    )
+
+
+class BulkDeleteRendersResponse(BaseModel):
+    deleted_clip_ids: list[str] = Field(default_factory=list)
+    failed_clip_ids: list[str] = Field(default_factory=list)
+    not_found_clip_ids: list[str] = Field(default_factory=list)
+    deleted_count: int = 0
+    total_requested: int = 0
+    task_id: str | None = None
+    message: str
+
+
+class RenderJobUpdateRequest(BaseModel):
+    status: str | None = Field(
+        None,
+        description="Job lifecycle status: 'pending', 'rendering', 'completed', or 'failed'",
+    )
+    progress: float | None = Field(
+        None,
+        ge=0.0,
+        le=100.0,
+        description="Render progress percentage (0.0 to 100.0)",
+    )
+    error_message: str | None = Field(None, description="Error details if job failed")
+    crop_preset: str | None = Field(
+        None,
+        description="Vertical crop layout preset: 'third_person', 'direct_crop', 'cinematic', or 'custom'",
+    )
+    crop_blur_padding: float | None = Field(
+        None,
+        ge=0.0,
+        le=0.6,
+        description="Top/bottom blur padding ratio (0.0 to 0.6)",
+    )
+    is_selected_for_upload: bool | None = Field(
+        None, description="Whether clip is staged for YouTube upload"
+    )
+    selected_format: str | None = Field(
+        None,
+        description="Selected video format: 'vertical_blur', 'vertical_crop', or 'landscape'",
+    )
+    upload_metadata: str | None = Field(
+        None,
+        description="Serialized JSON metadata for upload (title, description, tags, privacy)",
+    )
+    youtube_video_id: str | None = Field(
+        None, description="YouTube Video ID once uploaded"
+    )
+    youtube_upload_status: str | None = Field(
+        None,
+        description="YouTube upload status: 'not_uploaded', 'uploading', 'completed', 'failed'",
+    )
+    youtube_upload_progress: float | None = Field(
+        None,
+        ge=0.0,
+        le=100.0,
+        description="YouTube upload progress percentage",
+    )
+    youtube_upload_url: str | None = Field(
+        None, description="YouTube watch URL once uploaded"
+    )
+    youtube_upload_error: str | None = Field(
+        None, description="YouTube upload error message"
     )

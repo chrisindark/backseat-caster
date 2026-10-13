@@ -31,7 +31,6 @@ export const YouTubeVideoCard: React.FC<YouTubeVideoCardProps> = ({
   onToggleSelect,
   onPreview,
 }) => {
-  const isHighPriority = index < 4;
   const isInLibrary = video.is_in_database;
 
   return (
@@ -52,8 +51,6 @@ export const YouTubeVideoCard: React.FC<YouTubeVideoCardProps> = ({
         <img
           src={video.thumbnail_url || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`}
           alt={video.title}
-          fetchPriority={isHighPriority ? "high" : undefined}
-          loading={isHighPriority ? "eager" : "lazy"}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 cursor-pointer"
           onClick={() => onPreview(video)}
         />

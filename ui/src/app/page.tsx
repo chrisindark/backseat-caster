@@ -1,20 +1,16 @@
 "use client";
 
-import { ClipStudioModal } from "@/components/ClipStudioModal";
 import { Navbar } from "@/components/Navbar";
 import { Pagination } from "@/components/Pagination";
 import { StatsBar } from "@/components/StatsBar";
 import { VideoCard } from "@/components/VideoCard";
-import { VideoModal } from "@/components/VideoModal";
 import {
   checkBackendHealth,
   deleteVideoDownload,
   downloadVideo,
-  fetchVideo,
   fetchVideos,
   syncChannel,
 } from "@/lib/api";
-import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import { VideoItem } from "@/types/video";
 import {
   AlertCircle,
@@ -41,19 +37,37 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [backendHealthy, setBackendHealthy] = useState<boolean>(true);
-  const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null);
-  const [clipStudioVideo, setClipStudioVideo] = useState<VideoItem | null>(null);
-  const [clipInitialStartTime, setClipInitialStartTime] = useState<number>(0);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [downloadedTotal, setDownloadedTotal] = useState<number>(0);
+  const [cataloguedTotal, setCataloguedTotal] = useState<number>(0);
 
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    };
+  }, []);
+
+  const refreshCounts = useCallback(async () => {
+    try {
+      const [dlData, allData] = await Promise.all([
+        fetchVideos({ status: "downloaded", limit: 1 }),
+        fetchVideos({ status: "all", limit: 1 }),
+      ]);
+      setDownloadedTotal(dlData.total);
+      setCataloguedTotal(allData.total);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Load videos from backend
   const loadVideos = useCallback(
     async (currentPage = page, currentLimit = limit, currentFilter = activeFilter, currentSearch = searchQuery) => {
-      console.log("loadVideos");
       try {
         const data = await fetchVideos({
           page: currentPage,
@@ -67,6 +81,12 @@ export default function HomePage() {
         setTotalPages(data.total_pages);
         if (data.channel_title) {
           setChannelTitle(data.channel_title);
+        }
+
+        if (currentFilter === "all" && !currentSearch) {
+          setCataloguedTotal(data.total);
+        } else if (currentFilter === "downloaded" && !currentSearch) {
+          setDownloadedTotal(data.total);
         }
 
         // Check if any video is actively downloading
@@ -90,7 +110,6 @@ export default function HomePage() {
 
   // Handle Sync channel action
   const handleSync = useCallback(async () => {
-    console.log("handleSync");
     setIsSyncing(true);
     setSyncMessage(null);
     try {
@@ -102,118 +121,31 @@ export default function HomePage() {
       }
       await loadVideos(1, limit, activeFilter, searchQuery);
       setPage(1);
+      refreshCounts();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       setSyncMessage(`Sync failed: ${message}`);
     } finally {
       setIsSyncing(false);
-      setTimeout(() => setSyncMessage(null), 5000);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(() => setSyncMessage(null), 5000);
     }
-  }, [channelInput, limit, page, activeFilter, searchQuery, loadVideos]);
+  }, [channelInput, limit, page, activeFilter, searchQuery, loadVideos, refreshCounts]);
 
-  // Modal handlers with browser history tracking
-  const openVideoModal = useCallback((video: VideoItem) => {
-    setSelectedVideo(video);
-    setClipStudioVideo(null);
-    setQueryParams({ video: video.id, clip: null, start: null });
-  }, []);
-
-  const closeVideoModal = useCallback(() => {
-    setSelectedVideo(null);
-    setQueryParams({ video: null });
-  }, []);
-
-  const openClipStudioModal = useCallback((video: VideoItem, initialStartTime = 0) => {
-    setClipStudioVideo(video);
-    setClipInitialStartTime(initialStartTime);
-    setSelectedVideo(null);
-    setQueryParams({
-      clip: video.id,
-      start: initialStartTime > 0 ? String(initialStartTime) : null,
-      video: null,
-    });
-  }, []);
-
-  const closeClipStudioModal = useCallback(() => {
-    setClipStudioVideo(null);
-    setQueryParams({ clip: null, start: null });
-  }, []);
-
-  const videosRef = useRef<VideoItem[]>(videos);
+  // Initial check & load library videos
   useEffect(() => {
-    videosRef.current = videos;
-  }, [videos]);
-
-  // Sync modal state from browser URL (e.g. on reload or Back/Forward navigation)
-  const syncModalsFromUrl = useCallback(
-    async (itemsList?: VideoItem[]) => {
-      const clipId = getQueryParam("clip") || getQueryParam("clipVideoId");
-      const startParam = getQueryParam("start") || getQueryParam("startTime");
-      const videoId = getQueryParam("video") || getQueryParam("videoId");
-
-      if (clipId) {
-        const parsedStart = startParam ? parseFloat(startParam) || 0 : 0;
-        setClipInitialStartTime(parsedStart);
-        setSelectedVideo(null);
-
-        const list = itemsList || videosRef.current;
-        const found = list.find((v) => v.id === clipId);
-        if (found) {
-          setClipStudioVideo(found);
-        } else {
-          try {
-            const fetched = await fetchVideo(clipId);
-            setClipStudioVideo(fetched);
-          } catch (err) {
-            console.warn("Could not find video for clip modal:", err);
-            setQueryParams({ clip: null, start: null }, { replace: true });
-          }
-        }
-      } else if (videoId) {
-        setClipStudioVideo(null);
-        const list = itemsList || videosRef.current;
-        const found = list.find((v) => v.id === videoId);
-        if (found) {
-          setSelectedVideo(found);
-        } else {
-          try {
-            const fetched = await fetchVideo(videoId);
-            setSelectedVideo(fetched);
-          } catch (err) {
-            console.warn("Could not find video for detail modal:", err);
-            setQueryParams({ video: null }, { replace: true });
-          }
-        }
-      } else {
-        setSelectedVideo(null);
-        setClipStudioVideo(null);
-      }
-    },
-    []
-  );
-
-  // Initial check & load library videos, then restore any active modal from URL
-  useEffect(() => {
-    console.log("useEffect initial");
     let mounted = true;
 
     async function init() {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       const healthy = await checkBackendHealth();
       if (!mounted) return;
       setBackendHealthy(healthy);
 
       if (healthy) {
-        const data = await loadVideos(1, limit, "all", "");
-        if (!mounted) return;
-        if (data?.items) {
-          await syncModalsFromUrl(data.items);
-        } else {
-          await syncModalsFromUrl();
-        }
+        await loadVideos(1, limit, "all", "");
+        refreshCounts();
       } else {
         setIsLoading(false);
       }
@@ -223,24 +155,10 @@ export default function HomePage() {
     return () => {
       mounted = false;
     };
-  }, [limit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [limit, refreshCounts, loadVideos]);
 
-  // Listen to browser Back/Forward navigation to sync modal states
+  // Polling loop when videos are downloading (pauses when tab is hidden)
   useEffect(() => {
-    const onPopState = () => {
-      syncModalsFromUrl();
-    };
-
-    window.addEventListener("popstate", onPopState);
-    return () => {
-      window.removeEventListener("popstate", onPopState);
-    };
-  }, [syncModalsFromUrl]);
-
-
-  // Polling loop when videos are downloading
-  useEffect(() => {
-    console.log("useEffect polling");
     const hasActiveDownloads =
       downloadingIds.size > 0 ||
       videos.some(
@@ -249,32 +167,52 @@ export default function HomePage() {
           v.download_status === "pending"
       );
 
-    if (hasActiveDownloads) {
-      pollingRef.current = setInterval(() => {
-        loadVideos();
-      }, 2500);
-    } else {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    }
+    let interval: NodeJS.Timeout | null = null;
 
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
+    const startPolling = () => {
+      if (hasActiveDownloads && !interval && document.visibilityState === "visible") {
+        interval = setInterval(() => {
+          loadVideos();
+          refreshCounts();
+        }, 2500);
       }
     };
-  }, [downloadingIds, videos, loadVideos]);
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startPolling();
+        if (hasActiveDownloads) {
+          loadVideos();
+          refreshCounts();
+        }
+      } else {
+        stopPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [downloadingIds, videos, loadVideos, refreshCounts]);
 
   // Handle video download trigger
   const handleDownload = async (videoId: string) => {
-    console.log("handleDownload");
     setDownloadingIds((prev) => new Set(prev).add(videoId));
     try {
       await downloadVideo(videoId);
-      // await loadVideos();
+      await loadVideos();
+      refreshCounts();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       alert(`Could not start download: ${message}`);
@@ -291,10 +229,8 @@ export default function HomePage() {
     if (!confirm("Are you sure you want to delete this downloaded video file?")) return;
     try {
       await deleteVideoDownload(videoId);
-      if (selectedVideo?.id === videoId) {
-        setSelectedVideo(null);
-      }
       await loadVideos();
+      refreshCounts();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       alert(`Could not delete: ${message}`);
@@ -303,26 +239,37 @@ export default function HomePage() {
 
   // Filter change
   const handleFilterChange = (filter: string) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
     setActiveFilter(filter);
     setPage(1);
     loadVideos(1, limit, filter, searchQuery);
   };
 
-  // Search change
+  // Search change with 300ms debounce
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     setPage(1);
-    loadVideos(1, limit, activeFilter, query);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      loadVideos(1, limit, activeFilter, query);
+    }, 300);
   };
 
   // Page change
   const handlePageChange = (newPage: number) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
     setPage(newPage);
     loadVideos(newPage, limit, activeFilter, searchQuery);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
-  const downloadedCount = videos.filter((v) => v.is_downloaded).length;
 
   return (
     <div className="min-h-screen bg-[#090a0f] flex flex-col">
@@ -370,8 +317,9 @@ export default function HomePage() {
         {/* Channel and Filter Header */}
         <StatsBar
           channelTitle={channelTitle}
-          totalVideos={total}
-          downloadedCount={downloadedCount}
+          totalVideos={cataloguedTotal || total}
+          downloadedCount={downloadedTotal}
+          downloadingCount={downloadingIds.size}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
         />
@@ -411,7 +359,6 @@ export default function HomePage() {
                   key={video.id}
                   video={video}
                   index={idx}
-                  onSelect={openVideoModal}
                   onDownload={handleDownload}
                   onDeleteDownload={handleDeleteDownload}
                   isDownloadingThis={downloadingIds.has(video.id)}
@@ -427,8 +374,12 @@ export default function HomePage() {
               <p className="text-sm text-slate-400 max-w-md mb-6">
                 {searchQuery
                   ? `No videos match "${searchQuery}". Try a different keyword.`
-                  : activeFilter !== "all"
-                  ? `No videos match the "${activeFilter}" filter.`
+                  : activeFilter === "downloaded"
+                  ? "No videos have been downloaded locally yet. Download a video from the library to start clipping."
+                  : activeFilter === "downloading"
+                  ? "No videos are currently being downloaded."
+                  : activeFilter === "not_downloaded"
+                  ? "All catalogued videos are already downloaded locally."
                   : "No videos catalogued yet. Sync your YouTube channel to browse and download gameplay VODs."}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
@@ -466,26 +417,6 @@ export default function HomePage() {
           />
         </section>
       </main>
-
-      {/* Video Detail Modal */}
-      <VideoModal
-        video={selectedVideo}
-        onClose={closeVideoModal}
-        onDownload={handleDownload}
-        onDeleteDownload={handleDeleteDownload}
-        onOpenClipStudio={(vid, startTime) => {
-          openClipStudioModal(vid, startTime ?? 0);
-        }}
-        isDownloading={selectedVideo ? downloadingIds.has(selectedVideo.id) : false}
-      />
-
-      {/* Phase 1 Clip Studio & Comparison Modal */}
-      <ClipStudioModal
-        video={clipStudioVideo}
-        initialStartTime={clipInitialStartTime}
-        onClose={closeClipStudioModal}
-      />
     </div>
   );
-
 }

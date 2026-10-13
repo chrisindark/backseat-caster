@@ -1,8 +1,9 @@
 "use client";
 
 import { YouTubeChannelVideoItem } from "@/types/video";
+import { useScrollLock } from "@/lib/useScrollLock";
 import { CheckCircle2, ExternalLink, X } from "lucide-react";
-import React from "react";
+import React, { useEffect } from "react";
 
 interface YouTubePreviewModalProps {
   video: YouTubeChannelVideoItem | null;
@@ -17,16 +18,29 @@ export const YouTubePreviewModal: React.FC<YouTubePreviewModalProps> = ({
   onToggleSelect,
   onClose,
 }) => {
+  useScrollLock(Boolean(video));
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   if (!video) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in overflow-y-auto overscroll-contain"
+    >
       <div
-        className="relative w-full max-w-4xl bg-[#12141c] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-4xl bg-[#12141c] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[calc(100vh-2rem)] my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="p-4 border-b border-white/10 flex items-center justify-between gap-4">
+        <div className="p-4 border-b border-white/10 flex items-center justify-between gap-4 shrink-0">
           <div className="flex-1 min-w-0">
             <h2 className="text-base font-bold text-white truncate">{video.title}</h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -54,7 +68,7 @@ export const YouTubePreviewModal: React.FC<YouTubePreviewModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 border-t border-white/10 flex items-center justify-between gap-3 bg-[#0d0f17]">
+        <div className="p-4 border-t border-white/10 flex items-center justify-between gap-3 bg-[#0d0f17] shrink-0">
           <div className="flex items-center gap-2">
             {video.is_in_database ? (
               <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30">

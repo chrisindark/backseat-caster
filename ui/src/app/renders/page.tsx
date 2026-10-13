@@ -7,6 +7,7 @@ import { RenderCard } from "@/components/RenderCard";
 import { RenderJobRow } from "@/components/RenderJobRow";
 import { UploadQueueModal } from "@/components/UploadQueueModal";
 import {
+  bulkDeleteRenders,
   checkBackendHealth,
   deleteRender,
   fetchRenderJobs,
@@ -22,7 +23,9 @@ import {
   UploadSelectionPayload,
 } from "@/types/video";
 import {
+  AlertTriangle,
   CheckCircle2,
+  CheckSquare,
   Film,
   Layers,
   Loader2,
@@ -30,6 +33,7 @@ import {
   Search,
   Sparkles,
   Star,
+  Trash2,
   Video,
 } from "lucide-react";
 import Link from "next/link";
@@ -50,6 +54,11 @@ export default function RendersPage() {
   const [selectedVideoId, setSelectedVideoId] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Bulk selection & deletion
+  const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState<boolean>(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState<boolean>(false);
 
   // Modals with browser history tracking
   const [inspectingManifest, setInspectingManifest] = useState<RenderManifest | null>(null);
@@ -89,8 +98,8 @@ export default function RendersPage() {
 
       if (manifestId) {
         setShowUploadQueueModal(false);
-        const list = currentRenders || rendersRef.current;
-        const found = list.find((r) => r.clip_id === manifestId);
+        const list: RenderManifest[] = currentRenders || rendersRef.current;
+        const found = list.find((r: RenderManifest) => r.clip_id === manifestId);
         if (found) {
           setInspectingManifest(found);
         } else {
@@ -114,8 +123,26 @@ export default function RendersPage() {
 
   // Status notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const showToast = useCallback((msg: string, durationMs = 3500) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, durationMs);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Load all renders and jobs
   const loadData = useCallback(async () => {
@@ -187,19 +214,38 @@ export default function RendersPage() {
   }, [jobs]);
 
   useEffect(() => {
-    if (hasActiveJobs) {
-      pollingRef.current = setInterval(() => {
-        loadData();
-      }, 2500);
-    } else if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
+    let interval: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (hasActiveJobs && !interval && document.visibilityState === "visible") {
+        interval = setInterval(() => {
+          loadData();
+        }, 2500);
+      }
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startPolling();
+        if (hasActiveJobs) loadData();
+      } else {
+        stopPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [hasActiveJobs, loadData]);
 
@@ -249,17 +295,15 @@ export default function RendersPage() {
         )
       );
 
-      setToastMessage(
+      showToast(
         newSelected
           ? `Added ${clipId} to upload staging`
           : `Removed ${clipId} from upload staging`
       );
-      setTimeout(() => setToastMessage(null), 3500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Failed to update upload selection:", err);
-      setToastMessage(`Error: ${msg || "Failed to update"}`);
-      setTimeout(() => setToastMessage(null), 4000);
+      showToast(`Error: ${msg || "Failed to update"}`, 4000);
     }
   };
 
@@ -284,8 +328,7 @@ export default function RendersPage() {
       )
     );
     await loadData();
-    setToastMessage("Cleared all upload staging selections");
-    setTimeout(() => setToastMessage(null), 3000);
+    showToast("Cleared all upload staging selections", 3000);
   };
 
   // Delete render
@@ -294,13 +337,58 @@ export default function RendersPage() {
       await deleteRender(clipId);
       setRenders((prev) => prev.filter((r) => r.clip_id !== clipId));
       setJobs((prev) => prev.filter((j) => j.clip_id !== clipId && j.job_id !== clipId));
-      setToastMessage(`Deleted render ${clipId}`);
-      setTimeout(() => setToastMessage(null), 3000);
+      setSelectedClipIds((prev) => {
+        if (!prev.has(clipId)) return prev;
+        const next = new Set(prev);
+        next.delete(clipId);
+        return next;
+      });
+      showToast(`Deleted render ${clipId}`, 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Delete failed:", err);
-      setToastMessage(`Delete failed: ${msg}`);
-      setTimeout(() => setToastMessage(null), 4000);
+      showToast(`Delete failed: ${msg}`, 4000);
+    }
+  };
+
+  // Bulk selection handlers
+  const handleToggleSelectClip = useCallback((clipId: string) => {
+    setSelectedClipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(clipId)) {
+        next.delete(clipId);
+      } else {
+        next.add(clipId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedClipIds(new Set());
+  }, []);
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedClipIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const idsToDelete = Array.from(selectedClipIds);
+      const res = await bulkDeleteRenders(idsToDelete, { sync: true });
+      const deletedSet = new Set(res.deleted_clip_ids);
+
+      setRenders((prev) => prev.filter((r) => !deletedSet.has(r.clip_id)));
+      setJobs((prev) =>
+        prev.filter((j) => !deletedSet.has(j.clip_id) && !deletedSet.has(j.job_id))
+      );
+      setSelectedClipIds(new Set());
+      setShowBulkDeleteConfirm(false);
+      showToast(res.message || `Deleted ${res.deleted_count} renders`, 3500);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Bulk delete failed:", err);
+      showToast(`Bulk delete failed: ${msg}`, 4500);
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -308,14 +396,12 @@ export default function RendersPage() {
   const handleRetryJob = async (jobId: string) => {
     try {
       await retryRenderJob(jobId);
-      setToastMessage(`Re-queued job ${jobId}`);
-      setTimeout(() => setToastMessage(null), 3000);
+      showToast(`Re-queued job ${jobId}`, 3000);
       await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Retry failed:", err);
-      setToastMessage(`Retry failed: ${msg}`);
-      setTimeout(() => setToastMessage(null), 4000);
+      showToast(`Retry failed: ${msg}`, 4000);
     }
   };
 
@@ -346,8 +432,11 @@ export default function RendersPage() {
     return renders.filter((r) => {
       // Video filter
       if (selectedVideoId !== "all") {
-        const vidId = r.video_id || r.clip_id;
-        if (!vidId.includes(selectedVideoId)) return false;
+        const vidId =
+          r.video_id ||
+          (r.source?.path ? r.source.path.split("/").pop()?.split(".")[0] : null) ||
+          r.clip_id;
+        if (vidId !== selectedVideoId && !vidId.includes(selectedVideoId)) return false;
       }
 
       // Status filter
@@ -394,6 +483,14 @@ export default function RendersPage() {
       return true;
     });
   }, [jobs, selectedVideoId, statusFilter, searchQuery]);
+
+  const handleSelectAllCurrent = useCallback(() => {
+    const ids =
+      viewMode === "gallery"
+        ? filteredRenders.map((r) => r.clip_id)
+        : filteredJobs.map((j) => j.clip_id);
+    setSelectedClipIds(new Set(ids));
+  }, [viewMode, filteredRenders, filteredJobs]);
 
   // Jump from job to render
   const handleViewRender = (clipId: string) => {
@@ -600,6 +697,29 @@ export default function RendersPage() {
                 <Star className="w-3 h-3 fill-rose-400 text-rose-400" />
                 <span>Chosen for Upload ({selectedForUploadList.length})</span>
               </button>
+
+              {/* Quick Select All Toggle Button */}
+              {((viewMode === "gallery" && filteredRenders.length > 0) ||
+                (viewMode === "jobs" && filteredJobs.length > 0)) && (
+                <button
+                  type="button"
+                  onClick={
+                    selectedClipIds.size ===
+                    (viewMode === "gallery" ? filteredRenders.length : filteredJobs.length)
+                      ? handleDeselectAll
+                      : handleSelectAllCurrent
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold transition-colors"
+                >
+                  <CheckSquare className="w-3 h-3 text-rose-500" />
+                  <span>
+                    {selectedClipIds.size ===
+                    (viewMode === "gallery" ? filteredRenders.length : filteredJobs.length)
+                      ? "Deselect All"
+                      : `Select All (${viewMode === "gallery" ? filteredRenders.length : filteredJobs.length})`}
+                  </span>
+                </button>
+              )}
               {viewMode === "jobs" && (
                 <>
                   <button
@@ -707,6 +827,8 @@ export default function RendersPage() {
                 <RenderCard
                   key={render.clip_id}
                   render={render}
+                  isCardSelected={selectedClipIds.has(render.clip_id)}
+                  onToggleCardSelect={handleToggleSelectClip}
                   onToggleSelectForUpload={(clipId, isSel, fmt) =>
                     handleToggleSelectForUpload(clipId, isSel, fmt)
                   }
@@ -736,6 +858,8 @@ export default function RendersPage() {
                 <RenderJobRow
                   key={job.job_id}
                   job={job}
+                  isJobSelected={selectedClipIds.has(job.clip_id)}
+                  onToggleJobSelect={handleToggleSelectClip}
                   onRetry={handleRetryJob}
                   onDelete={handleDeleteRender}
                   onViewRender={handleViewRender}
@@ -745,6 +869,118 @@ export default function RendersPage() {
           )
         )}
       </main>
+
+      {/* Floating Bulk Action Bar */}
+      {selectedClipIds.size > 0 && (
+        <aside
+          aria-label="Bulk actions"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-xl px-4 animate-in slide-in-from-bottom-5 duration-200"
+        >
+          <div className="flex items-center justify-between gap-3 p-3 bg-slate-900/95 border border-rose-500/40 rounded-2xl shadow-2xl shadow-black/80 backdrop-blur-xl">
+            <div className="flex items-center gap-2.5 pl-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+              <span className="text-xs font-bold text-white whitespace-nowrap">
+                {selectedClipIds.size} {selectedClipIds.size === 1 ? "clip" : "clips"} selected
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSelectAllCurrent}
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-semibold transition-colors whitespace-nowrap"
+              >
+                Select All ({viewMode === "gallery" ? filteredRenders.length : filteredJobs.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeselectAll}
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-xs font-semibold transition-colors"
+              >
+                Clear
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteConfirm(true)}
+                disabled={isBulkDeleting}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all cursor-pointer whitespace-nowrap"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Selected ({selectedClipIds.size})</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !isBulkDeleting && setShowBulkDeleteConfirm(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-slate-900 border border-rose-500/40 rounded-2xl p-6 shadow-2xl shadow-rose-950/30 space-y-5 animate-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-start gap-4">
+              <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">
+                  Delete {selectedClipIds.size} Render{selectedClipIds.size > 1 ? "s" : ""}?
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  This will permanently delete all rendered MP4 files (landscape, vertical blur, crops) and job records for the selected clips from disk. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 max-h-36 overflow-y-auto space-y-1 text-xs text-slate-400 font-mono">
+              {Array.from(selectedClipIds).map((id) => (
+                <div key={id} className="flex items-center gap-2 truncate">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span className="truncate">{id}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                disabled={isBulkDeleting}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white text-xs font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBulkDelete}
+                disabled={isBulkDeleting}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-900/40 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Manifest Auditor Modal */}
       {inspectingManifest && (

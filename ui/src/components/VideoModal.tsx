@@ -13,6 +13,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import { useScrollLock } from "@/lib/useScrollLock";
 import React, { useEffect, useRef, useState } from "react";
 
 interface VideoModalProps {
@@ -33,19 +34,24 @@ function formatBytes(bytes?: number | null): string {
 
 function formatSeconds(sec: number): string {
   if (isNaN(sec) || sec < 0) return "0:00";
-  const m = Math.floor(sec / 60);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
+  if (h > 0) {
+    return `${h}:${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
+  }
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
 function parseSeconds(val: string): number {
   if (!val) return 0;
   if (val.includes(":")) {
-    const parts = val.split(":");
+    const parts = val.split(":").map((p) => parseFloat(p) || 0);
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
     if (parts.length === 2) {
-      const min = parseFloat(parts[0]) || 0;
-      const sec = parseFloat(parts[1]) || 0;
-      return min * 60 + sec;
+      return parts[0] * 60 + parts[1];
     }
   }
   return parseFloat(val) || 0;
@@ -59,6 +65,8 @@ export const VideoModal: React.FC<VideoModalProps> = ({
   onOpenClipStudio,
   isDownloading,
 }) => {
+  useScrollLock(Boolean(video));
+
   const isDownloaded = video?.is_downloaded;
   const isProcessing =
     video?.download_status === "downloading" ||
@@ -70,11 +78,25 @@ export const VideoModal: React.FC<VideoModalProps> = ({
   const [startTimeInput, setStartTimeInput] = useState<string>("0:00");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Sync state when video changes during render
+  const [prevVideoId, setPrevVideoId] = useState<string | undefined>(video?.id);
+  if (prevVideoId !== video?.id) {
+    setPrevVideoId(video?.id);
+    if (currentTime !== 0) setCurrentTime(0);
+    if (clipStartTime !== 0) setClipStartTime(0);
+    if (startTimeInput !== "0:00") setStartTimeInput("0:00");
+  }
+
+  // Listen to Escape key to close modal
   useEffect(() => {
-    setCurrentTime(0);
-    setClipStartTime(0);
-    setStartTimeInput("0:00");
-  }, [video?.id]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleSetCurrentAsStart = () => {
     const sec = Math.floor(currentTime);
@@ -107,14 +129,14 @@ export const VideoModal: React.FC<VideoModalProps> = ({
   return (
     <AnimatePresence>
       {video && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto overscroll-contain">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md touch-none"
         />
 
         {/* Modal Container */}
@@ -123,7 +145,7 @@ export const VideoModal: React.FC<VideoModalProps> = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
           transition={{ duration: 0.2 }}
-          className="relative w-full max-w-3xl bg-[#12141c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-10 my-8"
+          className="relative w-full max-w-3xl bg-[#12141c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-10 my-auto"
         >
           {/* Close Button */}
           <button

@@ -1,14 +1,12 @@
 """Input and boundary validation for clip rendering requests."""
 
 from pathlib import Path
-from typing import Optional
+
 from app.rendering.probe import MediaProbeResult
 
 
 class ValidationError(ValueError):
     """Raised when render parameters violate validation constraints."""
-
-    pass
 
 
 def validate_render_parameters(
@@ -16,8 +14,9 @@ def validate_render_parameters(
     start_seconds: float,
     duration_seconds: float,
     output_dir: Path,
-    narration_path: Optional[Path] = None,
+    narration_path: Path | None = None,
     overwrite: bool = False,
+    modes: list[str] | None = None,
 ):
     """Validate render parameters against media probe and filesystem state."""
     if start_seconds < 0:
@@ -49,11 +48,14 @@ def validate_render_parameters(
     # Check overwrite safety
     output_dir = Path(output_dir).resolve()
     if output_dir.exists() and not overwrite:
-        existing_outputs = [
-            output_dir / "landscape.mp4",
-            output_dir / "vertical_blur.mp4",
-            output_dir / "vertical_crop.mp4",
-        ]
+        if modes:
+            existing_outputs = [output_dir / f"{m}.mp4" for m in modes]
+        else:
+            existing_outputs = [
+                output_dir / "landscape.mp4",
+                output_dir / "vertical_blur.mp4",
+                output_dir / "vertical_crop.mp4",
+            ]
         found = [str(f.name) for f in existing_outputs if f.exists()]
         if found:
             raise ValidationError(

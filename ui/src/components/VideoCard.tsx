@@ -11,6 +11,7 @@ import {
   Scissors,
   Trash2
 } from "lucide-react";
+import Link from "next/link";
 import React from "react";
 
 import { VideoItem } from "@/types/video";
@@ -18,7 +19,7 @@ import { VideoItem } from "@/types/video";
 interface VideoCardProps {
   video: VideoItem;
   index: number;
-  onSelect: (video: VideoItem) => void;
+  onSelect?: (video: VideoItem) => void;
   onDownload: (videoId: string) => void;
   onDeleteDownload: (videoId: string) => void;
   isDownloadingThis: boolean;
@@ -52,6 +53,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     video.download_status === "pending" ||
     isDownloadingThis;
 
+  const handleClickCard = () => {
+    if (onSelect) onSelect(video);
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
@@ -60,9 +65,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       className="group relative flex flex-col bg-[#12141c] hover:bg-[#181b26] border border-white/5 hover:border-rose-500/30 rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:shadow-2xl hover:shadow-rose-950/20"
     >
       {/* Thumbnail Container (16:9 YouTube aspect ratio) */}
-      <div
-        className="relative aspect-video w-full bg-slate-900 cursor-pointer overflow-hidden"
-        onClick={() => onSelect(video)}
+      <Link
+        href={`/videos/${video.id}`}
+        onClick={handleClickCard}
+        className="relative aspect-video w-full bg-slate-900 cursor-pointer overflow-hidden block"
       >
         <img
           src={video.thumbnail_url || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`}
@@ -102,19 +108,20 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             </span>
           </div>
         )}
-      </div>
+      </Link>
 
       {/* Card Content */}
       <div className="p-4 flex-1 flex flex-col justify-between gap-3">
         <div>
           {/* Video Title */}
-          <h3
-            onClick={() => onSelect(video)}
-            className="text-sm font-semibold text-slate-100 group-hover:text-rose-400 line-clamp-2 leading-snug cursor-pointer transition-colors"
+          <Link
+            href={`/videos/${video.id}`}
+            onClick={handleClickCard}
+            className="text-sm font-semibold text-slate-100 group-hover:text-rose-400 line-clamp-2 leading-snug cursor-pointer transition-colors block"
             title={video.title}
           >
             {video.title}
-          </h3>
+          </Link>
 
           {/* Channel Name & Meta */}
           <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
@@ -152,14 +159,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 <span>{formatBytes(video.file_size_bytes) || "Saved"}</span>
               </div>
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() => onSelect(video)}
-                  title="Play video and create clip"
+                <Link
+                  href={`/studio/${video.id}`}
+                  title="Open Clip Studio workspace"
                   className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1"
                 >
                   <Scissors className="w-3 h-3" />
-                  <span>Create Clip</span>
-                </button>
+                  <span>Clip Studio</span>
+                </Link>
 
                 <button
                   onClick={() => onDeleteDownload(video.id)}

@@ -16,10 +16,12 @@ from app.schemas.video import (
     DownloadTaskResponse,
     SyncChannelRequest,
     SyncChannelResponse,
+    VideoCreateRequest,
     VideoListRequest,
     VideoListResponse,
     VideoResponse,
     VideoStatusResponse,
+    VideoUpdateRequest,
     YouTubeChannelVideosResponse,
 )
 from app.services.videos import VideoService
@@ -127,6 +129,29 @@ def sync_channel_videos(request: SyncChannelRequest, db: Session = Depends(get_d
         )
 
 
+@router.post(
+    "", response_model=BaseResponse[VideoResponse], status_code=status.HTTP_201_CREATED
+)
+def create_video(request: VideoCreateRequest, db: Session = Depends(get_db)):
+    """Create / register a new video in the catalog."""
+    try:
+        video = VideoService.create_video(db=db, request=request)
+        return BaseResponse.success_response(response=video)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to create video: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create video: {e!s}",
+        )
+
+
 @router.get("/{video_id}", response_model=BaseResponse[VideoResponse])
 def get_video(video_id: str, db: Session = Depends(get_db)):
     """Retrieve details for a specific video."""
@@ -145,6 +170,62 @@ def get_video(video_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve video: {e!s}",
+        )
+
+
+@router.patch("/{video_id}", response_model=BaseResponse[VideoResponse])
+@router.put("/{video_id}", response_model=BaseResponse[VideoResponse])
+def update_video(
+    video_id: str,
+    request: VideoUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Update metadata or status of an existing video in the catalog."""
+    try:
+        updated = VideoService.update_video(db=db, video_id=video_id, request=request)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with id '{video_id}' not found",
+            )
+        return BaseResponse.success_response(response=updated)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update video %s: %s", video_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update video: {e!s}",
+        )
+
+
+@router.delete("/{video_id}", response_model=BaseResponse[DeleteVideoResponse])
+def delete_video(
+    video_id: str,
+    delete_file: bool = Query(
+        True,
+        description="Whether to delete local downloaded video file from disk as well",
+    ),
+    db: Session = Depends(get_db),
+):
+    """Delete a video from the catalog and database, optionally removing downloaded file."""
+    try:
+        result = VideoService.delete_video(
+            db=db, video_id=video_id, delete_file=delete_file
+        )
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with id '{video_id}' not found",
+            )
+        return BaseResponse.success_response(response=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete video %s: %s", video_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete video: {e!s}",
         )
 
 

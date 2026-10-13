@@ -1,8 +1,9 @@
 "use client";
 
 import { RenderManifest } from "@/types/video";
+import { useScrollLock } from "@/lib/useScrollLock";
 import { Check, Copy, FileCode, X } from "lucide-react";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 interface ManifestModalProps {
   manifest: RenderManifest | null;
@@ -10,7 +11,17 @@ interface ManifestModalProps {
 }
 
 export const ManifestModal: React.FC<ManifestModalProps> = ({ manifest, onClose }) => {
+  useScrollLock(Boolean(manifest));
+
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   if (!manifest) return null;
 
@@ -21,13 +32,16 @@ export const ManifestModal: React.FC<ManifestModalProps> = ({ manifest, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto overscroll-contain"
+    >
       <div
-        className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-slate-900/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-2xl max-h-[calc(100vh-2rem)] flex flex-col bg-slate-900/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-950/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-950/50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
               <FileCode className="w-5 h-5" />

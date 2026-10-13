@@ -20,13 +20,28 @@ def write_manifest(
     api_prefix: str = "/api/v1",
     crop_preset: str | None = None,
     crop_blur_padding: float | None = None,
+    modes: list[str] | None = None,
 ) -> Path:
     """Generate and write manifest.json into the clip output directory."""
+    effective_modes = modes or list(outputs.keys())
     manifest_data = {
         "clip_id": clip_id,
-        "landscape_path": f"{api_prefix}/renders/{clip_id}/stream/landscape",
-        "vertical_blur_path": f"{api_prefix}/renders/{clip_id}/stream/vertical_blur",
-        "vertical_crop_path": f"{api_prefix}/renders/{clip_id}/stream/vertical_crop",
+        "modes": effective_modes,
+        "landscape_path": f"{api_prefix}/renders/{clip_id}/stream/landscape"
+        if "landscape" in outputs
+        else None,
+        "vertical_blur_path": f"{api_prefix}/renders/{clip_id}/stream/vertical_blur"
+        if "vertical_blur" in outputs
+        else None,
+        "vertical_crop_path": f"{api_prefix}/renders/{clip_id}/stream/vertical_crop"
+        if (
+            "vertical_crop" in outputs
+            or any(
+                m in outputs
+                for m in ("third_person", "direct_crop", "cinematic", "custom")
+            )
+        )
+        else None,
         "manifest_path": f"{api_prefix}/renders/{clip_id}/stream/manifest",
         "source_file": source_probe.file_path,
         "source": {
@@ -59,6 +74,7 @@ def write_manifest(
             "crop_blur_padding": crop_blur_padding
             if crop_blur_padding is not None
             else 0.3333,
+            "modes": effective_modes,
         },
         "outputs": outputs,
         "created_at": datetime.now(UTC).isoformat(),

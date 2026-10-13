@@ -1,9 +1,20 @@
 """Videos API endpoints."""
 
 import logging
+import subprocess
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -347,3 +358,81 @@ def stream_video(video_id: str, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to stream video: {e!s}",
         )
+
+
+@router.post(
+    "/upload",
+    response_model=BaseResponse[VideoResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_local_video(
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    channel_name: str | None = Form("OBS Studio"),
+    db: Session = Depends(get_db),
+):
+    """Directly upload and ingest an OBS or local gameplay recording (.mp4, .mkv, .mov, .webm, etc.)."""
+    try:
+        video_res = VideoService.upload_local_video(
+            db=db,
+            file=file,
+            title=title,
+            channel_name=channel_name,
+        )
+        return BaseResponse.success_response(
+            response=video_res,
+            status_code=status.HTTP_201_CREATED,
+        )
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve),
+        )
+    except Exception as e:
+        logger.exception("Failed to upload local video: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload local video: {e!s}",
+        )
+
+
+@router.get("/{video_id}/thumbnail")
+def get_video_thumbnail(video_id: str, db: Session = Depends(get_db)):
+    """Serve or extract on-demand thumbnail image for a local or downloaded video."""
+    thumb_path = settings.downloads_path / f"{video_id}_thumb.jpg"
+    if thumb_path.exists() and thumb_path.stat().st_size > 0:
+        return FileResponse(path=thumb_path, media_type="image/jpeg")
+
+    file_info = VideoService.get_video_file_info(db=db, video_id=video_id)
+    if file_info:
+        target_path, _, _ = file_info
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    "0.5",
+                    "-i",
+                    str(target_path),
+                    "-vframes",
+                    "1",
+                    "-q:v",
+                    "2",
+                    str(thumb_path),
+                ],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            if thumb_path.exists() and thumb_path.stat().st_size > 0:
+                return FileResponse(path=thumb_path, media_type="image/jpeg")
+        except Exception as e:
+            logger.warning(
+                "Failed on-demand thumbnail generation for %s: %s", video_id, e
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Thumbnail not found for video '{video_id}'",
+    )

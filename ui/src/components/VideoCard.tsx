@@ -8,6 +8,7 @@ import {
   HardDrive,
   Loader2,
   Play,
+  Radio,
   Scissors,
   Trash2
 } from "lucide-react";
@@ -47,11 +48,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   isDownloadingThis,
 }) => {
   const isHighPriority = index < 2;
-  const isDownloaded = video.is_downloaded;
+  const isDownloaded = video.is_downloaded || video.download_status === "completed";
   const isProcessing =
-    video.download_status === "downloading" ||
-    video.download_status === "pending" ||
-    isDownloadingThis;
+    (video.download_status === "downloading" ||
+      video.download_status === "pending" ||
+      isDownloadingThis) &&
+    !isDownloaded;
 
   const handleClickCard = () => {
     if (onSelect) onSelect(video);
@@ -90,13 +92,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           {video.duration_formatted}
         </div>
 
-        {/* Download Status Badge on Thumbnail */}
-        {isDownloaded && (
+        {/* Download / OBS Status Badge on Thumbnail */}
+        {video.id.startsWith("obs_") || video.channel_name === "OBS Studio" ? (
+          <div className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-rose-600 to-amber-600 text-white text-xs font-semibold backdrop-blur-md shadow-md border border-rose-400/30">
+            <Radio className="w-3 h-3 text-white animate-pulse" />
+            <span>OBS / Local VOD</span>
+          </div>
+        ) : isDownloaded ? (
           <div className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/90 text-white text-xs font-semibold backdrop-blur-md shadow-md">
             <CheckCircle2 className="w-3 h-3" />
             <span>Local MP4</span>
           </div>
-        )}
+        ) : null}
 
         {isProcessing && (
           <div className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/90 text-white text-xs font-semibold backdrop-blur-md shadow-md animate-pulse">

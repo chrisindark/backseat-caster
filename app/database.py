@@ -20,7 +20,22 @@ connect_args = (
     {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
 )
 
-engine = create_engine(settings.DATABASE_URL, connect_args=connect_args, echo=False)
+pool_kwargs = {}
+if "sqlite:///:memory:" not in settings.DATABASE_URL:
+    pool_kwargs = {
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        "pool_timeout": settings.DB_POOL_TIMEOUT,
+        "pool_recycle": settings.DB_POOL_RECYCLE,
+        "pool_pre_ping": True,
+    }
+
+engine = create_engine(
+    settings.DATABASE_URL,
+    connect_args=connect_args,
+    echo=False,
+    **pool_kwargs,
+)
 
 SessionLocal = sessionmaker(
     autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
@@ -32,19 +47,42 @@ Base = declarative_base()
 @event.listens_for(engine, "connect")
 def receive_connect(dbapi_connection, connection_record):
     """Fired when a physical database connection is established."""
-    logger.info("Successfully connected to the master database server.")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.close()
+        except Exception as e:
+            logger.warning("Failed to configure SQLite PRAGMAs: %s", e)
+    logger.debug(
+        "Successfully connected to database and initialized connection pool entry."
+    )
+
+
+@event.listens_for(engine, "checkout")
+def receive_checkout(dbapi_connection, connection_record, connection_proxy):
+    """Fired when a pooled connection is checked out for a request or task."""
+    logger.debug("Database connection checked out from pool.")
+
+
+@event.listens_for(engine, "checkin")
+def receive_checkin(dbapi_connection, connection_record):
+    """Fired when a connection is returned to the pool for reuse."""
+    logger.debug("Database connection returned to pool.")
 
 
 @event.listens_for(engine, "invalidate")
 def receive_invalidate(dbapi_connection, connection_record, exception):
     """Fired when a connection encounters a fatal error and is discarded."""
-    logger.error(f"Master connection invalidated due to error: {exception}")
+    logger.error("Database connection invalidated due to error: %s", exception)
 
 
 @event.listens_for(engine, "close")
 def receive_close(dbapi_connection, connection_record):
-    """Fired when a connection is closed."""
-    logger.error("Master connection closed")
+    """Fired when a connection is closed during pool cleanup, recycle, or shutdown."""
+    logger.debug("Database connection closed by pool.")
 
 
 def get_db():

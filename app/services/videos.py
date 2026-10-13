@@ -5,12 +5,14 @@ import math
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, UploadFile
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,7 @@ from app.config import settings
 from app.database import get_task_db_session
 from app.models.render_job import RenderJob
 from app.models.video import Video
+from app.rendering.probe import probe_media
 from app.schemas.video import (
     DeleteVideoResponse,
     DownloadTaskResponse,
@@ -72,6 +75,12 @@ class VideoService:
                 candidate_path = expected_file
             else:
                 matches = list(settings.downloads_path.glob(f"{video_id}.*"))
+                if not matches:
+                    matches = [
+                        m
+                        for m in settings.downloads_path.glob(f"{video_id}_*.*")
+                        if not m.name.endswith("_thumb.jpg")
+                    ]
                 video_matches = [
                     m
                     for m in matches
@@ -128,7 +137,11 @@ class VideoService:
                     or_(
                         Video.is_downloaded.is_(True),
                         Video.download_status == "completed",
-                    )
+                    ),
+                    or_(
+                        Video.download_status.is_(None),
+                        Video.download_status.notin_(["downloading", "pending"]),
+                    ),
                 )
             elif status == "not_downloaded":
                 query = query.filter(
@@ -136,8 +149,11 @@ class VideoService:
                         Video.is_downloaded.is_(False),
                         Video.is_downloaded.is_(None),
                     ),
-                    Video.download_status.notin_(
-                        ["completed", "downloading", "pending"]
+                    or_(
+                        Video.download_status.is_(None),
+                        Video.download_status.notin_(
+                            ["completed", "downloading", "pending"]
+                        ),
                     ),
                 )
             elif status in ["downloading", "pending"]:
@@ -158,6 +174,10 @@ class VideoService:
             .limit(limit)
             .all()
         )
+
+        for item in items:
+            if item.download_status == "completed" and not item.is_downloaded:
+                item.is_downloaded = True
 
         first_item = items[0] if items else None
         channel_title = first_item.channel_name if first_item else None
@@ -446,6 +466,115 @@ class VideoService:
         return VideoResponse.model_validate(new_video)
 
     @staticmethod
+    def upload_local_video(
+        db: Session,
+        file: UploadFile,
+        title: str | None = None,
+        channel_name: str | None = None,
+    ) -> VideoResponse:
+        """
+        Handle direct local video upload (OBS drag-and-drop or local file import).
+        Saves file to downloads directory, probes metadata, extracts video thumbnail,
+        and catalogues the video as immediately downloaded and ready for clipping.
+        """
+        original_filename = file.filename or "recording.mp4"
+        suffix = Path(original_filename).suffix.lower()
+        allowed_extensions = {".mp4", ".mkv", ".mov", ".webm", ".flv", ".ts", ".m4v"}
+        if suffix not in allowed_extensions:
+            raise ValueError(
+                f"Unsupported video file format '{suffix}'. Supported formats: {', '.join(sorted(allowed_extensions))}"
+            )
+
+        video_id = f"obs_{uuid.uuid4().hex[:10]}"
+        safe_stem = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", Path(original_filename).stem)
+        saved_filename = f"{video_id}_{safe_stem}{suffix}"
+        dest_path = settings.downloads_path / saved_filename
+
+        settings.downloads_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with open(dest_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        except Exception as write_err:
+            if dest_path.exists():
+                try:
+                    dest_path.unlink()
+                except OSError:
+                    pass
+            raise RuntimeError(f"Failed writing uploaded video to disk: {write_err}")
+
+        # Probe video metadata using ffprobe
+        probe = probe_media(dest_path)
+        duration_s = max(1, int(round(probe.duration)))
+        duration_str = format_duration(duration_s)
+        file_size = dest_path.stat().st_size
+
+        # Generate a video frame thumbnail at 1s (or midpoint if duration < 1s)
+        thumb_path = settings.downloads_path / f"{video_id}_thumb.jpg"
+        seek_sec = min(1.0, max(0.0, probe.duration / 2.0))
+        thumbnail_url = None
+        try:
+            thumb_proc = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    f"{seek_sec:.2f}",
+                    "-i",
+                    str(dest_path),
+                    "-vframes",
+                    "1",
+                    "-q:v",
+                    "2",
+                    str(thumb_path),
+                ],
+                capture_output=True,
+                check=False,
+                timeout=15,
+            )
+            if thumb_path.exists() and thumb_path.stat().st_size > 0:
+                thumbnail_url = f"{settings.API_PREFIX}/videos/{video_id}/thumbnail"
+            else:
+                logger.warning(
+                    "Thumbnail generation produced empty file: %s", thumb_proc.stderr
+                )
+        except Exception as thumb_err:
+            logger.warning(
+                "Could not generate thumbnail for %s: %s", video_id, thumb_err
+            )
+
+        clean_title = (
+            title.strip()
+            if title and title.strip()
+            else Path(original_filename).stem.replace("_", " ").title()
+        )
+
+        new_video = Video(
+            id=video_id,
+            title=clean_title,
+            description=f"Local OBS recording imported from {original_filename} ({probe.width}x{probe.height}, {probe.fps} FPS)",
+            thumbnail_url=thumbnail_url,
+            duration=duration_s,
+            duration_formatted=duration_str,
+            channel_name=channel_name or "OBS Studio",
+            channel_id="local_obs",
+            channel_url="local://obs",
+            view_count=0,
+            published_at=datetime.now(UTC).strftime("%Y-%m-%d"),
+            webpage_url=f"file://{dest_path}",
+            is_downloaded=True,
+            local_file_path=str(dest_path),
+            file_size_bytes=file_size,
+            download_status="completed",
+            download_progress=100.0,
+            error_message=None,
+        )
+        db.add(new_video)
+        db.commit()
+        db.refresh(new_video)
+        return VideoResponse.model_validate(new_video)
+
+    @staticmethod
     def update_video(
         db: Session, video_id: str, request: VideoUpdateRequest
     ) -> VideoResponse | None:
@@ -488,6 +617,14 @@ class VideoService:
                 os.remove(video.local_file_path)
             except OSError as err:
                 logger.warning("Error removing video file for %s: %s", video_id, err)
+
+        # Remove local thumbnail file if present
+        thumb_path = settings.downloads_path / f"{video_id}_thumb.jpg"
+        if thumb_path.exists():
+            try:
+                os.remove(thumb_path)
+            except OSError:
+                pass
 
         # Clean up associated render jobs in DB
         db.query(RenderJob).filter(RenderJob.video_id == video_id).delete(
@@ -593,6 +730,14 @@ class VideoService:
         ):
             os.remove(target_video.local_file_path)
 
+        # Remove local thumbnail file if present
+        thumb_path = settings.downloads_path / f"{target_video.id}_thumb.jpg"
+        if thumb_path.exists():
+            try:
+                os.remove(thumb_path)
+            except OSError:
+                pass
+
         try:
             target_video.is_downloaded = False
             target_video.download_status = "not_downloaded"
@@ -612,7 +757,8 @@ class VideoService:
     @staticmethod
     def execute_download_job(
         video_id: str,
-        quality: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        quality: str
+        | None = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         celery_task_instance=None,
         db_session: Session | None = None,
     ) -> dict[str, Any]:
@@ -703,7 +849,7 @@ class VideoService:
 
 def execute_download_job(
     video_id: str,
-    quality: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+    quality: str | None = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
     celery_task_instance=None,
     db_session: Session | None = None,
 ) -> dict[str, Any]:

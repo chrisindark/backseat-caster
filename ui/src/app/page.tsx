@@ -1,6 +1,7 @@
 "use client";
 
 import { Navbar } from "@/components/Navbar";
+import { OBSUploadDropzone } from "@/components/OBSUploadDropzone";
 import { Pagination } from "@/components/Pagination";
 import { StatsBar } from "@/components/StatsBar";
 import { VideoCard } from "@/components/VideoCard";
@@ -11,6 +12,7 @@ import {
   fetchVideos,
   syncChannel,
 } from "@/lib/api";
+import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import { VideoItem } from "@/types/video";
 import {
   AlertCircle,
@@ -21,17 +23,23 @@ import {
   Tv,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
-export default function HomePage() {
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const initialFilter = searchParams.get("filter") || "all";
+  const initialPage = parseInt(searchParams.get("page") || "1", 10) || 1;
+  const initialSearch = searchParams.get("q") || "";
+
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [channelTitle, setChannelTitle] = useState<string>("chrisindark");
   const [channelInput, setChannelInput] = useState<string>("@chrisindark");
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [page, setPage] = useState<number>(1);
+  const [searchQuery, setSearchQuery] = useState<string>(initialSearch);
+  const [activeFilter, setActiveFilter] = useState<string>(initialFilter);
+  const [page, setPage] = useState<number>(initialPage);
   const [limit, setLimit] = useState<number>(20);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -41,6 +49,7 @@ export default function HomePage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [downloadedTotal, setDownloadedTotal] = useState<number>(0);
   const [cataloguedTotal, setCataloguedTotal] = useState<number>(0);
+  const [downloadingTotal, setDownloadingTotal] = useState<number>(0);
 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -54,12 +63,14 @@ export default function HomePage() {
 
   const refreshCounts = useCallback(async () => {
     try {
-      const [dlData, allData] = await Promise.all([
+      const [dlData, allData, ingData] = await Promise.all([
         fetchVideos({ status: "downloaded", limit: 1 }),
         fetchVideos({ status: "all", limit: 1 }),
+        fetchVideos({ status: "downloading", limit: 1 }),
       ]);
       setDownloadedTotal(dlData.total);
       setCataloguedTotal(allData.total);
+      setDownloadingTotal(ingData.total);
     } catch {
       // ignore
     }
@@ -67,7 +78,13 @@ export default function HomePage() {
 
   // Load videos from backend
   const loadVideos = useCallback(
-    async (currentPage = page, currentLimit = limit, currentFilter = activeFilter, currentSearch = searchQuery) => {
+    async (
+      currentPage = page,
+      currentLimit = limit,
+      currentFilter = activeFilter,
+      currentSearch = searchQuery
+    ) => {
+      setIsLoading(true);
       try {
         const data = await fetchVideos({
           page: currentPage,
@@ -87,6 +104,8 @@ export default function HomePage() {
           setCataloguedTotal(data.total);
         } else if (currentFilter === "downloaded" && !currentSearch) {
           setDownloadedTotal(data.total);
+        } else if (currentFilter === "downloading" && !currentSearch) {
+          setDownloadingTotal(data.total);
         }
 
         // Check if any video is actively downloading
@@ -96,7 +115,11 @@ export default function HomePage() {
             inProgress.add(v.id);
           }
         });
-        setDownloadingIds(inProgress);
+        setDownloadingIds((prev) => {
+          const next = new Set(prev);
+          inProgress.forEach((id) => next.add(id));
+          return next;
+        });
 
         return data;
       } catch (err) {
@@ -132,19 +155,17 @@ export default function HomePage() {
     }
   }, [channelInput, limit, page, activeFilter, searchQuery, loadVideos, refreshCounts]);
 
-  // Initial check & load library videos
+  // Initial check & load library videos (runs once on mount)
   useEffect(() => {
     let mounted = true;
 
     async function init() {
-      if (!mounted) return;
-
       const healthy = await checkBackendHealth();
       if (!mounted) return;
       setBackendHealthy(healthy);
 
       if (healthy) {
-        await loadVideos(1, limit, "all", "");
+        await loadVideos(initialPage, limit, initialFilter, initialSearch);
         refreshCounts();
       } else {
         setIsLoading(false);
@@ -155,11 +176,29 @@ export default function HomePage() {
     return () => {
       mounted = false;
     };
-  }, [limit, refreshCounts, loadVideos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle popstate for browser Back/Forward tab and page navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const f = getQueryParam("filter") || "all";
+      const p = parseInt(getQueryParam("page") || "1", 10) || 1;
+      const q = getQueryParam("q") || "";
+      setActiveFilter(f);
+      setPage(p);
+      setSearchQuery(q);
+      loadVideos(p, limit, f, q);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [limit, loadVideos]);
 
   // Polling loop when videos are downloading (pauses when tab is hidden)
   useEffect(() => {
     const hasActiveDownloads =
+      downloadingTotal > 0 ||
       downloadingIds.size > 0 ||
       videos.some(
         (v) =>
@@ -167,14 +206,18 @@ export default function HomePage() {
           v.download_status === "pending"
       );
 
+    if (!hasActiveDownloads) return;
+
     let interval: NodeJS.Timeout | null = null;
 
+    const tick = () => {
+      loadVideos(page, limit, activeFilter, searchQuery);
+      refreshCounts();
+    };
+
     const startPolling = () => {
-      if (hasActiveDownloads && !interval && document.visibilityState === "visible") {
-        interval = setInterval(() => {
-          loadVideos();
-          refreshCounts();
-        }, 2500);
+      if (!interval && document.visibilityState === "visible") {
+        interval = setInterval(tick, 2500);
       }
     };
 
@@ -187,11 +230,8 @@ export default function HomePage() {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
+        tick();
         startPolling();
-        if (hasActiveDownloads) {
-          loadVideos();
-          refreshCounts();
-        }
       } else {
         stopPolling();
       }
@@ -204,14 +244,24 @@ export default function HomePage() {
       stopPolling();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [downloadingIds, videos, loadVideos, refreshCounts]);
+  }, [
+    downloadingTotal,
+    downloadingIds,
+    videos,
+    page,
+    limit,
+    activeFilter,
+    searchQuery,
+    loadVideos,
+    refreshCounts,
+  ]);
 
   // Handle video download trigger
   const handleDownload = async (videoId: string) => {
     setDownloadingIds((prev) => new Set(prev).add(videoId));
     try {
       await downloadVideo(videoId);
-      await loadVideos();
+      await loadVideos(page, limit, activeFilter, searchQuery);
       refreshCounts();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -229,7 +279,7 @@ export default function HomePage() {
     if (!confirm("Are you sure you want to delete this downloaded video file?")) return;
     try {
       await deleteVideoDownload(videoId);
-      await loadVideos();
+      await loadVideos(page, limit, activeFilter, searchQuery);
       refreshCounts();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -245,6 +295,10 @@ export default function HomePage() {
     }
     setActiveFilter(filter);
     setPage(1);
+    setQueryParams(
+      { filter: filter === "all" ? null : filter, page: null },
+      { replace: true }
+    );
     loadVideos(1, limit, filter, searchQuery);
   };
 
@@ -252,6 +306,10 @@ export default function HomePage() {
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     setPage(1);
+    setQueryParams(
+      { q: query.trim() ? query.trim() : null, page: null },
+      { replace: true }
+    );
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
@@ -267,9 +325,18 @@ export default function HomePage() {
       searchTimeoutRef.current = null;
     }
     setPage(newPage);
+    setQueryParams(
+      { page: newPage <= 1 ? null : String(newPage) },
+      { replace: true }
+    );
     loadVideos(newPage, limit, activeFilter, searchQuery);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const handleUploadSuccess = useCallback(async () => {
+    await loadVideos(1, limit, activeFilter, searchQuery);
+    refreshCounts();
+  }, [limit, activeFilter, searchQuery, loadVideos, refreshCounts]);
 
   return (
     <div className="min-h-screen bg-[#090a0f] flex flex-col">
@@ -314,12 +381,15 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* OBS & Local Video Drag-and-Drop Ingestion */}
+        <OBSUploadDropzone onUploadSuccess={handleUploadSuccess} />
+
         {/* Channel and Filter Header */}
         <StatsBar
           channelTitle={channelTitle}
           totalVideos={cataloguedTotal || total}
           downloadedCount={downloadedTotal}
-          downloadingCount={downloadingIds.size}
+          downloadingCount={Math.max(downloadingTotal, downloadingIds.size)}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
         />
@@ -329,7 +399,15 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <Film className="w-5 h-5 text-rose-500" />
-              <span>Channel Gameplay Videos</span>
+              <span>
+                {activeFilter === "downloaded"
+                  ? "Downloaded Local VODs"
+                  : activeFilter === "downloading"
+                  ? "Currently Downloading Videos"
+                  : activeFilter === "not_downloaded"
+                  ? "Videos Ready to Download"
+                  : "Channel Gameplay Videos"}
+              </span>
               <span className="text-xs font-normal text-slate-400 ml-1">
                 ({total} items)
               </span>
@@ -418,5 +496,13 @@ export default function HomePage() {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <React.Suspense fallback={<div className="min-h-screen bg-[#090a0f]" />}>
+      <HomeContent />
+    </React.Suspense>
   );
 }

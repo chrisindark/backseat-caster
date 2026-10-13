@@ -50,6 +50,9 @@ class RenderResult(BaseModel):
     modes: list[str] = Field(default_factory=list)
     outputs: dict[str, str] = Field(default_factory=dict)
     local_outputs: dict[str, str] = Field(default_factory=dict)
+    effective_duration_seconds: float = 0.0
+    requested_duration_seconds: float = 0.0
+    clamped: bool = False
 
 
 @functools.lru_cache(maxsize=1)
@@ -559,6 +562,9 @@ class RenderEngine:
         crop_blur_padding: float | None = None,
         modes: list[str] | None = None,
         progress_callback: Callable[[float, str], None] | None = None,
+        normalize_audio: bool | None = None,
+        target_lufs: float | None = None,
+        clamp_to_duration: bool | None = None,
     ) -> RenderResult:
         """
         Render a gameplay video window into selected high-fidelity exports in a single pass.
@@ -587,8 +593,13 @@ class RenderEngine:
         # 1. Probe source video
         probe = probe_media(source_file)
 
-        # 2. Validate parameters & overwrite safety
-        validate_render_parameters(
+        # 2. Validate parameters & overwrite safety (with optional duration clamping)
+        should_clamp = (
+            clamp_to_duration
+            if clamp_to_duration is not None
+            else self.config.clamp_to_duration
+        )
+        effective_duration = validate_render_parameters(
             probe=probe,
             start_seconds=start_seconds,
             duration_seconds=duration_seconds,
@@ -596,7 +607,10 @@ class RenderEngine:
             narration_path=narr_file,
             overwrite=overwrite,
             modes=modes,
+            clamp_duration=should_clamp,
+            min_duration=self.config.min_clip_duration,
         )
+        is_clamped = abs(effective_duration - duration_seconds) > 0.001
 
         # 3. Select encoder with studio quality settings
         encoder_name, encoder_flags = select_encoder(self.config)
@@ -605,14 +619,27 @@ class RenderEngine:
         )
 
         # 4. Construct Audio Filter Graph
+        effective_normalize_audio = (
+            normalize_audio
+            if normalize_audio is not None
+            else self.config.normalize_audio
+        )
+        effective_target_lufs = (
+            target_lufs if target_lufs is not None else self.config.target_lufs
+        )
+
         audio_filter, audio_label = build_audio_filter_graph(
             start_seconds=0,
-            duration_seconds=duration_seconds,
+            duration_seconds=effective_duration,
             has_source_audio=probe.has_audio,
             has_narration=narr_file is not None,
             ducked_game_gain=self.config.ducked_game_gain,
             narration_gain=self.config.narration_gain,
             limiter_enabled=self.config.limiter_enabled,
+            normalize_audio=effective_normalize_audio,
+            target_lufs=effective_target_lufs,
+            loudnorm_true_peak=self.config.loudnorm_true_peak,
+            loudnorm_lra=self.config.loudnorm_lra,
         )
 
         # Resolve vertical crop layout preset and padding
@@ -660,7 +687,7 @@ class RenderEngine:
         self._render_all_targets_single_pass(
             source_path=source_file,
             start_seconds=start_seconds,
-            duration_seconds=duration_seconds,
+            duration_seconds=effective_duration,
             targets=targets,
             crop_blur_padding=effective_crop_padding,
             audio_filter=audio_filter,
@@ -693,7 +720,7 @@ class RenderEngine:
                 "file_path": str(target_out),
                 "width": w,
                 "height": h,
-                "duration": duration_seconds,
+                "duration": effective_duration,
                 "size_bytes": target_out.stat().st_size,
                 "encoder": encoder_name,
             }
@@ -752,7 +779,7 @@ class RenderEngine:
             clip_id=clip_id,
             source_probe=probe,
             start_seconds=start_seconds,
-            duration_seconds=duration_seconds,
+            duration_seconds=effective_duration,
             outputs=outputs_meta,
             narration_path=narr_file,
             render_duration=render_duration,
@@ -760,6 +787,10 @@ class RenderEngine:
             crop_preset=effective_preset,
             crop_blur_padding=effective_crop_padding,
             modes=normalized_modes,
+            normalize_audio=effective_normalize_audio,
+            target_lufs=effective_target_lufs,
+            requested_duration_seconds=duration_seconds,
+            clamped=is_clamped,
         )
         files_created.append(str(manifest_file))
 
@@ -817,4 +848,7 @@ class RenderEngine:
             modes=normalized_modes,
             outputs=stream_outputs,
             local_outputs=local_outputs,
+            effective_duration_seconds=effective_duration,
+            requested_duration_seconds=duration_seconds,
+            clamped=is_clamped,
         )

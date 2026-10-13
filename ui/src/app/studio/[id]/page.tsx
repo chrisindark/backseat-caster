@@ -10,6 +10,7 @@ import {
   getRenderJobStatus,
   getStreamUrl,
 } from "@/lib/api";
+import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import {
   ClippingMode,
   RenderClipResponse,
@@ -170,9 +171,11 @@ function StudioWorkspace() {
   const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(0);
   const sourceVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Audio mode
+  // Audio mode & normalization
   const [audioMode, setAudioMode] = useState<AudioMode>("gameplay_only");
   const [narrationPath, setNarrationPath] = useState<string>("");
+  const [normalizeAudio, setNormalizeAudio] = useState<boolean>(true);
+  const [targetLufs, setTargetLufs] = useState<number>(-14.0);
 
   // 6 Clipping modes multi-select
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
@@ -193,9 +196,27 @@ function StudioWorkspace() {
   const [renderedOutputs, setRenderedOutputs] = useState<Record<string, string>>({});
 
   // Active comparison tab & output streams
-  const [activeTab, setActiveTab] = useState<string>("comparison");
+  const initialTabFromQuery = searchParams.get("tab") || getQueryParam("tab") || "comparison";
+  const [activeTab, setActiveTabState] = useState<string>(initialTabFromQuery);
   const [leftCompareMode, setLeftCompareMode] = useState<string>("vertical_blur");
   const [rightCompareMode, setRightCompareMode] = useState<string>("third_person");
+
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabState(tab);
+    setQueryParams({ tab: tab === "comparison" ? null : tab }, { replace: true });
+  }, []);
+
+  // Listen to browser Back/Forward navigation to sync tab
+  useEffect(() => {
+    const handlePopState = () => {
+      const tabFromUrl = getQueryParam("tab");
+      if (tabFromUrl) {
+        setActiveTabState(tabFromUrl);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // Existing renders cache
   const [existingRenders, setExistingRenders] = useState<RenderManifest[]>([]);
@@ -241,6 +262,15 @@ function StudioWorkspace() {
     ? Math.max(1, Math.min(300, parseInt(customDuration, 10) || 15))
     : durationPreset;
 
+  const currentStartSec = Math.max(0, parseSeconds(startSecondsInput) || 0);
+  const remainingVideoSeconds =
+    video && video.duration > 0 ? Math.max(0, video.duration - currentStartSec) : null;
+  const isDurationClamped =
+    remainingVideoSeconds !== null && activeDuration > remainingVideoSeconds;
+  const effectiveDuration = isDurationClamped
+    ? Math.max(1, remainingVideoSeconds)
+    : activeDuration;
+
   const extractOutputs = useCallback((latest: RenderManifest) => {
     const newOutputs: Record<string, string> = {};
     if (latest.outputs) {
@@ -270,16 +300,19 @@ function StudioWorkspace() {
     setRenderedOutputs(newOutputs);
 
     const vertKeys = Object.keys(newOutputs).filter((k) => k !== "landscape");
-    if (vertKeys.length >= 2) {
-      setActiveTab("comparison");
+    const queryTab = getQueryParam("tab") || searchParams.get("tab");
+    if (queryTab && (newOutputs[queryTab] || queryTab === "comparison")) {
+      setActiveTabState(queryTab);
+    } else if (vertKeys.length >= 2) {
+      setActiveTabState("comparison");
       setLeftCompareMode(vertKeys[0]);
       setRightCompareMode(vertKeys[1]);
     } else if (vertKeys.length === 1) {
-      setActiveTab(vertKeys[0]);
+      setActiveTabState(vertKeys[0]);
     } else if (newOutputs.landscape) {
-      setActiveTab("landscape");
+      setActiveTabState("landscape");
     }
-  }, []);
+  }, [searchParams]);
 
   // Refresh existing renders after user actions
   const refreshExistingRenders = useCallback(async () => {
@@ -367,11 +400,13 @@ function StudioWorkspace() {
       const res = await createRender({
         video_id: video.id,
         start_seconds: startSec,
-        duration_seconds: activeDuration,
+        duration_seconds: effectiveDuration,
         crop_preset: cropPresetForCompat,
         crop_blur_padding: selectedModes.includes("custom") ? customBlurPadding : undefined,
         modes: selectedModes,
         narration_path: audioMode === "voiceover" && narrationPath.trim() ? narrationPath.trim() : null,
+        normalize_audio: normalizeAudio,
+        target_lufs: targetLufs,
       });
 
       let completedJob: RenderJobResponse | RenderClipResponse = res;
@@ -654,6 +689,11 @@ function StudioWorkspace() {
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                         Duration: <span className="text-rose-400 font-mono">{activeDuration}s</span>
+                        {isDurationClamped && (
+                          <span className="text-amber-400 text-[11px] ml-1.5 font-normal">
+                            (capped: {effectiveDuration}s)
+                          </span>
+                        )}
                       </label>
                       <div className="flex items-center gap-1.5">
                         {[10, 15, 30, 60].map((sec) => (
@@ -705,12 +745,19 @@ function StudioWorkspace() {
 
                   {/* Summary extraction banner */}
                   <div className="p-3 bg-black/30 rounded-xl border border-white/5 flex items-center justify-between text-xs text-slate-400">
-                    <span>
-                      Selected Range:{" "}
-                      <strong className="text-white font-mono">
-                        {startSecondsInput}s → {formatSeconds(parseSeconds(startSecondsInput) + activeDuration)}
-                      </strong>
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>
+                        Selected Range:{" "}
+                        <strong className="text-white font-mono">
+                          {startSecondsInput}s → {formatSeconds(currentStartSec + effectiveDuration)}
+                        </strong>
+                      </span>
+                      {isDurationClamped && (
+                        <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/60 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                          Capped at video end ({effectiveDuration}s)
+                        </span>
+                      )}
+                    </div>
                     <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
                       <Sparkles className="w-3.5 h-3.5" /> High-Fidelity Lossless Cuts
                     </span>
@@ -927,6 +974,58 @@ function StudioWorkspace() {
                         className="w-full px-3 py-1.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-purple-500"
                       />
                     )}
+
+                    {/* Audio Normalization (EBU R128 -14 LUFS) */}
+                    <div className="mt-2 pt-2.5 border-t border-white/10 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                          <span className="text-xs font-semibold text-slate-200">EBU R128 Loudness Normalization</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNormalizeAudio(!normalizeAudio)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            normalizeAudio ? "bg-cyan-500" : "bg-white/10"
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                              normalizeAudio ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>YouTube Shorts Standard:</span>
+                        <span className="font-mono font-bold text-cyan-400">
+                          {normalizeAudio ? `${targetLufs.toFixed(1)} LUFS` : "Disabled"}
+                        </span>
+                      </div>
+                      {normalizeAudio && (
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] font-mono text-slate-500">-24</span>
+                          <input
+                            type="range"
+                            min="-24"
+                            max="-9"
+                            step="0.5"
+                            value={targetLufs}
+                            onChange={(e) => setTargetLufs(parseFloat(e.target.value))}
+                            className="flex-1 accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                          />
+                          <span className="text-[10px] font-mono text-slate-500">-9</span>
+                          <button
+                            type="button"
+                            onClick={() => setTargetLufs(-14.0)}
+                            className="text-cyan-400 hover:text-cyan-300 text-[10px] underline ml-1 cursor-pointer"
+                            title="Reset to YouTube Shorts standard (-14 LUFS)"
+                          >
+                            -14 (Reset)
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 

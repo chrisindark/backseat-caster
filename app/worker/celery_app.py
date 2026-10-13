@@ -27,3 +27,19 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=False,
     broker_connection_max_retries=0,
 )
+
+
+@celery_app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    pass
+
+
+from celery.signals import worker_process_init  # noqa: E402
+
+
+@worker_process_init.connect
+def on_worker_process_init(**kwargs):
+    """Ensure child Celery worker processes initialize an isolated database connection pool."""
+    from app.database import engine
+
+    engine.dispose(close=False)

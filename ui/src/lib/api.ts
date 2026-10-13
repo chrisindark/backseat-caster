@@ -195,6 +195,58 @@ export async function deleteVideo(videoId: string, deleteFile = true): Promise<{
   return parseResponse<{ status: string; message?: string }>(res, `delete video ${videoId}`);
 }
 
+export function getVideoThumbnailUrl(videoId: string): string {
+  return `${API_BASE}/videos/${videoId}/thumbnail`;
+}
+
+export async function uploadLocalVideo(
+  file: File,
+  title?: string,
+  channelName: string = "OBS Studio",
+  onProgress?: (progressPct: number) => void
+): Promise<VideoItem> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (title) formData.append("title", title);
+    if (channelName) formData.append("channel_name", channelName);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/videos/upload`);
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          onProgress(percentComplete);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      try {
+        const text = xhr.responseText;
+        const json = JSON.parse(text);
+        if (xhr.status >= 200 && xhr.status < 300 && json.success) {
+          resolve(json.response as VideoItem);
+        } else {
+          const errMsg =
+            json.error_message || json.detail || `Upload failed with HTTP status ${xhr.status}`;
+          reject(new Error(typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg)));
+        }
+      } catch (err) {
+        reject(new Error(`Failed to parse response: ${err}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Network error during local video upload"));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 export async function createRender(request: RenderRequest): Promise<RenderClipResponse> {
   const res = await fetch(`${API_BASE}/renders`, {
     method: "POST",

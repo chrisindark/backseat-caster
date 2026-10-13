@@ -204,18 +204,20 @@ def test_filters_generation():
 
 def test_audio_filters_unducked_vs_ducked():
     """Verify pure game audio has no ducking, and narration mix has ducking + limiter."""
-    # Mode 1: No narration -> No ducking
+    # Mode 1: No narration -> No ducking, with loudnorm
     unducked_graph, label = build_audio_filter_graph(
         start_seconds=0,
         duration_seconds=5,
         has_source_audio=True,
         has_narration=False,
+        normalize_audio=True,
     )
     assert "atrim=" in unducked_graph
     assert "volume=" not in unducked_graph  # Zero volume attenuation!
     assert "alimiter" not in unducked_graph
+    assert "loudnorm=I=-14.0:TP=-1.5:LRA=11.0" in unducked_graph
 
-    # Mode 2: With narration -> Ducking + Limiter
+    # Mode 2: With narration -> Ducking + Limiter + loudnorm
     ducked_graph, label = build_audio_filter_graph(
         start_seconds=0,
         duration_seconds=5,
@@ -223,10 +225,37 @@ def test_audio_filters_unducked_vs_ducked():
         has_narration=True,
         ducked_game_gain=0.30,
         narration_gain=1.0,
+        normalize_audio=True,
     )
     assert "volume=0.30" in ducked_graph
     assert "amix=" in ducked_graph
     assert "alimiter=" in ducked_graph
+    assert "loudnorm=I=-14.0:TP=-1.5:LRA=11.0" in ducked_graph
+
+
+def test_audio_normalization_ebu_r128():
+    """Verify EBU R128 loudness normalization toggles and custom LUFS targets."""
+    # Disabled normalization
+    off_graph, _ = build_audio_filter_graph(
+        start_seconds=0,
+        duration_seconds=5,
+        has_source_audio=True,
+        has_narration=False,
+        normalize_audio=False,
+    )
+    assert "loudnorm" not in off_graph
+
+    # Custom LUFS target (-16 LUFS podcast standard)
+    custom_graph, _ = build_audio_filter_graph(
+        start_seconds=0,
+        duration_seconds=5,
+        has_source_audio=True,
+        has_narration=True,
+        normalize_audio=True,
+        target_lufs=-16.0,
+        loudnorm_true_peak=-1.0,
+    )
+    assert "loudnorm=I=-16.0:TP=-1.0:LRA=11.0" in custom_graph
 
 
 def test_render_clip_integration(synthetic_assets, tmp_path):

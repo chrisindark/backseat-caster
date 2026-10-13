@@ -559,6 +559,8 @@ class RenderEngine:
         crop_blur_padding: float | None = None,
         modes: list[str] | None = None,
         progress_callback: Callable[[float, str], None] | None = None,
+        normalize_audio: bool | None = None,
+        target_lufs: float | None = None,
     ) -> RenderResult:
         """
         Render a gameplay video window into selected high-fidelity exports in a single pass.
@@ -605,6 +607,15 @@ class RenderEngine:
         )
 
         # 4. Construct Audio Filter Graph
+        effective_normalize_audio = (
+            normalize_audio
+            if normalize_audio is not None
+            else self.config.normalize_audio
+        )
+        effective_target_lufs = (
+            target_lufs if target_lufs is not None else self.config.target_lufs
+        )
+
         audio_filter, audio_label = build_audio_filter_graph(
             start_seconds=0,
             duration_seconds=duration_seconds,
@@ -613,6 +624,10 @@ class RenderEngine:
             ducked_game_gain=self.config.ducked_game_gain,
             narration_gain=self.config.narration_gain,
             limiter_enabled=self.config.limiter_enabled,
+            normalize_audio=effective_normalize_audio,
+            target_lufs=effective_target_lufs,
+            loudnorm_true_peak=self.config.loudnorm_true_peak,
+            loudnorm_lra=self.config.loudnorm_lra,
         )
 
         # Resolve vertical crop layout preset and padding
@@ -760,6 +775,8 @@ class RenderEngine:
             crop_preset=effective_preset,
             crop_blur_padding=effective_crop_padding,
             modes=normalized_modes,
+            normalize_audio=effective_normalize_audio,
+            target_lufs=effective_target_lufs,
         )
         files_created.append(str(manifest_file))
 

@@ -1,5 +1,7 @@
 """Tests for BackseatCaster API endpoints and BaseResponse envelope."""
 
+import subprocess
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -1426,3 +1428,112 @@ def test_delete_render_job_not_found(client):
     """DELETE /renders/jobs/{job_id} returns 404 for unknown job."""
     res = client.delete(f"{settings.API_PREFIX}/renders/jobs/nonexistent_job")
     assert res.status_code == 404
+
+
+def test_upload_local_video_success(client, db_session, tmp_path, monkeypatch):
+    """POST /videos/upload ingests local/OBS recording, creates thumbnail, and catalogues video."""
+    downloads_dir = tmp_path / "downloads"
+    downloads_dir.mkdir(parents=True)
+    monkeypatch.setattr(settings, "DOWNLOADS_DIR", str(downloads_dir))
+
+    # Generate a lightweight 1-second synthetic video
+    sample_mp4 = tmp_path / "obs_test.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=duration=1:size=320x240:rate=15",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(sample_mp4),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+    with open(sample_mp4, "rb") as f:
+        response = client.post(
+            f"{settings.API_PREFIX}/videos/upload",
+            files={"file": ("obs_session_01.mp4", f, "video/mp4")},
+            data={"title": "Ranked OBS Match", "channel_name": "Pro Gamer"},
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["success"] is True
+    video_item = data["response"]
+    assert video_item["id"].startswith("obs_")
+    assert video_item["title"] == "Ranked OBS Match"
+    assert video_item["channel_name"] == "Pro Gamer"
+    assert video_item["is_downloaded"] is True
+    assert video_item["download_status"] == "completed"
+    assert video_item["duration"] >= 1
+    assert video_item["thumbnail_url"] is not None
+
+    # Test thumbnail retrieval endpoint
+    thumb_res = client.get(f"{settings.API_PREFIX}/videos/{video_item['id']}/thumbnail")
+    assert thumb_res.status_code == 200
+    assert thumb_res.headers["content-type"].startswith("image/jpeg")
+
+
+def test_upload_local_video_unsupported_format(client):
+    """POST /videos/upload rejects non-video file formats with 400 Bad Request."""
+    response = client.post(
+        f"{settings.API_PREFIX}/videos/upload",
+        files={"file": ("notes.txt", b"plain text content", "text/plain")},
+        data={"title": "Text File"},
+    )
+    assert response.status_code == 400
+
+
+def test_render_with_audio_normalization(client, db_session, tmp_path, monkeypatch):
+    """POST /renders persists and respects normalize_audio and target_lufs."""
+    renders_dir = tmp_path / "renders"
+    renders_dir.mkdir(parents=True)
+    monkeypatch.setattr(settings, "RENDERS_DIR", str(renders_dir))
+
+    norm_file = tmp_path / "norm.mp4"
+    norm_file.write_bytes(b"dummy_mp4_bytes")
+
+    v = Video(
+        id="norm_vid_1",
+        title="Loudness Test Video",
+        webpage_url="local://norm_vid_1",
+        duration=60,
+        is_downloaded=True,
+        download_status="completed",
+        local_file_path=str(norm_file),
+    )
+    db_session.add(v)
+    db_session.commit()
+
+    payload = {
+        "video_id": "norm_vid_1",
+        "start_seconds": 0.0,
+        "duration_seconds": 10.0,
+        "normalize_audio": True,
+        "target_lufs": -14.0,
+    }
+    res = client.post(f"{settings.API_PREFIX}/renders", json=payload)
+    assert res.status_code == 200
+    job_data = res.json()["response"]
+    assert job_data["status"] == "pending"
+
+    # Check database record
+    db_job = (
+        db_session.query(RenderJob).filter(RenderJob.video_id == "norm_vid_1").first()
+    )
+    assert db_job is not None
+    assert db_job.normalize_audio is True
+    assert db_job.target_lufs == -14.0

@@ -147,7 +147,8 @@ class YtdlpService:
     @staticmethod
     def download_video(
         video_id: str,
-        quality: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        quality: str
+        | None = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """

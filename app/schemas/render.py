@@ -37,6 +37,14 @@ class RenderClipRequest(BaseModel):
         None,
         description="List of modes to render: 'landscape', 'vertical_blur', 'third_person', 'direct_crop', 'cinematic', 'custom'. Defaults to ['landscape', 'vertical_blur', crop_preset or 'third_person'].",
     )
+    normalize_audio: bool = Field(
+        True,
+        description="Enable EBU R128 audio normalization (default -14 LUFS standard for YouTube Shorts).",
+    )
+    target_lufs: float = Field(
+        -14.0,
+        description="Target integrated loudness in LUFS (-14.0 standard for YouTube Shorts).",
+    )
     sync: bool = Field(
         False,
         description="If True, wait for render to finish synchronously before returning.",
@@ -73,6 +81,8 @@ class RenderJobResponse(BaseModel):
     encoder: str = "auto"
     crop_preset: str = "third_person"
     crop_blur_padding: float | None = None
+    normalize_audio: bool = True
+    target_lufs: float = -14.0
     output_dir: str | None = None
     landscape_path: str | None = None
     vertical_blur_path: str | None = None

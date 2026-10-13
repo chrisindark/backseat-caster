@@ -9,6 +9,7 @@ import {
   VideoItem,
 } from "@/types/video";
 
+import { useScrollLock } from "@/lib/useScrollLock";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
@@ -30,7 +31,6 @@ import {
   Volume2,
   X
 } from "lucide-react";
-import { useScrollLock } from "@/lib/useScrollLock";
 import React, { useEffect, useRef, useState } from "react";
 
 interface ClipStudioModalProps {
@@ -201,9 +201,11 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
     }
   }
 
-  // Audio mode
+  // Audio mode & normalization
   const [audioMode, setAudioMode] = useState<AudioMode>("gameplay_only");
   const [narrationPath, setNarrationPath] = useState<string>("");
+  const [normalizeAudio, setNormalizeAudio] = useState<boolean>(true);
+  const [targetLufs, setTargetLufs] = useState<number>(-14.0);
 
   // Clipping modes multi-select
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
@@ -378,6 +380,8 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
         crop_preset: cropPresetForCompat,
         crop_blur_padding: selectedModes.includes("custom") ? customBlurPadding : undefined,
         modes: selectedModes,
+        normalize_audio: normalizeAudio,
+        target_lufs: targetLufs,
       });
 
       if (!isMountedRef.current) return;
@@ -758,6 +762,58 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                       />
                     </div>
                   )}
+
+                  {/* Audio Normalization (EBU R128 -14 LUFS) */}
+                  <div className="mt-2 pt-2.5 border-t border-white/10 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="text-xs font-semibold text-slate-200">EBU R128 Loudness Normalization</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setNormalizeAudio(!normalizeAudio)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          normalizeAudio ? "bg-cyan-500" : "bg-white/10"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            normalizeAudio ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span>YouTube Shorts Standard:</span>
+                      <span className="font-mono font-bold text-cyan-400">
+                        {normalizeAudio ? `${targetLufs.toFixed(1)} LUFS` : "Disabled"}
+                      </span>
+                    </div>
+                    {normalizeAudio && (
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] font-mono text-slate-500">-24</span>
+                        <input
+                          type="range"
+                          min="-24"
+                          max="-9"
+                          step="0.5"
+                          value={targetLufs}
+                          onChange={(e) => setTargetLufs(parseFloat(e.target.value))}
+                          className="flex-1 accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                        />
+                        <span className="text-[10px] font-mono text-slate-500">-9</span>
+                        <button
+                          type="button"
+                          onClick={() => setTargetLufs(-14.0)}
+                          className="text-cyan-400 hover:text-cyan-300 text-[10px] underline ml-1 cursor-pointer"
+                          title="Reset to YouTube Shorts standard (-14 LUFS)"
+                        >
+                          -14 (Reset)
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

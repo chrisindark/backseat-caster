@@ -21,6 +21,8 @@ def write_manifest(
     crop_preset: str | None = None,
     crop_blur_padding: float | None = None,
     modes: list[str] | None = None,
+    normalize_audio: bool = True,
+    target_lufs: float = -14.0,
 ) -> Path:
     """Generate and write manifest.json into the clip output directory."""
     effective_modes = modes or list(outputs.keys())
@@ -65,6 +67,13 @@ def write_manifest(
             "audio_codec": source_probe.audio_codec,
             "file_size_bytes": source_probe.file_size_bytes,
         },
+        "audio": {
+            "normalization": "EBU R128" if normalize_audio else "disabled",
+            "normalized": normalize_audio,
+            "target_lufs": target_lufs,
+            "true_peak_dbtp": -1.5 if normalize_audio else None,
+            "has_narration": narration_path is not None,
+        },
         "request": {
             "start_seconds": start_seconds,
             "duration_seconds": duration_seconds,
@@ -75,6 +84,8 @@ def write_manifest(
             if crop_blur_padding is not None
             else 0.3333,
             "modes": effective_modes,
+            "normalize_audio": normalize_audio,
+            "target_lufs": target_lufs,
         },
         "outputs": outputs,
         "created_at": datetime.now(UTC).isoformat(),

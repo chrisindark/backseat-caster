@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
 
     DATABASE_URL: str = "sqlite:///./data/backseatcaster.db"
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: float = 30.0
+    DB_POOL_RECYCLE: int = 1800
     DOWNLOADS_DIR: str = "./data/downloads"
     DEFAULT_YOUTUBE_CHANNEL: str = "@chrisindark"
 

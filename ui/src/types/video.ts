@@ -115,6 +115,8 @@ export interface RenderRequest {
   crop_preset?: "third_person" | "direct_crop" | "cinematic" | "custom" | string;
   crop_blur_padding?: number | null;
   modes?: ClippingMode[] | string[];
+  normalize_audio?: boolean;
+  target_lufs?: number;
   sync?: boolean;
 }
 
@@ -148,6 +150,8 @@ export interface RenderJobResponse {
   encoder?: string;
   crop_preset?: string;
   crop_blur_padding?: number | null;
+  normalize_audio?: boolean;
+  target_lufs?: number;
   modes?: string[];
   outputs?: Record<string, string>;
   output_dir?: string | null;

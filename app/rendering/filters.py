@@ -40,7 +40,7 @@ def build_vertical_blur_filter(
         f"{in_pad}split=2[{p}_bg_in][{p}_fg_in];"
         f"[{p}_bg_in]scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{height},boxblur={blur_sigma}:5[{p}_bg];"
-        f"[{p}_fg_in]scale={width}:-1:flags=lanczos[{p}_fg];"
+        f"[{p}_fg_in]scale={width}:-2:flags=lanczos[{p}_fg];"
         f"[{p}_bg][{p}_fg]overlay=(W-w)/2:(H-h)/2{out_pad}"
     )
 
@@ -62,29 +62,29 @@ def build_vertical_crop_filter(
       allowing the center crop to be 50% wider (ideal for third-person character views).
     """
     in_pad = f"[{input_label.strip('[]')}]" if input_label else ""
-    out_pad = f"[{output_label.strip('[]')}]" if output_label else ""
+    out_suffix = f"[{output_label.strip('[]')}]" if output_label else ""
 
     if blur_padding <= 0.001:
         return (
-            f"{in_pad}scale=-1:{height}:flags=lanczos,"
+            f"{in_pad}scale=-2:{height}:flags=lanczos,"
             f"crop={width}:{height}:(in_w-{width})/2:0,"
-            f"setsar=1{out_pad}"
+            f"setsar=1{out_suffix}"
         )
 
     # Compute foreground center crop height (e.g. 1920 * (2/3) = 1280px)
-    fg_height = int(round(height * (1.0 - blur_padding)))
+    fg_height = round(height * (1.0 - blur_padding))
     if fg_height % 2 != 0:
         fg_height -= 1
 
     in_pad_padded = in_pad if in_pad else "[0:v]"
-    out_pad_padded = out_pad if out_pad else "[v_out]"
+    out_pad_padded = out_suffix if out_suffix else "[v_out]"
     p = prefix or "v"
 
     return (
         f"{in_pad_padded}split=2[{p}_bg_in][{p}_fg_in];"
         f"[{p}_bg_in]scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{height},boxblur={blur_sigma}:5[{p}_bg];"
-        f"[{p}_fg_in]scale=-1:{fg_height}:flags=lanczos,"
+        f"[{p}_fg_in]scale=-2:{fg_height}:flags=lanczos,"
         f"crop={width}:{fg_height}:(in_w-{width})/2:0[{p}_fg];"
         f"[{p}_bg][{p}_fg]overlay=(W-w)/2:(H-h)/2{out_pad_padded}"
     )

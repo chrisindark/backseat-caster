@@ -161,10 +161,17 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.exception("Unhandled server exception: %s", exc)
+        from app.config import settings
+
+        error_message = (
+            f"Internal server error: {exc!s}"
+            if settings.DEBUG
+            else "An internal server error occurred."
+        )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=BaseResponse.error_response(
-                error_message=f"Internal server error: {exc!s}",
+                error_message=error_message,
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 error_code="INTERNAL_SERVER_ERROR",
             ).model_dump(),

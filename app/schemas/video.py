@@ -144,3 +144,50 @@ class VideoStatusResponse(BaseModel):
 class DeleteVideoResponse(BaseModel):
     status: str
     message: str
+
+
+class VideoCreateRequest(BaseModel):
+    id: str | None = Field(
+        None,
+        description="YouTube Video ID or custom identifier. If omitted, extracted from webpage_url or auto-generated.",
+    )
+    title: str = Field(..., min_length=1, description="Video title")
+    description: str | None = Field(None, description="Video description")
+    thumbnail_url: str | None = Field(None, description="Video thumbnail URL")
+    duration: int = Field(0, ge=0, description="Duration in seconds")
+    duration_formatted: str | None = Field(
+        None, description="Formatted duration e.g. '12:34'"
+    )
+    channel_name: str | None = Field(None, description="Channel or creator name")
+    channel_id: str | None = Field(None, description="Channel ID")
+    channel_url: str | None = Field(None, description="Channel URL")
+    view_count: int = Field(0, ge=0, description="View count")
+    published_at: str | None = Field(None, description="Published date string")
+    webpage_url: str | None = Field(
+        None,
+        description="Video page URL. If omitted and id is provided, defaults to YouTube watch URL.",
+    )
+
+
+class VideoUpdateRequest(BaseModel):
+    title: str | None = Field(None, min_length=1, description="Updated video title")
+    description: str | None = Field(None, description="Updated video description")
+    thumbnail_url: str | None = Field(None, description="Updated thumbnail URL")
+    duration: int | None = Field(None, ge=0, description="Updated duration in seconds")
+    duration_formatted: str | None = Field(
+        None, description="Updated formatted duration"
+    )
+    channel_name: str | None = Field(None, description="Updated channel name")
+    channel_id: str | None = Field(None, description="Updated channel ID")
+    channel_url: str | None = Field(None, description="Updated channel URL")
+    view_count: int | None = Field(None, ge=0, description="Updated view count")
+    published_at: str | None = Field(None, description="Updated published date")
+    webpage_url: str | None = Field(None, description="Updated webpage URL")
+    is_downloaded: bool | None = Field(None, description="Whether downloaded locally")
+    local_file_path: str | None = Field(None, description="Local file path")
+    file_size_bytes: int | None = Field(None, ge=0, description="File size in bytes")
+    download_status: str | None = Field(None, description="Download status")
+    download_progress: float | None = Field(
+        None, ge=0.0, le=100.0, description="Download progress percentage"
+    )
+    error_message: str | None = Field(None, description="Download or error message")

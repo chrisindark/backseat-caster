@@ -1,7 +1,5 @@
 """Audio mixing, ducking, and peak limiting filtergraph builders."""
 
-from typing import Optional, Tuple
-
 
 def build_audio_filter_graph(
     start_seconds: float,
@@ -11,7 +9,7 @@ def build_audio_filter_graph(
     ducked_game_gain: float = 0.30,
     narration_gain: float = 1.0,
     limiter_enabled: bool = True,
-) -> Tuple[Optional[str], str]:
+) -> tuple[str | None, str]:
     """
     Construct audio filtergraph string and return (filter_string, output_label).
 
@@ -41,10 +39,12 @@ def build_audio_filter_graph(
     if has_source_audio:
         graph = (
             f"[0:a]atrim=start={start_seconds:.3f}:duration={duration_seconds:.3f},"
-            f"asetpts=PTS-STARTPTS,volume={ducked_game_gain:.2f}[a_game];"
+            f"asetpts=PTS-STARTPTS[a_game];"
             f"[1:a]atrim=start=0:duration={duration_seconds:.3f},"
             f"asetpts=PTS-STARTPTS,volume={narration_gain:.2f}[a_narr];"
-            f"[a_game][a_narr]amix=inputs=2:duration=first:dropout_transition=2"
+            f"[a_game][a_narr]sidechaincompress=threshold=0.1:ratio=4:attack=20:release=250,"
+            f"volume={ducked_game_gain:.2f}[a_ducked];"
+            f"[a_ducked][a_narr]amix=inputs=2:duration=first:dropout_transition=2"
             f"{limiter_suffix}[a_out]"
         )
         return graph, "[a_out]"

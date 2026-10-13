@@ -47,8 +47,7 @@ def synthetic_assets(tmp_path_factory) -> dict:
             "aac",
             str(video_path),
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
 
@@ -68,8 +67,7 @@ def synthetic_assets(tmp_path_factory) -> dict:
             "-an",
             str(silent_video_path),
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
 
@@ -86,8 +84,7 @@ def synthetic_assets(tmp_path_factory) -> dict:
             "pcm_s16le",
             str(narration_path),
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
 
@@ -157,6 +154,28 @@ def test_validation_overwrite_protection(synthetic_assets, tmp_path):
     validate_render_parameters(
         probe, start_seconds=0, duration_seconds=1, output_dir=out_dir, overwrite=True
     )
+
+    # Test custom modes overwrite isolation:
+    # out_dir has landscape.mp4, but we only request ["vertical_blur", "direct_crop"]
+    validate_render_parameters(
+        probe,
+        start_seconds=0,
+        duration_seconds=1,
+        output_dir=out_dir,
+        overwrite=False,
+        modes=["vertical_blur", "direct_crop"],
+    )
+
+    # If requested modes include the existing "landscape", it should raise
+    with pytest.raises(ValidationError, match="already contains rendered files"):
+        validate_render_parameters(
+            probe,
+            start_seconds=0,
+            duration_seconds=1,
+            output_dir=out_dir,
+            overwrite=False,
+            modes=["landscape", "direct_crop"],
+        )
 
 
 def test_filters_generation():
@@ -397,3 +416,75 @@ def test_render_silent_video(synthetic_assets, tmp_path):
         assert Path(p).exists()
         probe = probe_media(p)
         assert probe.has_audio is True
+
+
+def test_render_single_mode_selection(synthetic_assets, tmp_path):
+    """Verify rendering a single selected mode (e.g. only landscape)."""
+    config = RenderConfig(
+        preferred_encoder="libx264",
+        libx264_crf=20,
+        libx264_preset="ultrafast",
+    )
+    engine = RenderEngine(config=config)
+    output_dir = tmp_path / "clip_single_mode"
+
+    result = engine.render_clip(
+        source_path=synthetic_assets["video"],
+        start_seconds=0.0,
+        duration_seconds=1.0,
+        output_dir=output_dir,
+        modes=["landscape"],
+        overwrite=True,
+    )
+
+    assert result.modes == ["landscape"]
+    assert Path(result.local_landscape_path).exists()
+    assert (output_dir / "landscape.mp4").exists()
+    assert not (output_dir / "vertical_blur.mp4").exists()
+
+
+def test_render_all_six_modes(synthetic_assets, tmp_path):
+    """Verify rendering all 6 clipping modes simultaneously in a single pass."""
+    config = RenderConfig(
+        preferred_encoder="libx264",
+        libx264_crf=20,
+        libx264_preset="ultrafast",
+    )
+    engine = RenderEngine(config=config)
+    output_dir = tmp_path / "clip_six_modes"
+
+    all_modes = [
+        "landscape",
+        "vertical_blur",
+        "third_person",
+        "direct_crop",
+        "cinematic",
+        "custom",
+    ]
+
+    result = engine.render_clip(
+        source_path=synthetic_assets["video"],
+        start_seconds=0.0,
+        duration_seconds=1.0,
+        output_dir=output_dir,
+        modes=all_modes,
+        crop_blur_padding=0.15,
+        overwrite=True,
+    )
+
+    assert result.modes == all_modes
+    for m in all_modes:
+        file_path = output_dir / f"{m}.mp4"
+        assert file_path.exists(), f"Expected {m}.mp4 to exist"
+        assert file_path.stat().st_size > 0
+
+    # Also verify manifest recorded all 6 modes
+    manifest_path = output_dir / "manifest.json"
+    assert manifest_path.exists()
+    import json
+
+    with open(manifest_path) as f:
+        manifest_data = json.load(f)
+    assert manifest_data["modes"] == all_modes
+    for m in all_modes:
+        assert m in manifest_data["outputs"]

@@ -1,21 +1,37 @@
 "use client";
 
-import { getStreamUrl } from "@/lib/api";
-import { RenderManifest, UploadSelectionPayload } from "@/types/video";
 import {
+  getStreamUrl,
+  getYouTubeAuthStatus,
+  getYouTubeAuthUrl,
+  uploadClipToYouTube,
+  uploadSelectedClipsToYouTube,
+} from "@/lib/api";
+import { useScrollLock } from "@/lib/useScrollLock";
+import {
+  RenderManifest,
+  UploadSelectionPayload,
+  YouTubeAuthStatus,
+  YouTubeUploadResult,
+} from "@/types/video";
+import {
+  AlertCircle,
   CheckCircle2,
   Download,
+  ExternalLink,
   FileJson,
+  Loader2,
   Radio,
   Smartphone,
   Trash2,
   Tv,
+  UploadCloud,
   X,
 } from "lucide-react";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { YoutubeIcon } from "./icons";
 
-export type UploadFormat = "vertical_blur" | "vertical_crop" | "landscape";
+export type UploadFormat = string;
 export type UploadPrivacy = "private" | "unlisted" | "public";
 
 interface UploadQueueModalProps {
@@ -25,12 +41,45 @@ interface UploadQueueModalProps {
   onClearAll: () => Promise<void>;
 }
 
+function getDefaultMetadata(item: RenderManifest) {
+  const preferred: UploadFormat =
+    item.upload_selection?.preferred_format ||
+    (item.modes && item.modes[0]) ||
+    (item.outputs && Object.keys(item.outputs)[0]) ||
+    "vertical_blur";
+  const start = item.clip?.start_seconds ?? item.request?.start_seconds ?? 0;
+  const dur = item.clip?.duration_seconds ?? item.request?.duration_seconds ?? 15;
+  const defaultTitle =
+    item.upload_selection?.title ||
+    `${item.video_title ? `${item.video_title.slice(0, 50)} - ` : ""}Highlight (${Math.round(start)}s-${Math.round(start + dur)}s)`;
+  const defaultDesc =
+    item.upload_selection?.description ||
+    `Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight`;
+  const defaultTags =
+    (item.upload_selection?.tags || ["Gaming", "MarvelRivals", "Highlights"]).join(", ");
+  const privacyVal: UploadPrivacy =
+    item.upload_selection?.privacy === "private" ||
+    item.upload_selection?.privacy === "public"
+      ? item.upload_selection.privacy
+      : "unlisted";
+
+  return {
+    title: defaultTitle,
+    description: defaultDesc,
+    tags: defaultTags,
+    privacy: privacyVal,
+    format: preferred,
+  };
+}
+
 export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   selectedRenders,
   onUpdateSelection,
   onClose,
   onClearAll,
 }) => {
+  useScrollLock(true);
+
   const [clipMetadata, setClipMetadata] = useState<
     Record<
       string,
@@ -54,34 +103,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
       }
     > = {};
     selectedRenders.forEach((item) => {
-      const preferred: UploadFormat =
-        item.upload_selection?.preferred_format === "vertical_crop" ||
-        item.upload_selection?.preferred_format === "landscape"
-          ? item.upload_selection.preferred_format
-          : "vertical_blur";
-      const start = item.clip?.start_seconds ?? item.request?.start_seconds ?? 0;
-      const dur = item.clip?.duration_seconds ?? item.request?.duration_seconds ?? 15;
-      const defaultTitle =
-        item.upload_selection?.title ||
-        `${item.video_title ? `${item.video_title.slice(0, 50)} - ` : ""}Highlight (${Math.round(start)}s-${Math.round(start + dur)}s)`;
-      const defaultDesc =
-        item.upload_selection?.description ||
-        `Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight`;
-      const defaultTags =
-        (item.upload_selection?.tags || ["Gaming", "MarvelRivals", "Highlights"]).join(", ");
-      const privacyVal: UploadPrivacy =
-        item.upload_selection?.privacy === "private" ||
-        item.upload_selection?.privacy === "public"
-          ? item.upload_selection.privacy
-          : "unlisted";
-
-      initial[item.clip_id] = {
-        title: defaultTitle,
-        description: defaultDesc,
-        tags: defaultTags,
-        privacy: privacyVal,
-        format: preferred,
-      };
+      initial[item.clip_id] = getDefaultMetadata(item);
     });
     return initial;
   });
@@ -89,18 +111,139 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // YouTube integration state
+  const [ytAuth, setYtAuth] = useState<YouTubeAuthStatus | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
+  const [uploadingClipIds, setUploadingClipIds] = useState<Set<string>>(new Set());
+  const [isUploadingBatch, setIsUploadingBatch] = useState<boolean>(false);
+  const [uploadedClips, setUploadedClips] = useState<Record<string, YouTubeUploadResult>>({});
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function checkAuth() {
+      setIsLoadingAuth(true);
+      try {
+        const status = await getYouTubeAuthStatus();
+        if (mounted) setYtAuth(status);
+      } catch (err) {
+        console.warn("Could not check YouTube auth status:", err);
+      } finally {
+        if (mounted) setIsLoadingAuth(false);
+      }
+    }
+    checkAuth();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleConnectYouTube = async () => {
+    try {
+      const data = await getYouTubeAuthUrl();
+      if (data.auth_url) {
+        window.open(data.auth_url, "_blank", "width=600,height=750");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadError(`Failed to initiate YouTube connection: ${msg}`);
+    }
+  };
+
+  const handleUploadSingle = async (clipId: string) => {
+    const meta = clipMetadata[clipId];
+    if (!meta) return;
+    setUploadingClipIds((prev) => new Set(prev).add(clipId));
+    setUploadError(null);
+    try {
+      const tagsArray = meta.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const isShort = meta.format !== "landscape";
+      const result = await uploadClipToYouTube(clipId, {
+        title: meta.title,
+        description: meta.description,
+        tags: tagsArray,
+        privacy: meta.privacy,
+        format: meta.format,
+        is_short: isShort,
+        sync: true,
+      });
+      setUploadedClips((prev) => ({ ...prev, [clipId]: result }));
+      setSuccessMessage(
+        `Successfully uploaded ${clipId} to YouTube as ${isShort ? "Short" : "Video"}!`
+      );
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadError(`Upload failed for ${clipId}: ${msg}`);
+    } finally {
+      setUploadingClipIds((prev) => {
+        const next = new Set(prev);
+        next.delete(clipId);
+        return next;
+      });
+    }
+  };
+
+  const handleUploadAllToYouTube = async () => {
+    if (selectedRenders.length === 0) return;
+    setIsUploadingBatch(true);
+    setUploadError(null);
+    try {
+      const batchRes = await uploadSelectedClipsToYouTube(true);
+      if (batchRes.results) {
+        const resultMap: Record<string, YouTubeUploadResult> = {};
+        batchRes.results.forEach((r) => {
+          resultMap[r.clip_id] = r;
+        });
+        setUploadedClips((prev) => ({ ...prev, ...resultMap }));
+      }
+      setSuccessMessage(
+        batchRes.message || `Uploaded ${batchRes.total_succeeded} clips to YouTube!`
+      );
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadError(`Batch upload failed: ${msg}`);
+    } finally {
+      setIsUploadingBatch(false);
+    }
+  };
+
+  // Close on Escape key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const handleFieldChange = (
     clipId: string,
     field: "title" | "description" | "tags" | "privacy" | "format",
     value: string
   ) => {
-    setClipMetadata((prev) => ({
-      ...prev,
-      [clipId]: {
-        ...prev[clipId],
-        [field]: value,
-      },
-    }));
+    setClipMetadata((prev) => {
+      const renderItem = selectedRenders.find((r) => r.clip_id === clipId);
+      const existing = prev[clipId] || (renderItem ? getDefaultMetadata(renderItem) : {
+        title: clipId,
+        description: "",
+        tags: "Gaming, Highlights",
+        privacy: "unlisted" as UploadPrivacy,
+        format: "vertical_blur" as UploadFormat,
+      });
+
+      return {
+        ...prev,
+        [clipId]: {
+          ...existing,
+          [field]: value,
+        },
+      };
+    });
   };
 
   const handleSaveClipMetadata = async (clipId: string) => {
@@ -168,6 +311,9 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   };
 
   const handleDownloadAll = () => {
+    setSuccessMessage(
+      "Starting downloads sequentially. If your browser asks for permission to download multiple files, please click 'Allow'."
+    );
     selectedRenders.forEach((r, idx) => {
       const meta = clipMetadata[r.clip_id];
       const fmt: UploadFormat =
@@ -185,15 +331,18 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto overscroll-contain"
+    >
       <div
-        className="relative w-full max-w-4xl max-h-[90vh] flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-4xl max-h-[calc(100vh-2rem)] flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-950/70">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-b border-white/10 bg-slate-950/70">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-rose-900/40 text-white">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-rose-900/40 text-white shrink-0">
               <YoutubeIcon className="w-5 h-5" />
             </div>
             <div>
@@ -210,13 +359,59 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-2 justify-end">
+            {/* YouTube Auth Badge / Connect Button */}
+            {isLoadingAuth ? (
+              <span className="text-xs text-slate-400 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-white/10">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Checking YouTube...</span>
+              </span>
+            ) : ytAuth?.is_authenticated ? (
+              <div
+                className="flex items-center gap-2 px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium"
+                title={`Connected to channel: ${ytAuth.channel_title || "YouTube"}`}
+              >
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="font-semibold">{ytAuth.channel_title || "Connected Channel"}</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectYouTube}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-900/30 transition-colors"
+                title="Connect YouTube account via OAuth"
+              >
+                <YoutubeIcon className="w-3.5 h-3.5" />
+                <span>Connect YouTube</span>
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors ml-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
+        {/* Upload error notice */}
+        {uploadError && (
+          <div className="px-6 py-2.5 bg-rose-500/15 border-b border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-2 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{uploadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUploadError(null)}
+              className="text-rose-400 hover:text-rose-200 text-xs underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Success toast notice */}
         {successMessage && (
@@ -241,16 +436,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
           ) : (
             <div className="space-y-4">
               {selectedRenders.map((render) => {
-                const meta = clipMetadata[render.clip_id] || {
-                  title: render.upload_selection?.title || render.clip_id,
-                  description: render.upload_selection?.description || "",
-                  tags: (render.upload_selection?.tags || []).join(", "),
-                  privacy:
-                    (render.upload_selection?.privacy as UploadPrivacy) || "unlisted",
-                  format:
-                    (render.upload_selection?.preferred_format as UploadFormat) ||
-                    "vertical_blur",
-                };
+                const meta = clipMetadata[render.clip_id] || getDefaultMetadata(render);
                 const chosenFormat = meta.format;
                 const streamUrl = getStreamUrl(render.clip_id, chosenFormat);
                 const isShort = chosenFormat === "vertical_blur" || chosenFormat === "vertical_crop";
@@ -297,43 +483,41 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                       </div>
 
                       {/* Format selector for this clip */}
-                      <div className="flex items-center gap-1.5 self-end sm:self-auto bg-slate-900 p-1 rounded-xl border border-white/10">
-                        <button
-                          type="button"
-                          onClick={() => handleFieldChange(render.clip_id, "format", "vertical_blur")}
-                          className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
-                            chosenFormat === "vertical_blur"
-                              ? "bg-rose-600 text-white shadow-sm"
-                              : "text-slate-400 hover:text-white"
-                          }`}
-                        >
-                          <Smartphone className="w-3 h-3" />
-                          <span>Vertical Blur (Short)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleFieldChange(render.clip_id, "format", "vertical_crop")}
-                          className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
-                            chosenFormat === "vertical_crop"
-                              ? "bg-rose-600 text-white shadow-sm"
-                              : "text-slate-400 hover:text-white"
-                          }`}
-                        >
-                          <Smartphone className="w-3 h-3" />
-                          <span>Vertical Crop</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleFieldChange(render.clip_id, "format", "landscape")}
-                          className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
-                            chosenFormat === "landscape"
-                              ? "bg-rose-600 text-white shadow-sm"
-                              : "text-slate-400 hover:text-white"
-                          }`}
-                        >
-                          <Tv className="w-3 h-3" />
-                          <span>16:9 Landscape</span>
-                        </button>
+                      <div className="flex items-center gap-1.5 self-end sm:self-auto bg-slate-900 p-1 rounded-xl border border-white/10 flex-wrap">
+                        {(() => {
+                          const list: string[] = [];
+                          if (render.outputs) {
+                            for (const k of Object.keys(render.outputs)) {
+                              if (render.outputs[k] && !list.includes(k)) list.push(k);
+                            }
+                          }
+                          if (render.modes) {
+                            for (const m of render.modes) {
+                              if (!list.includes(m)) list.push(m);
+                            }
+                          }
+                          const hasSpecialCrop = list.some((m) =>
+                            ["third_person", "direct_crop", "cinematic", "custom"].includes(m)
+                          );
+                          const filtered = hasSpecialCrop ? list.filter((m) => m !== "vertical_crop") : list;
+                          const formats = filtered.length > 0 ? filtered : ["vertical_blur", "vertical_crop", "landscape"];
+
+                          return formats.map((fmt) => (
+                            <button
+                              key={fmt}
+                              type="button"
+                              onClick={() => handleFieldChange(render.clip_id, "format", fmt)}
+                              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                                chosenFormat === fmt
+                                  ? "bg-rose-600 text-white shadow-sm"
+                                  : "text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              {fmt === "landscape" ? <Tv className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
+                              <span className="capitalize">{fmt.replace("_", " ")}</span>
+                            </button>
+                          ));
+                        })()}
                       </div>
                     </div>
 
@@ -406,8 +590,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                     </div>
 
                     {/* Bottom Actions for Clip */}
-                    <div className="flex items-center justify-between pt-2 text-xs">
-                      <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
                         <a
                           href={streamUrl}
                           download={`${render.clip_id}_${chosenFormat}.mp4`}
@@ -424,6 +608,67 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                         >
                           {savingId === render.clip_id ? "Saving..." : "Save Staging"}
                         </button>
+
+                        {/* YouTube Upload Button or View Link */}
+                        {(() => {
+                          const uploadRes =
+                            uploadedClips[render.clip_id] ||
+                            (render.youtube_upload
+                              ? {
+                                  clip_id: render.clip_id,
+                                  youtube_video_id: render.youtube_upload.video_id,
+                                  youtube_url: render.youtube_upload.url,
+                                  is_short: render.youtube_upload.is_short,
+                                  status: "completed",
+                                }
+                              : null);
+
+                          const isUploading = uploadingClipIds.has(render.clip_id);
+                          const isShort = chosenFormat !== "landscape";
+
+                          if (uploadRes && uploadRes.status === "completed" && uploadRes.youtube_url) {
+                            return (
+                              <a
+                                href={uploadRes.youtube_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 font-medium transition-colors"
+                              >
+                                <YoutubeIcon className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>View on YouTube {uploadRes.is_short ? "(Short)" : ""}</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            );
+                          }
+
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => handleUploadSingle(render.clip_id)}
+                              disabled={!ytAuth?.is_authenticated || isUploading}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 text-red-300 hover:bg-red-600/30 border border-red-500/40 font-medium transition-colors disabled:opacity-40"
+                              title={
+                                !ytAuth?.is_authenticated
+                                  ? "Connect YouTube account first using the button at top"
+                                  : `Upload to YouTube as ${isShort ? "Short" : "Video"}`
+                              }
+                            >
+                              {isUploading ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Uploading...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <UploadCloud className="w-3.5 h-3.5 text-red-400" />
+                                  <span>
+                                    Upload to YouTube ({isShort ? "Short" : "Video"})
+                                  </span>
+                                </>
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
 
                       <button
@@ -444,11 +689,11 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
 
         {/* Footer */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t border-white/10 bg-slate-950/70">
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <button
               onClick={handleExportJSON}
               disabled={selectedRenders.length === 0}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50 text-slate-200 border border-white/10 text-xs font-semibold transition-colors"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50 text-slate-200 border border-white/10 text-xs font-semibold transition-colors"
             >
               <FileJson className="w-3.5 h-3.5" />
               <span>Export Staging JSON</span>
@@ -456,10 +701,28 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
             <button
               onClick={handleDownloadAll}
               disabled={selectedRenders.length === 0}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50 text-slate-200 border border-white/10 text-xs font-semibold transition-colors"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50 text-slate-200 border border-white/10 text-xs font-semibold transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Download All Selected (.mp4)</span>
+              <span>Download All (.mp4)</span>
+            </button>
+            <button
+              onClick={handleUploadAllToYouTube}
+              disabled={!ytAuth?.is_authenticated || selectedRenders.length === 0 || isUploadingBatch}
+              className="flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-red-900/30 transition-all cursor-pointer whitespace-nowrap active:scale-95"
+              title={!ytAuth?.is_authenticated ? "Connect YouTube account first" : "Upload all selected renders"}
+            >
+              {isUploadingBatch ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Uploading Selected...</span>
+                </>
+              ) : (
+                <>
+                  <YoutubeIcon className="w-3.5 h-3.5" />
+                  <span>Upload All to YouTube</span>
+                </>
+              )}
             </button>
           </div>
 

@@ -57,6 +57,16 @@ data/*.db-shm
 .env.*.local
 !.env.example
 
+# Google / YouTube OAuth credentials and tokens
+*client_secret*.json
+client_secrets.json
+youtube_token.json
+token.json
+data/*token*.json
+data/*secret*.json
+data/*oauth*.json
+data/credentials/
+
 # Frontend build artifacts & dependencies
 .next/
 

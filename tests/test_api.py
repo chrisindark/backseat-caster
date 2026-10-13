@@ -98,6 +98,74 @@ def test_list_videos_with_content(client, db_session):
     assert payload["items"][0]["duration_formatted"] == "3:00"
 
 
+def test_list_videos_status_filtering(client, db_session):
+    # Setup: 1 downloaded, 1 downloading, 1 not_downloaded
+    v_dl = Video(
+        id="vid_downloaded",
+        title="Downloaded Gameplay",
+        thumbnail_url="https://i.ytimg.com/vi/vid_downloaded/hqdefault.jpg",
+        duration=120,
+        duration_formatted="2:00",
+        channel_name="Marvel Rivals",
+        webpage_url="https://www.youtube.com/watch?v=vid_downloaded",
+        is_downloaded=True,
+        download_status="completed",
+    )
+    v_ing = Video(
+        id="vid_downloading",
+        title="Downloading Gameplay",
+        thumbnail_url="https://i.ytimg.com/vi/vid_downloading/hqdefault.jpg",
+        duration=90,
+        duration_formatted="1:30",
+        channel_name="Marvel Rivals",
+        webpage_url="https://www.youtube.com/watch?v=vid_downloading",
+        is_downloaded=False,
+        download_status="downloading",
+    )
+    v_not = Video(
+        id="vid_not_dl",
+        title="Not Downloaded Gameplay",
+        thumbnail_url="https://i.ytimg.com/vi/vid_not_dl/hqdefault.jpg",
+        duration=60,
+        duration_formatted="1:00",
+        channel_name="Marvel Rivals",
+        webpage_url="https://www.youtube.com/watch?v=vid_not_dl",
+        is_downloaded=False,
+        download_status="not_downloaded",
+    )
+    db_session.add_all([v_dl, v_ing, v_not])
+    db_session.commit()
+
+    # 1. Filter: downloaded
+    res_dl = client.get(f"{settings.API_PREFIX}/videos?status=downloaded")
+    assert res_dl.status_code == 200
+    dl_items = res_dl.json()["response"]["items"]
+    assert len(dl_items) == 1
+    assert dl_items[0]["id"] == "vid_downloaded"
+    assert res_dl.json()["response"]["total"] == 1
+
+    # 2. Filter: not_downloaded
+    res_not = client.get(f"{settings.API_PREFIX}/videos?status=not_downloaded")
+    assert res_not.status_code == 200
+    not_items = res_not.json()["response"]["items"]
+    assert len(not_items) == 1
+    assert not_items[0]["id"] == "vid_not_dl"
+    assert res_not.json()["response"]["total"] == 1
+
+    # 3. Filter: downloading
+    res_ing = client.get(f"{settings.API_PREFIX}/videos?status=downloading")
+    assert res_ing.status_code == 200
+    ing_items = res_ing.json()["response"]["items"]
+    assert len(ing_items) == 1
+    assert ing_items[0]["id"] == "vid_downloading"
+    assert res_ing.json()["response"]["total"] == 1
+
+    # 4. Filter: all
+    res_all = client.get(f"{settings.API_PREFIX}/videos?status=all")
+    assert res_all.status_code == 200
+    assert res_all.json()["response"]["total"] == 3
+
+
 def test_get_single_video(client, db_session):
     video = Video(
         id="sample_vid_2",
@@ -243,8 +311,7 @@ def test_render_and_stream_endpoints(client, db_session, tmp_path):
             "aac",
             str(dummy_video_path),
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
 
@@ -415,8 +482,7 @@ def test_render_with_direct_crop_preset(client, db_session, tmp_path):
             "aac",
             str(dummy_video_path),
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
 
@@ -455,6 +521,83 @@ def test_render_with_direct_crop_preset(client, db_session, tmp_path):
     manifest = get_res.json()["response"]
     assert manifest["outputs"]["vertical_crop"]["crop_preset"] == "direct_crop"
     assert manifest["outputs"]["vertical_crop"]["crop_blur_padding"] == 0.0
+
+
+def test_render_with_custom_modes_and_stream(client, db_session, tmp_path):
+    import subprocess
+
+    dummy_video_path = tmp_path / "test_api_modes_source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=640x360:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=800:duration=1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(dummy_video_path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+    video = Video(
+        id="api_test_vod_modes",
+        title="API Test VOD Modes",
+        webpage_url="https://youtube.com/watch?v=api_test_vod_modes",
+        is_downloaded=True,
+        download_status="completed",
+        local_file_path=str(dummy_video_path),
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    clip_id = f"test_clip_modes_{int(tmp_path.stat().st_mtime)}"
+    target_modes = ["third_person", "cinematic", "custom"]
+    response = client.post(
+        f"{settings.API_PREFIX}/renders",
+        json={
+            "video_id": "api_test_vod_modes",
+            "start_seconds": 0,
+            "duration_seconds": 1,
+            "clip_id": clip_id,
+            "encoder": "libx264",
+            "modes": target_modes,
+            "crop_blur_padding": 0.1,
+            "overwrite": True,
+            "sync": True,
+        },
+    )
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["success"] is True
+    render_resp = res_data["response"]
+    assert render_resp["modes"] == target_modes
+    assert "third_person" in render_resp["outputs"]
+    assert "cinematic" in render_resp["outputs"]
+    assert "custom" in render_resp["outputs"]
+
+    # Verify stream endpoints for the new mode names
+    for m in target_modes:
+        stream_res = client.get(f"{settings.API_PREFIX}/renders/{clip_id}/stream/{m}")
+        assert stream_res.status_code == 200
+        assert stream_res.headers["content-type"] == "video/mp4"
+
+    # Verify manifest
+    get_res = client.get(f"{settings.API_PREFIX}/renders/{clip_id}")
+    assert get_res.status_code == 200
+    manifest = get_res.json()["response"]
+    assert manifest["modes"] == target_modes
 
 
 def test_render_job_celery_dispatch(client, db_session, monkeypatch, tmp_path):
@@ -554,7 +697,7 @@ def test_render_job_status_not_found(client):
 
 def test_get_channel_youtube_videos_preview(client, db_session, monkeypatch):
     """Verify previewing channel videos does not insert them to DB and detects existing ones."""
-    from app.services.youtube import YouTubeService
+    from app.services.youtube import YtdlpService
 
     # Insert one existing video
     existing = Video(
@@ -603,7 +746,7 @@ def test_get_channel_youtube_videos_preview(client, db_session, monkeypatch):
             ],
         }
 
-    monkeypatch.setattr(YouTubeService, "extract_channel_metadata", mock_extract)
+    monkeypatch.setattr(YtdlpService, "extract_channel_metadata", mock_extract)
 
     res = client.get(
         f"{settings.API_PREFIX}/videos/youtube/channel?channel=@test&limit=20&offset=0"
@@ -873,3 +1016,413 @@ def test_stream_video_downloaded_success(client, db_session, tmp_path):
     assert res.status_code == 200
     assert res.headers["content-type"].startswith("video/mp4")
     assert len(res.content) == len(dummy_file.read_bytes())
+
+
+def test_correlation_id_middleware(client):
+    """CorrelationIdMiddleware sets and propagates X-Correlation-ID header."""
+    # 1. Without header -> auto-generated UUID returned
+    res = client.get(f"{settings.API_PREFIX}/health")
+    assert "x-correlation-id" in res.headers
+    assert len(res.headers["x-correlation-id"]) > 0
+
+    # 2. With client header -> echoed back
+    custom_id = "test-corr-id-12345"
+    res2 = client.get(
+        f"{settings.API_PREFIX}/health", headers={"x-correlation-id": custom_id}
+    )
+    assert res2.headers.get("x-correlation-id") == custom_id
+
+
+def test_bulk_delete_renders_sync(client, db_session, tmp_path, monkeypatch):
+    """Bulk delete removes clip files from disk and RenderJob rows from database synchronously."""
+    monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path))
+
+    # Setup 2 clips with files and 1 non-existing
+    clip1_dir = tmp_path / "bulk_clip_1"
+    clip1_dir.mkdir(parents=True)
+    (clip1_dir / "landscape.mp4").write_bytes(b"dummy1")
+    (clip1_dir / "manifest.json").write_text("{}")
+
+    clip2_dir = tmp_path / "bulk_clip_2"
+    clip2_dir.mkdir(parents=True)
+    (clip2_dir / "landscape.mp4").write_bytes(b"dummy2")
+
+    job1 = RenderJob(
+        id="job_bulk_1",
+        clip_id="bulk_clip_1",
+        video_id="v1",
+        status="completed",
+        progress=100.0,
+        start_seconds=0.0,
+        duration_seconds=10.0,
+    )
+    job2 = RenderJob(
+        id="job_bulk_2",
+        clip_id="bulk_clip_2",
+        video_id="v2",
+        status="completed",
+        progress=100.0,
+        start_seconds=0.0,
+        duration_seconds=10.0,
+    )
+    db_session.add_all([job1, job2])
+    db_session.commit()
+
+    # 1. POST /bulk-delete
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/bulk-delete",
+        json={
+            "clip_ids": ["bulk_clip_1", "bulk_clip_2", "non_existing_clip"],
+            "sync": True,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    resp = data["response"]
+    assert resp["deleted_count"] == 2
+    assert "bulk_clip_1" in resp["deleted_clip_ids"]
+    assert "bulk_clip_2" in resp["deleted_clip_ids"]
+    assert "non_existing_clip" in resp["not_found_clip_ids"]
+
+    # Files must be gone
+    assert not clip1_dir.exists()
+    assert not clip2_dir.exists()
+
+    # Jobs must be deleted
+    remaining = (
+        db_session.query(RenderJob)
+        .filter(RenderJob.clip_id.in_(["bulk_clip_1", "bulk_clip_2"]))
+        .all()
+    )
+    assert len(remaining) == 0
+
+
+def test_bulk_delete_renders_via_delete_endpoints(
+    client, db_session, tmp_path, monkeypatch
+):
+    """DELETE /renders/bulk route accepts BulkDeleteRendersRequest."""
+    monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path))
+
+    c_dir = tmp_path / "delete_bulk_clip"
+    c_dir.mkdir(parents=True)
+    (c_dir / "manifest.json").write_text("{}")
+
+    job = RenderJob(
+        id="job_del_1",
+        clip_id="delete_bulk_clip",
+        video_id="v1",
+        status="completed",
+        progress=100.0,
+        start_seconds=0.0,
+        duration_seconds=5.0,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    res = client.request(
+        "DELETE",
+        f"{settings.API_PREFIX}/renders/bulk",
+        json={"clip_ids": ["delete_bulk_clip"], "sync": True},
+    )
+    assert res.status_code == 200
+    assert res.json()["response"]["deleted_count"] == 1
+    assert not c_dir.exists()
+
+
+def test_bulk_delete_renders_celery_dispatch(client, monkeypatch):
+    """Async bulk delete dispatches to Celery task when Celery broker is online."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr("app.routers.renders.is_celery_broker_online", lambda: True)
+    mock_task = MagicMock()
+    mock_task.id = "celery-bulk-del-123"
+    mock_delay = MagicMock(return_value=mock_task)
+    monkeypatch.setattr(
+        "app.routers.renders.bulk_delete_renders_celery_task.delay", mock_delay
+    )
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/bulk-delete",
+        json={"clip_ids": ["clip_a", "clip_b"], "sync": False},
+    )
+    assert res.status_code == 200
+    resp = res.json()["response"]
+    assert resp["task_id"] == "celery-bulk-del-123"
+    assert "via Celery" in resp["message"]
+    mock_delay.assert_called_once_with(["clip_a", "clip_b"])
+
+
+def test_bulk_delete_renders_background_fallback(client, monkeypatch):
+    """Async bulk delete dispatches to FastAPI background tasks when Celery broker is offline."""
+    monkeypatch.setattr("app.routers.renders.is_celery_broker_online", lambda: False)
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/bulk-delete",
+        json={"clip_ids": ["clip_offline_1"], "sync": False},
+    )
+    assert res.status_code == 200
+    resp = res.json()["response"]
+    assert resp["task_id"] is None
+    assert "background worker" in resp["message"]
+
+
+def test_create_video_success(client, db_session):
+    """POST /videos creates a new Video catalog entry and returns 201."""
+    payload = {
+        "id": "test_crud_vid_1",
+        "title": "CRUD Test Video",
+        "description": "Test description",
+        "duration": 90,
+        "channel_name": "TestChannel",
+        "webpage_url": "https://www.youtube.com/watch?v=test_crud_vid_1",
+    }
+    res = client.post(f"{settings.API_PREFIX}/videos", json=payload)
+    assert res.status_code == 201
+    data = res.json()
+    assert data["success"] is True
+    assert data["response"]["id"] == "test_crud_vid_1"
+    assert data["response"]["title"] == "CRUD Test Video"
+    assert data["response"]["duration_formatted"] == "1:30"
+
+    # Verify persisted in database
+    db_vid = db_session.query(Video).filter(Video.id == "test_crud_vid_1").first()
+    assert db_vid is not None
+    assert db_vid.title == "CRUD Test Video"
+
+
+def test_create_video_auto_extracted_id(client, db_session):
+    """POST /videos extracts video ID from webpage_url when id is not supplied."""
+    payload = {
+        "title": "Auto ID Video",
+        "webpage_url": "https://www.youtube.com/watch?v=abcdef12345",
+    }
+    res = client.post(f"{settings.API_PREFIX}/videos", json=payload)
+    assert res.status_code == 201
+    data = res.json()
+    assert data["response"]["id"] == "abcdef12345"
+
+
+def test_create_video_duplicate_conflict(client):
+    """POST /videos returns 409 Conflict when video with the same ID already exists."""
+    payload = {
+        "id": "dup_video_id",
+        "title": "First Creation",
+        "webpage_url": "https://www.youtube.com/watch?v=dup_video_id",
+    }
+    res1 = client.post(f"{settings.API_PREFIX}/videos", json=payload)
+    assert res1.status_code == 201
+
+    res2 = client.post(f"{settings.API_PREFIX}/videos", json=payload)
+    assert res2.status_code == 409
+    err_text = res2.json().get("error_message") or res2.json().get("detail") or ""
+    assert "already exists" in err_text
+
+
+def test_update_video_success(client, db_session):
+    """PATCH and PUT /videos/{video_id} update video attributes."""
+    video = Video(
+        id="upd_vid_1",
+        title="Original Title",
+        duration=60,
+        duration_formatted="1:00",
+        webpage_url="https://youtube.com/watch?v=upd_vid_1",
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    # 1. PATCH update title and duration
+    patch_res = client.patch(
+        f"{settings.API_PREFIX}/videos/upd_vid_1",
+        json={"title": "Updated Title", "duration": 125},
+    )
+    assert patch_res.status_code == 200
+    pdata = patch_res.json()["response"]
+    assert pdata["title"] == "Updated Title"
+    assert pdata["duration"] == 125
+    assert pdata["duration_formatted"] == "2:05"
+
+    # 2. PUT alias
+    put_res = client.put(
+        f"{settings.API_PREFIX}/videos/upd_vid_1",
+        json={"channel_name": "New Channel"},
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["response"]["channel_name"] == "New Channel"
+
+
+def test_update_video_not_found(client):
+    """PATCH /videos/{video_id} returns 404 for unknown video."""
+    res = client.patch(
+        f"{settings.API_PREFIX}/videos/nonexistent_id",
+        json={"title": "Doesn't exist"},
+    )
+    assert res.status_code == 404
+
+
+def test_delete_video_with_file_and_associated_jobs(client, db_session, tmp_path):
+    """DELETE /videos/{video_id} removes database row, associated RenderJobs, and downloaded file."""
+    fake_file = tmp_path / "del_vid.mp4"
+    fake_file.write_bytes(b"content")
+
+    video = Video(
+        id="del_vid",
+        title="To Delete",
+        webpage_url="https://youtube.com/watch?v=del_vid",
+        is_downloaded=True,
+        local_file_path=str(fake_file),
+    )
+    job = RenderJob(
+        id="job_linked_vid",
+        clip_id="clip_linked_vid",
+        video_id="del_vid",
+        start_seconds=0.0,
+        duration_seconds=5.0,
+    )
+    db_session.add_all([video, job])
+    db_session.commit()
+
+    res = client.delete(f"{settings.API_PREFIX}/videos/del_vid?delete_file=true")
+    assert res.status_code == 200
+    assert res.json()["response"]["status"] == "success"
+
+    # Video must be removed from DB
+    assert db_session.query(Video).filter(Video.id == "del_vid").first() is None
+    # Associated RenderJob must be removed
+    assert (
+        db_session.query(RenderJob).filter(RenderJob.video_id == "del_vid").first()
+        is None
+    )
+    # Disk file must be deleted
+    assert not fake_file.exists()
+
+
+def test_delete_video_not_found(client):
+    """DELETE /videos/{video_id} returns 404 for unknown video."""
+    res = client.delete(f"{settings.API_PREFIX}/videos/unknown_id")
+    assert res.status_code == 404
+
+
+def test_create_render_job_via_jobs_endpoint(client, db_session, monkeypatch, tmp_path):
+    """POST /renders/jobs creates a render job and returns 201 Created."""
+    from unittest.mock import MagicMock
+
+    dummy_vod = tmp_path / "jobs_endpoint_vid.mp4"
+    dummy_vod.write_bytes(b"dummy")
+
+    video = Video(
+        id="jobs_endpoint_vid",
+        title="Jobs Endpoint Video",
+        webpage_url="https://youtube.com/watch?v=jobs_endpoint_vid",
+        is_downloaded=True,
+        local_file_path=str(dummy_vod),
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    monkeypatch.setattr("app.routers.renders.is_celery_broker_online", lambda: True)
+    mock_task = MagicMock()
+    mock_task.id = "celery-job-123"
+    monkeypatch.setattr(
+        "app.services.renders.render_clip_celery_task.delay",
+        MagicMock(return_value=mock_task),
+    )
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/jobs",
+        json={
+            "video_id": "jobs_endpoint_vid",
+            "start_seconds": 10.0,
+            "duration_seconds": 20.0,
+            "crop_preset": "third_person",
+        },
+    )
+    assert res.status_code == 201
+    data = res.json()
+    assert data["success"] is True
+    assert data["response"]["job_id"] is not None
+
+
+def test_update_render_job_success(client, db_session):
+    """PATCH and PUT /renders/jobs/{job_id} update job fields."""
+    job = RenderJob(
+        id="upd_render_job_1",
+        clip_id="upd_clip_1",
+        video_id="v1",
+        status="rendering",
+        progress=45.0,
+        start_seconds=0.0,
+        duration_seconds=10.0,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # 1. PATCH progress and status
+    res = client.patch(
+        f"{settings.API_PREFIX}/renders/jobs/upd_render_job_1",
+        json={
+            "status": "completed",
+            "progress": 100.0,
+            "crop_preset": "cinematic",
+            "is_selected_for_upload": True,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()["response"]
+    assert data["status"] == "completed"
+    assert data["progress"] == 100.0
+    assert data["crop_preset"] == "cinematic"
+    assert data["is_selected_for_upload"] is True
+    assert data["completed_at"] is not None
+
+    # 2. PUT alias
+    put_res = client.put(
+        f"{settings.API_PREFIX}/renders/jobs/upd_render_job_1",
+        json={"error_message": "test note"},
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["response"]["error_message"] == "test note"
+
+
+def test_update_render_job_not_found(client):
+    """PATCH /renders/jobs/{job_id} returns 404 for unknown job."""
+    res = client.patch(
+        f"{settings.API_PREFIX}/renders/jobs/nonexistent_job",
+        json={"progress": 50.0},
+    )
+    assert res.status_code == 404
+
+
+def test_delete_render_job_success(client, db_session, tmp_path, monkeypatch):
+    """DELETE /renders/jobs/{job_id} removes the database job record and clip directory."""
+    monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path))
+
+    clip_dir = tmp_path / "del_job_clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "landscape.mp4").write_bytes(b"dummy")
+
+    job = RenderJob(
+        id="del_job_id",
+        clip_id="del_job_clip",
+        video_id="v1",
+        start_seconds=0.0,
+        duration_seconds=5.0,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    res = client.delete(f"{settings.API_PREFIX}/renders/jobs/del_job_id")
+    assert res.status_code == 200
+    assert res.json()["response"]["status"] == "deleted"
+
+    # Record and directory must be gone
+    assert (
+        db_session.query(RenderJob).filter(RenderJob.id == "del_job_id").first() is None
+    )
+    assert not clip_dir.exists()
+
+
+def test_delete_render_job_not_found(client):
+    """DELETE /renders/jobs/{job_id} returns 404 for unknown job."""
+    res = client.delete(f"{settings.API_PREFIX}/renders/jobs/nonexistent_job")
+    assert res.status_code == 404

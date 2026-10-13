@@ -8,9 +8,11 @@ from app.schemas.video import (
     SyncChannelRequest,
     SyncChannelResponse,
     VideoBase,
+    VideoCreateRequest,
     VideoListResponse,
     VideoResponse,
     VideoStatusResponse,
+    VideoUpdateRequest,
 )
 
 __all__ = [
@@ -21,7 +23,9 @@ __all__ = [
     "SyncChannelRequest",
     "SyncChannelResponse",
     "VideoBase",
+    "VideoCreateRequest",
     "VideoListResponse",
     "VideoResponse",
     "VideoStatusResponse",
+    "VideoUpdateRequest",
 ]

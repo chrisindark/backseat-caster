@@ -4,6 +4,9 @@ import logging
 import math
 import mimetypes
 import os
+import re
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,21 +16,30 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_task_db_session
+from app.models.render_job import RenderJob
 from app.models.video import Video
 from app.schemas.video import (
     DeleteVideoResponse,
     DownloadTaskResponse,
     SyncChannelResponse,
     VideoBase,
+    VideoCreateRequest,
     VideoListResponse,
     VideoResponse,
     VideoStatusResponse,
+    VideoUpdateRequest,
     YouTubeChannelVideoItem,
     YouTubeChannelVideosResponse,
 )
-from app.services.youtube import YouTubeService
+from app.services.youtube import YtdlpService, format_duration
+from app.worker import helpers
 from app.worker.celery_app import celery_app
-from app.worker.helpers import is_celery_broker_online
+
+
+def is_celery_broker_online() -> bool:
+    """Check whether Celery broker is online, delegating dynamically to helpers."""
+    return helpers.is_celery_broker_online()
+
 
 logger = logging.getLogger(__name__)
 
@@ -111,14 +123,29 @@ class VideoService:
             )
 
         if status and status != "all":
-            if status == "downloaded":
-                query = query.filter(Video.is_downloaded is True)
+            if status in ["downloaded", "completed"]:
+                query = query.filter(
+                    or_(
+                        Video.is_downloaded.is_(True),
+                        Video.download_status == "completed",
+                    )
+                )
             elif status == "not_downloaded":
-                query = query.filter(Video.is_downloaded is False)
+                query = query.filter(
+                    or_(
+                        Video.is_downloaded.is_(False),
+                        Video.is_downloaded.is_(None),
+                    ),
+                    Video.download_status.notin_(
+                        ["completed", "downloading", "pending"]
+                    ),
+                )
             elif status in ["downloading", "pending"]:
                 query = query.filter(
                     Video.download_status.in_(["downloading", "pending"])
                 )
+            elif status == "failed":
+                query = query.filter(Video.download_status == "failed")
 
         total = query.count()
         total_pages = math.ceil(total / limit) if total > 0 else 1
@@ -158,7 +185,7 @@ class VideoService:
         annotating each video with its database presence and download status.
         """
         target_channel = channel_url or settings.DEFAULT_YOUTUBE_CHANNEL
-        data = YouTubeService.extract_channel_metadata(
+        data = YtdlpService.extract_channel_metadata(
             target_channel, limit=limit, offset=offset
         )
         videos_raw = data.get("videos", [])
@@ -280,7 +307,7 @@ class VideoService:
                 )
 
             # Fallback: extract from YouTube and sync
-            data = YouTubeService.extract_channel_metadata(
+            data = YtdlpService.extract_channel_metadata(
                 target_channel, limit=limit, offset=offset
             )
             raw_videos = data.get("videos", [])
@@ -371,6 +398,109 @@ class VideoService:
         if not video:
             return None
         return VideoResponse.model_validate(video)
+
+    @staticmethod
+    def create_video(db: Session, request: VideoCreateRequest) -> VideoResponse:
+        """Create a new video resource in the catalog."""
+        vid_id = request.id
+        if not vid_id:
+            if request.webpage_url:
+                match = re.search(
+                    r"(?:v=|/videos/|youtu\.be/|/shorts/)([a-zA-Z0-9_-]{11})",
+                    request.webpage_url,
+                )
+                if match:
+                    vid_id = match.group(1)
+            if not vid_id:
+                vid_id = f"vid_{uuid.uuid4().hex[:12]}"
+
+        existing = db.query(Video).filter(Video.id == vid_id).first()
+        if existing:
+            raise ValueError(f"Video with id '{vid_id}' already exists")
+
+        webpage_url = request.webpage_url or f"https://www.youtube.com/watch?v={vid_id}"
+        duration_formatted = request.duration_formatted or format_duration(
+            request.duration
+        )
+
+        new_video = Video(
+            id=vid_id,
+            title=request.title,
+            description=request.description,
+            thumbnail_url=request.thumbnail_url,
+            duration=request.duration,
+            duration_formatted=duration_formatted,
+            channel_name=request.channel_name,
+            channel_id=request.channel_id,
+            channel_url=request.channel_url,
+            view_count=request.view_count,
+            published_at=request.published_at,
+            webpage_url=webpage_url,
+            is_downloaded=False,
+            download_status="not_downloaded",
+            download_progress=0.0,
+        )
+        db.add(new_video)
+        db.commit()
+        db.refresh(new_video)
+        return VideoResponse.model_validate(new_video)
+
+    @staticmethod
+    def update_video(
+        db: Session, video_id: str, request: VideoUpdateRequest
+    ) -> VideoResponse | None:
+        """Update fields on an existing video resource."""
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return None
+
+        update_data = request.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(video, field, value)
+
+        if (
+            "duration" in update_data
+            and "duration_formatted" not in update_data
+            and video.duration is not None
+        ):
+            video.duration_formatted = format_duration(video.duration)
+
+        video.updated_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(video)
+        return VideoResponse.model_validate(video)
+
+    @staticmethod
+    def delete_video(
+        db: Session, video_id: str, delete_file: bool = True
+    ) -> DeleteVideoResponse | None:
+        """Delete video record from database, clean up associated files and render jobs."""
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return None
+
+        if (
+            delete_file
+            and video.local_file_path
+            and os.path.exists(video.local_file_path)
+        ):
+            try:
+                os.remove(video.local_file_path)
+            except OSError as err:
+                logger.warning("Error removing video file for %s: %s", video_id, err)
+
+        # Clean up associated render jobs in DB
+        db.query(RenderJob).filter(RenderJob.video_id == video_id).delete(
+            synchronize_session=False
+        )
+
+        db.delete(video)
+        db.commit()
+
+        return DeleteVideoResponse(
+            status="success",
+            message=f"Video '{video_id}' deleted successfully",
+        )
 
     @staticmethod
     def start_download(
@@ -521,7 +651,7 @@ class VideoService:
                             "Error committing progress update: %s", commit_err
                         )
 
-            result = YouTubeService.download_video(
+            result = YtdlpService.download_video(
                 video_id=video_id, quality=quality, progress_callback=on_progress
             )
 

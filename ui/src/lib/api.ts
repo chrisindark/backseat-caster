@@ -9,20 +9,45 @@ import {
   UploadSelectionPayload,
   VideoItem,
   VideoListResponse,
+  YouTubeAuthStatus,
+  YouTubeBatchUploadResponse,
   YouTubeChannelResponse,
   YouTubeChannelVideoItem,
+  YouTubeUploadResult,
 } from "@/types/video";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 async function parseResponse<T>(res: Response, fallbackActionName: string): Promise<T> {
   if (!res.ok) {
-    let errMsg = `${res.status}`;
+    let errMsg = `${res.status} ${res.statusText}`;
     try {
-      const errJson = await res.json();
-      errMsg = errJson.error_message || errJson.detail || JSON.stringify(errJson);
+      const rawText = await res.text();
+      try {
+        const errJson = JSON.parse(rawText);
+        if (errJson) {
+          if (typeof errJson.error_message === "string") {
+            errMsg = errJson.error_message;
+          } else if (Array.isArray(errJson.detail)) {
+            errMsg = errJson.detail
+              .map((item: { msg?: string; loc?: (string | number)[] }) => {
+                const field = item.loc ? item.loc.slice(1).join(".") : "";
+                return field ? `${field}: ${item.msg}` : item.msg || JSON.stringify(item);
+              })
+              .join("; ");
+          } else if (typeof errJson.detail === "string") {
+            errMsg = errJson.detail;
+          } else {
+            errMsg = JSON.stringify(errJson);
+          }
+        }
+      } catch {
+        if (rawText && rawText.trim()) {
+          errMsg = rawText.trim();
+        }
+      }
     } catch {
-      errMsg = await res.text();
+      // response body could not be read
     }
     throw new Error(`Failed to ${fallbackActionName}: ${errMsg}`);
   }
@@ -145,6 +170,31 @@ export async function deleteVideoDownload(videoId: string): Promise<{ status: st
   return parseResponse<{ status: string; message?: string }>(res, "delete video download");
 }
 
+export async function createVideo(data: Partial<VideoItem> & { title: string }): Promise<VideoItem> {
+  const res = await fetch(`${API_BASE}/videos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return parseResponse<VideoItem>(res, "create video");
+}
+
+export async function updateVideo(videoId: string, data: Partial<VideoItem>): Promise<VideoItem> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return parseResponse<VideoItem>(res, `update video ${videoId}`);
+}
+
+export async function deleteVideo(videoId: string, deleteFile = true): Promise<{ status: string; message?: string }> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}?delete_file=${deleteFile}`, {
+    method: "DELETE",
+  });
+  return parseResponse<{ status: string; message?: string }>(res, `delete video ${videoId}`);
+}
+
 export async function createRender(request: RenderRequest): Promise<RenderClipResponse> {
   const res = await fetch(`${API_BASE}/renders`, {
     method: "POST",
@@ -200,6 +250,55 @@ export async function deleteRender(clipId: string): Promise<{
   );
 }
 
+export async function updateRenderJob(
+  jobId: string,
+  data: Partial<RenderJobResponse>
+): Promise<RenderJobResponse> {
+  const res = await fetch(`${API_BASE}/renders/jobs/${jobId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return parseResponse<RenderJobResponse>(res, `update render job ${jobId}`);
+}
+
+export async function deleteRenderJob(
+  jobId: string
+): Promise<{ status: string; clip_id?: string; message?: string }> {
+  const res = await fetch(`${API_BASE}/renders/jobs/${jobId}`, {
+    method: "DELETE",
+  });
+  return parseResponse<{ status: string; clip_id?: string; message?: string }>(
+    res,
+    `delete render job ${jobId}`
+  );
+}
+
+export interface BulkDeleteRendersResponse {
+  deleted_clip_ids: string[];
+  failed_clip_ids: string[];
+  not_found_clip_ids: string[];
+  deleted_count: number;
+  total_requested: number;
+  task_id?: string | null;
+  message: string;
+}
+
+export async function bulkDeleteRenders(
+  clipIds: string[],
+  options?: { sync?: boolean }
+): Promise<BulkDeleteRendersResponse> {
+  const res = await fetch(`${API_BASE}/renders/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clip_ids: clipIds,
+      sync: options?.sync ?? true,
+    }),
+  });
+  return parseResponse<BulkDeleteRendersResponse>(res, "bulk delete renders");
+}
+
 export async function updateUploadSelection(
   clipId: string,
   payload: UploadSelectionPayload
@@ -241,7 +340,7 @@ export async function getRenderJobStatus(targetId: string): Promise<RenderJobRes
   return parseResponse<RenderJobResponse>(res, `fetch render status for ${targetId}`);
 }
 
-export function getStreamUrl(clipId: string, videoType: "landscape" | "vertical_blur" | "vertical_crop"): string {
+export function getStreamUrl(clipId: string, videoType: "landscape" | "vertical_blur" | "vertical_crop" | "third_person" | "direct_crop" | "cinematic" | "custom" | string): string {
   return `${API_BASE}/renders/${clipId}/stream/${videoType}`;
 }
 
@@ -249,6 +348,75 @@ export function getDownloadedVideoStreamUrl(videoId: string): string {
   return `${API_BASE}/videos/${videoId}/stream`;
 }
 
+// -----------------------------------------------------------------------------
+// YouTube OAuth & Upload API Helpers
+// -----------------------------------------------------------------------------
 
+export async function getYouTubeAuthStatus(): Promise<YouTubeAuthStatus> {
+  const res = await fetch(`${API_BASE}/youtube/auth/status`, {
+    cache: "no-store",
+  });
+  return parseResponse<YouTubeAuthStatus>(res, "fetch YouTube auth status");
+}
 
+export async function getYouTubeAuthUrl(redirectUri?: string): Promise<{
+  auth_url: string;
+  redirect_uri: string;
+  client_id?: string;
+}> {
+  const query = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : "";
+  const res = await fetch(`${API_BASE}/youtube/auth/url${query}`, {
+    cache: "no-store",
+  });
+  return parseResponse<{
+    auth_url: string;
+    redirect_uri: string;
+    client_id?: string;
+  }>(res, "generate YouTube authorization URL");
+}
 
+export async function uploadClipToYouTube(
+  clipId: string,
+  options: {
+    title?: string;
+    description?: string;
+    tags?: string[];
+    privacy?: string;
+    format?: string;
+    is_short?: boolean;
+    sync?: boolean;
+  } = {}
+): Promise<YouTubeUploadResult> {
+  const res = await fetch(`${API_BASE}/youtube/upload/${clipId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  return parseResponse<YouTubeUploadResult>(res, `upload clip ${clipId} to YouTube`);
+}
+
+export async function uploadSelectedClipsToYouTube(
+  sync = false
+): Promise<YouTubeBatchUploadResponse> {
+  const query = sync ? "?sync=true" : "";
+  const res = await fetch(`${API_BASE}/youtube/upload/selected${query}`, {
+    method: "POST",
+  });
+  return parseResponse<YouTubeBatchUploadResponse>(
+    res,
+    "upload selected clips to YouTube"
+  );
+}
+
+export async function revokeYouTubeAuth(): Promise<{
+  revoked: boolean;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/youtube/auth/revoke`, {
+    method: "POST",
+  });
+  return parseResponse<{ revoked: boolean; message: string }>(
+    res,
+    "revoke YouTube authorization"
+  );
+}

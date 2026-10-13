@@ -21,7 +21,7 @@ import {
   Tv
 } from "lucide-react";
 import Link from "next/link";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 export default function YouTubeChannelPage() {
   const [channelInput, setChannelInput] = useState<string>("@chrisindark");
@@ -249,6 +249,18 @@ export default function YouTubeChannelPage() {
     });
   };
 
+  // Filtered videos based on local search keyword
+  const deferredSearchFilter = useDeferredValue(searchFilter);
+  const filteredVideos = useMemo(() => {
+    if (!deferredSearchFilter.trim()) return videos;
+    const q = deferredSearchFilter.toLowerCase();
+    return videos.filter(
+      (v) =>
+        v.title.toLowerCase().includes(q) ||
+        (v.channel_name && v.channel_name.toLowerCase().includes(q))
+    );
+  }, [videos, deferredSearchFilter]);
+
   // Select all currently filtered/loaded videos
   const handleToggleSelectAll = () => {
     const visibleVideos = filteredVideos;
@@ -313,16 +325,6 @@ export default function YouTubeChannelPage() {
       setIsSyncing(false);
     }
   };
-
-  // Filtered videos based on local search keyword
-  const filteredVideos = videos.filter((v) => {
-    if (!searchFilter.trim()) return true;
-    const q = searchFilter.toLowerCase();
-    return (
-      v.title.toLowerCase().includes(q) ||
-      (v.channel_name && v.channel_name.toLowerCase().includes(q))
-    );
-  });
 
   const inLibraryCount = videos.filter((v) => v.is_in_database).length;
   const unsyncedCount = videos.length - inLibraryCount;

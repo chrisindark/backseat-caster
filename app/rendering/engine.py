@@ -1,6 +1,9 @@
 """Core rendering engine orchestrating FFmpeg commands and exports."""
 
+import functools
 import logging
+import os
+import shutil
 import subprocess
 import threading
 import time
@@ -8,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.rendering.audio import build_audio_filter_graph
 from app.rendering.config import (
@@ -33,9 +36,9 @@ class RenderResult(BaseModel):
 
     clip_id: str
     output_dir: str
-    landscape_path: str
-    vertical_blur_path: str
-    vertical_crop_path: str
+    landscape_path: str = ""
+    vertical_blur_path: str = ""
+    vertical_crop_path: str = ""
     manifest_path: str
     encoder_used: str
     render_duration_seconds: float
@@ -44,15 +47,18 @@ class RenderResult(BaseModel):
     local_vertical_blur_path: str = ""
     local_vertical_crop_path: str = ""
     local_manifest_path: str = ""
+    modes: list[str] = Field(default_factory=list)
+    outputs: dict[str, str] = Field(default_factory=dict)
+    local_outputs: dict[str, str] = Field(default_factory=dict)
 
 
+@functools.lru_cache(maxsize=1)
 def detect_available_encoders() -> list[str]:
     """Inspect ffmpeg for available H.264 video encoders."""
     try:
         proc = subprocess.run(
             ["ffmpeg", "-hide_banner", "-encoders"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             check=True,
         )
@@ -220,8 +226,7 @@ class RenderEngine:
         )
         proc = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
 
@@ -241,23 +246,63 @@ class RenderEngine:
         source_path: Path,
         start_seconds: float,
         duration_seconds: float,
-        landscape_output: Path,
-        vert_blur_output: Path,
-        vert_crop_output: Path,
-        crop_blur_padding: float,
-        audio_filter: str | None,
-        audio_label: str,
-        encoder_flags: list[str],
+        targets: dict[str, Path] | Path,
+        crop_blur_padding: float = 0.3333,
+        audio_filter: str | None = None,
+        audio_label: str = "[a_out]",
+        encoder_flags: list[str] | None = None,
         narration_path: Path | None = None,
         progress_callback: Callable[[float, str], None] | None = None,
+        *args,
+        **kwargs,
     ):
         """
-        Execute a unified, single-pass FFmpeg command rendering landscape,
-        vertical_blur, and vertical_crop simultaneously.
-
-        Eliminates 3x redundant decoding and audio mixing passes.
+        Execute a unified, single-pass FFmpeg command rendering all requested
+        targets simultaneously. Eliminates redundant decoding and audio mixing passes.
         """
-        for out_file in (landscape_output, vert_blur_output, vert_crop_output):
+        # Backward-compatibility check: if positional arguments passed old Path objects
+        if isinstance(targets, Path):
+            landscape_out = targets
+            vert_blur_out = (
+                crop_blur_padding if isinstance(crop_blur_padding, Path) else args[0]
+            )
+            vert_crop_out = audio_filter if isinstance(audio_filter, Path) else args[1]
+            actual_padding = (
+                audio_label if isinstance(audio_label, (int, float)) else args[2]
+            )
+            actual_audio_filter = (
+                encoder_flags if isinstance(encoder_flags, str) else args[3]
+            )
+            actual_audio_label = (
+                narration_path if isinstance(narration_path, str) else args[4]
+            )
+            actual_encoder_flags = (
+                progress_callback if isinstance(progress_callback, list) else args[5]
+            )
+            actual_narration = kwargs.get("narration_path")
+            actual_callback = kwargs.get("progress_callback")
+
+            target_dict = {
+                "landscape": landscape_out,
+                "vertical_blur": vert_blur_out,
+                "vertical_crop": vert_crop_out,
+            }
+            return self._render_all_targets_single_pass(
+                source_path=source_path,
+                start_seconds=start_seconds,
+                duration_seconds=duration_seconds,
+                targets=target_dict,
+                crop_blur_padding=float(actual_padding),
+                audio_filter=actual_audio_filter,
+                audio_label=actual_audio_label,
+                encoder_flags=actual_encoder_flags or [],
+                narration_path=actual_narration,
+                progress_callback=actual_callback,
+            )
+
+        target_dict = targets
+        encoder_flags = encoder_flags or []
+        for out_file in target_dict.values():
             out_file.parent.mkdir(parents=True, exist_ok=True)
 
         cmd = [
@@ -292,42 +337,107 @@ class RenderEngine:
                 ]
             )
 
-        # Build filtergraph:
-        # 1. Split source video into 3 branches
-        filter_parts = [
-            "[0:v]split=3[v_in_land][v_in_blur][v_in_crop]",
-            build_landscape_filter(
-                width=self.config.landscape_width,
-                height=self.config.landscape_height,
-                input_label="v_in_land",
-                output_label="v_out_land",
-            ),
-            build_vertical_blur_filter(
-                width=self.config.vertical_width,
-                height=self.config.vertical_height,
-                input_label="v_in_blur",
-                output_label="v_out_blur",
-                prefix="v_b",
-            ),
-            build_vertical_crop_filter(
-                width=self.config.vertical_width,
-                height=self.config.vertical_height,
-                blur_padding=crop_blur_padding,
-                input_label="v_in_crop",
-                output_label="v_out_crop",
-                prefix="v_c",
-            ),
-        ]
+        modes = list(target_dict.keys())
+        n_targets = len(modes)
 
-        # 2. Audio mixing & splitting into 3 target streams
+        # Build filtergraph:
+        filter_parts = []
+
+        # 1. Video splitting if n_targets > 1
+        if n_targets > 1:
+            split_labels = "".join(f"[v_in_{i}]" for i in range(n_targets))
+            filter_parts.append(f"[0:v]split={n_targets}{split_labels}")
+
+        for i, mode in enumerate(modes):
+            v_in = f"v_in_{i}" if n_targets > 1 else "0:v"
+            v_out = f"v_out_{i}"
+            p = f"v_{i}"
+
+            if mode == "landscape":
+                filter_parts.append(
+                    build_landscape_filter(
+                        width=self.config.landscape_width,
+                        height=self.config.landscape_height,
+                        input_label=v_in,
+                        output_label=v_out,
+                    )
+                )
+            elif mode == "vertical_blur":
+                filter_parts.append(
+                    build_vertical_blur_filter(
+                        width=self.config.vertical_width,
+                        height=self.config.vertical_height,
+                        input_label=v_in,
+                        output_label=v_out,
+                        prefix=p,
+                    )
+                )
+            elif mode == "third_person":
+                filter_parts.append(
+                    build_vertical_crop_filter(
+                        width=self.config.vertical_width,
+                        height=self.config.vertical_height,
+                        blur_padding=0.3333,
+                        input_label=v_in,
+                        output_label=v_out,
+                        prefix=p,
+                    )
+                )
+            elif mode == "direct_crop":
+                filter_parts.append(
+                    build_vertical_crop_filter(
+                        width=self.config.vertical_width,
+                        height=self.config.vertical_height,
+                        blur_padding=0.0,
+                        input_label=v_in,
+                        output_label=v_out,
+                        prefix=p,
+                    )
+                )
+            elif mode == "cinematic":
+                filter_parts.append(
+                    build_vertical_crop_filter(
+                        width=self.config.vertical_width,
+                        height=self.config.vertical_height,
+                        blur_padding=0.25,
+                        input_label=v_in,
+                        output_label=v_out,
+                        prefix=p,
+                    )
+                )
+            elif mode == "custom" or mode == "vertical_crop":
+                filter_parts.append(
+                    build_vertical_crop_filter(
+                        width=self.config.vertical_width,
+                        height=self.config.vertical_height,
+                        blur_padding=crop_blur_padding,
+                        input_label=v_in,
+                        output_label=v_out,
+                        prefix=p,
+                    )
+                )
+            else:
+                filter_parts.append(
+                    build_landscape_filter(
+                        width=self.config.landscape_width,
+                        height=self.config.landscape_height,
+                        input_label=v_in,
+                        output_label=v_out,
+                    )
+                )
+
+        # 2. Audio mixing & splitting into n_targets streams
+        clean_audio_label = audio_label.strip("[]") if audio_filter else "0:a"
         if audio_filter:
             filter_parts.append(audio_filter)
-            clean_audio_label = audio_label.strip("[]")
+
+        if n_targets > 1:
+            asplit_labels = "".join(f"[a_out_{i}]" for i in range(n_targets))
             filter_parts.append(
-                f"[{clean_audio_label}]asplit=3[a_out_land][a_out_blur][a_out_crop]"
+                f"[{clean_audio_label}]asplit={n_targets}{asplit_labels}"
             )
         else:
-            filter_parts.append("[0:a]asplit=3[a_out_land][a_out_blur][a_out_crop]")
+            filter_parts.append(f"[{clean_audio_label}]anull[a_out_0]")
 
         filter_complex_str = ";".join(filter_parts)
         cmd.extend(["-filter_complex", filter_complex_str])
@@ -341,29 +451,25 @@ class RenderEngine:
             str(self.config.audio_sample_rate),
         ]
 
-        # Target 1: Landscape (1920x1080)
-        cmd.extend(["-map", "[v_out_land]", "-map", "[a_out_land]"])
-        cmd.extend(encoder_flags)
-        cmd.extend(audio_flags)
-        cmd.append(str(landscape_output))
-
-        # Target 2: Vertical Blur (1080x1920)
-        cmd.extend(["-map", "[v_out_blur]", "-map", "[a_out_blur]"])
-        cmd.extend(encoder_flags)
-        cmd.extend(audio_flags)
-        cmd.append(str(vert_blur_output))
-
-        # Target 3: Vertical Crop (1080x1920)
-        cmd.extend(["-map", "[v_out_crop]", "-map", "[a_out_crop]"])
-        cmd.extend(encoder_flags)
-        cmd.extend(audio_flags)
-        cmd.append(str(vert_crop_output))
+        # Map each target format to output file
+        for i, mode in enumerate(modes):
+            target_file = target_dict[mode]
+            cmd.extend(
+                [
+                    "-map",
+                    f"[v_out_{i}]",
+                    "-map",
+                    f"[a_out_{i}]",
+                ]
+            )
+            cmd.extend(encoder_flags)
+            cmd.extend(audio_flags)
+            cmd.append(str(target_file))
 
         logger.info(
-            "Executing single-pass multi-target render command for [%s, %s, %s]",
-            landscape_output.name,
-            vert_blur_output.name,
-            vert_crop_output.name,
+            "Executing single-pass multi-target render command for %d formats: [%s]",
+            n_targets,
+            ", ".join(target_dict.keys()),
         )
 
         proc = subprocess.Popen(
@@ -383,31 +489,49 @@ class RenderEngine:
         err_thread.start()
 
         last_reported_pct = 20.0
-        if proc.stdout:
-            for line in proc.stdout:
-                line = line.strip()
-                if (
-                    line.startswith("out_time_us=")
-                    and progress_callback
-                    and duration_seconds > 0
-                ):
-                    val = line.split("=", 1)[1].strip()
-                    if val.lstrip("-").isdigit():
-                        elapsed_s = int(val) / 1_000_000.0
-                        fraction = min(1.0, max(0.0, elapsed_s / duration_seconds))
-                        current_pct = round(20.0 + (fraction * 65.0), 1)
-                        if (
-                            current_pct - last_reported_pct >= 5.0
-                            or current_pct >= 85.0
-                        ):
-                            last_reported_pct = current_pct
-                            progress_callback(
-                                current_pct,
-                                f"Rendering 3 formats (single-pass {int(fraction * 100)}%)",
-                            )
+        try:
+            if proc.stdout:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if (
+                        line.startswith("out_time_us=")
+                        and progress_callback
+                        and duration_seconds > 0
+                    ):
+                        val = line.split("=", 1)[1].strip()
+                        if val.lstrip("-").isdigit():
+                            elapsed_s = int(val) / 1_000_000.0
+                            fraction = min(1.0, max(0.0, elapsed_s / duration_seconds))
+                            current_pct = round(20.0 + (fraction * 65.0), 1)
+                            if (
+                                current_pct - last_reported_pct >= 5.0
+                                or current_pct >= 85.0
+                            ):
+                                last_reported_pct = current_pct
+                                progress_callback(
+                                    current_pct,
+                                    f"Rendering {n_targets} format(s) (single-pass {int(fraction * 100)}%)",
+                                )
 
-        proc.wait()
-        err_thread.join(timeout=2.0)
+            proc.wait()
+        except BaseException:
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    proc.kill()
+                    proc.wait()
+            raise
+        finally:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                    proc.wait()
+                except Exception:
+                    pass
+            err_thread.join(timeout=2.0)
+
         err_msg = "".join(stderr_output).strip()
 
         if proc.returncode != 0:
@@ -416,10 +540,10 @@ class RenderEngine:
                 f"FFmpeg failed while rendering variants in single-pass:\n{err_msg}"
             )
 
-        for target_file in (landscape_output, vert_blur_output, vert_crop_output):
+        for mode, target_file in target_dict.items():
             if not target_file.exists() or target_file.stat().st_size == 0:
                 raise RuntimeError(
-                    f"Render failed to create valid output file: {target_file}"
+                    f"Render failed to create valid output file for '{mode}': {target_file}"
                 )
 
     def render_clip(
@@ -433,13 +557,18 @@ class RenderEngine:
         overwrite: bool = False,
         crop_preset: str | None = None,
         crop_blur_padding: float | None = None,
+        modes: list[str] | None = None,
         progress_callback: Callable[[float, str], None] | None = None,
     ) -> RenderResult:
         """
-        Render a gameplay video window into 3 studio-quality exports in a single pass:
-        1. landscape.mp4 (1920x1080 16:9)
-        2. vertical_blur.mp4 (1080x1920 9:16 blurred top/bottom)
-        3. vertical_crop.mp4 (1080x1920 9:16 center cropped)
+        Render a gameplay video window into selected high-fidelity exports in a single pass.
+        Supports any combination of the 6 clipping modes:
+        - landscape (1920x1080 16:9 master)
+        - vertical_blur (1080x1920 9:16 blurred background)
+        - third_person (1080x1920 9:16 33.3% padded crop)
+        - direct_crop (1080x1920 9:16 full center crop)
+        - cinematic (1080x1920 9:16 25% padded crop)
+        - custom (1080x1920 9:16 custom blur padding)
         + manifest.json
         """
         start_time_perf = time.perf_counter()
@@ -466,6 +595,7 @@ class RenderEngine:
             output_dir=out_directory,
             narration_path=narr_file,
             overwrite=overwrite,
+            modes=modes,
         )
 
         # 3. Select encoder with studio quality settings
@@ -485,14 +615,6 @@ class RenderEngine:
             limiter_enabled=self.config.limiter_enabled,
         )
 
-        outputs_meta: dict[str, dict[str, Any]] = {}
-        files_created: list[str] = []
-
-        # 5. Output file paths
-        landscape_out = out_directory / "landscape.mp4"
-        vert_blur_out = out_directory / "vertical_blur.mp4"
-        vert_crop_out = out_directory / "vertical_crop.mp4"
-
         # Resolve vertical crop layout preset and padding
         if crop_blur_padding is not None:
             effective_crop_padding = max(0.0, min(0.6, float(crop_blur_padding)))
@@ -504,17 +626,42 @@ class RenderEngine:
             effective_crop_padding = self.config.crop_blur_padding
             effective_preset = self.config.crop_preset
 
-        # 6. Execute Single-Pass Multi-Target Render
+        # Resolve modes to render
+        if not modes:
+            modes = ["landscape", "vertical_blur", crop_preset or "third_person"]
+
+        normalized_modes: list[str] = []
+        for m in modes:
+            if m not in normalized_modes and m in (
+                "landscape",
+                "vertical_blur",
+                "third_person",
+                "direct_crop",
+                "cinematic",
+                "custom",
+                "vertical_crop",
+            ):
+                normalized_modes.append(m)
+
+        if not normalized_modes:
+            normalized_modes = ["landscape", "vertical_blur", "third_person"]
+
+        # Build output targets dictionary
+        targets: dict[str, Path] = {
+            m: out_directory / f"{m}.mp4" for m in normalized_modes
+        }
+
+        # 5. Execute Single-Pass Multi-Target Render
         if progress_callback:
-            progress_callback(20.0, "Rendering 3 formats (single-pass)")
+            progress_callback(
+                20.0, f"Rendering {len(normalized_modes)} format(s) (single-pass)"
+            )
 
         self._render_all_targets_single_pass(
             source_path=source_file,
             start_seconds=start_seconds,
             duration_seconds=duration_seconds,
-            landscape_output=landscape_out,
-            vert_blur_output=vert_blur_out,
-            vert_crop_output=vert_crop_out,
+            targets=targets,
             crop_blur_padding=effective_crop_padding,
             audio_filter=audio_filter,
             audio_label=audio_label,
@@ -524,42 +671,77 @@ class RenderEngine:
         )
 
         api_prefix = self.config.api_prefix
-        outputs_meta["landscape"] = {
-            "path": f"{api_prefix}/renders/{clip_id}/stream/landscape",
-            "file_path": str(landscape_out),
-            "width": self.config.landscape_width,
-            "height": self.config.landscape_height,
-            "duration": duration_seconds,
-            "size_bytes": landscape_out.stat().st_size,
-            "encoder": encoder_name,
-        }
-        files_created.append(str(landscape_out))
+        outputs_meta: dict[str, dict[str, Any]] = {}
+        files_created: list[str] = []
 
-        outputs_meta["vertical_blur"] = {
-            "path": f"{api_prefix}/renders/{clip_id}/stream/vertical_blur",
-            "file_path": str(vert_blur_out),
-            "width": self.config.vertical_width,
-            "height": self.config.vertical_height,
-            "duration": duration_seconds,
-            "size_bytes": vert_blur_out.stat().st_size,
-            "encoder": encoder_name,
-        }
-        files_created.append(str(vert_blur_out))
+        for m in normalized_modes:
+            target_out = targets[m]
+            is_landscape = m == "landscape"
+            w = (
+                self.config.landscape_width
+                if is_landscape
+                else self.config.vertical_width
+            )
+            h = (
+                self.config.landscape_height
+                if is_landscape
+                else self.config.vertical_height
+            )
 
-        outputs_meta["vertical_crop"] = {
-            "path": f"{api_prefix}/renders/{clip_id}/stream/vertical_crop",
-            "file_path": str(vert_crop_out),
-            "width": self.config.vertical_width,
-            "height": self.config.vertical_height,
-            "duration": duration_seconds,
-            "size_bytes": vert_crop_out.stat().st_size,
-            "encoder": encoder_name,
-            "crop_preset": effective_preset,
-            "crop_blur_padding": effective_crop_padding,
-        }
-        files_created.append(str(vert_crop_out))
+            meta: dict[str, Any] = {
+                "path": f"{api_prefix}/renders/{clip_id}/stream/{m}",
+                "file_path": str(target_out),
+                "width": w,
+                "height": h,
+                "duration": duration_seconds,
+                "size_bytes": target_out.stat().st_size,
+                "encoder": encoder_name,
+            }
+            if m in (
+                "third_person",
+                "direct_crop",
+                "cinematic",
+                "custom",
+                "vertical_crop",
+            ):
+                meta["crop_preset"] = m if m != "vertical_crop" else effective_preset
+                meta["crop_blur_padding"] = (
+                    CROP_PADDING_PRESETS.get(m, effective_crop_padding)
+                    if m != "custom"
+                    else effective_crop_padding
+                )
 
-        # 7. Write Manifest
+            outputs_meta[m] = meta
+            files_created.append(str(target_out))
+
+        # Backward compatibility: ensure vertical_crop.mp4 exists on disk if any crop mode was created
+        vert_crop_out = out_directory / "vertical_crop.mp4"
+        primary_crop_mode = None
+        for cand in (
+            "third_person",
+            "direct_crop",
+            "cinematic",
+            "custom",
+            "vertical_crop",
+        ):
+            if cand in normalized_modes:
+                primary_crop_mode = cand
+                break
+
+        if primary_crop_mode and not vert_crop_out.exists():
+            try:
+                os.link(targets[primary_crop_mode], vert_crop_out)
+            except OSError:
+                shutil.copyfile(targets[primary_crop_mode], vert_crop_out)
+            files_created.append(str(vert_crop_out))
+            if "vertical_crop" not in outputs_meta:
+                outputs_meta["vertical_crop"] = {
+                    **outputs_meta[primary_crop_mode],
+                    "path": f"{api_prefix}/renders/{clip_id}/stream/vertical_crop",
+                    "file_path": str(vert_crop_out),
+                }
+
+        # 6. Write Manifest
         if progress_callback:
             progress_callback(90.0, "Generating audit manifest")
 
@@ -577,6 +759,7 @@ class RenderEngine:
             api_prefix=api_prefix,
             crop_preset=effective_preset,
             crop_blur_padding=effective_crop_padding,
+            modes=normalized_modes,
         )
         files_created.append(str(manifest_file))
 
@@ -584,22 +767,54 @@ class RenderEngine:
             progress_callback(100.0, "Completed")
 
         logger.info(
-            "Successfully completed clip render %s in %.2fs (single-pass multi-target)",
+            "Successfully completed clip render %s (%d formats) in %.2fs (single-pass multi-target)",
             clip_id,
+            len(normalized_modes),
             render_duration,
         )
+
+        land_file = targets.get("landscape")
+        blur_file = targets.get("vertical_blur")
+        crop_file = targets.get("vertical_crop") or (
+            vert_crop_out if vert_crop_out.exists() else None
+        )
+
+        landscape_stream = (
+            f"{api_prefix}/renders/{clip_id}/stream/landscape" if land_file else ""
+        )
+        vertical_blur_stream = (
+            f"{api_prefix}/renders/{clip_id}/stream/vertical_blur" if blur_file else ""
+        )
+        vertical_crop_stream = (
+            f"{api_prefix}/renders/{clip_id}/stream/vertical_crop"
+            if crop_file
+            else (
+                f"{api_prefix}/renders/{clip_id}/stream/{primary_crop_mode}"
+                if primary_crop_mode
+                else ""
+            )
+        )
+
+        stream_outputs = {
+            m: f"{api_prefix}/renders/{clip_id}/stream/{m}" for m in normalized_modes
+        }
+        local_outputs = {m: str(targets[m]) for m in normalized_modes}
+
         return RenderResult(
             clip_id=clip_id,
             output_dir=str(out_directory),
-            landscape_path=f"{api_prefix}/renders/{clip_id}/stream/landscape",
-            vertical_blur_path=f"{api_prefix}/renders/{clip_id}/stream/vertical_blur",
-            vertical_crop_path=f"{api_prefix}/renders/{clip_id}/stream/vertical_crop",
+            landscape_path=landscape_stream,
+            vertical_blur_path=vertical_blur_stream,
+            vertical_crop_path=vertical_crop_stream,
             manifest_path=f"{api_prefix}/renders/{clip_id}/stream/manifest",
             encoder_used=encoder_name,
             render_duration_seconds=render_duration,
             files_created=files_created,
-            local_landscape_path=str(landscape_out),
-            local_vertical_blur_path=str(vert_blur_out),
-            local_vertical_crop_path=str(vert_crop_out),
+            local_landscape_path=str(land_file) if land_file else "",
+            local_vertical_blur_path=str(blur_file) if blur_file else "",
+            local_vertical_crop_path=str(crop_file) if crop_file else "",
             local_manifest_path=str(manifest_file),
+            modes=normalized_modes,
+            outputs=stream_outputs,
+            local_outputs=local_outputs,
         )

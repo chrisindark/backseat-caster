@@ -21,7 +21,7 @@ class RenderJob(Base):
         String(64),
         primary_key=True,
         index=True,
-        default=str(uuid.uuid4()),
+        default=lambda: str(uuid.uuid4()),
     )
     clip_id = Column(String(128), index=True, nullable=False)
     video_id = Column(String(64), index=True, nullable=False)
@@ -38,6 +38,7 @@ class RenderJob(Base):
     # Crop preset values: third_person, direct_center, cinematic_balanced
     crop_preset = Column(String(64), default="third_person")
     crop_blur_padding = Column(Float, default=0.3333)
+    modes = Column(String(256), nullable=True)
     overwrite = Column(Boolean, default=True)
 
     # Outputs
@@ -54,9 +55,17 @@ class RenderJob(Base):
     error_message = Column(Text, nullable=True)
 
     # Upload staging / selection
-    is_selected_for_upload = Column(Boolean, default=False)
+    is_selected_for_upload = Column(Boolean, default=False, index=True)
     selected_format = Column(String(64), nullable=True)
     upload_metadata = Column(Text, nullable=True)
+
+    # YouTube upload tracking
+    youtube_video_id = Column(String(64), nullable=True)
+    youtube_upload_status = Column(String(32), default="not_uploaded", index=True)
+    youtube_upload_progress = Column(Float, default=0.0)
+    youtube_upload_url = Column(String(256), nullable=True)
+    youtube_uploaded_at = Column(DateTime, nullable=True)
+    youtube_upload_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
@@ -75,6 +84,9 @@ class RenderJob(Base):
             "encoder": self.encoder,
             "crop_preset": self.crop_preset,
             "crop_blur_padding": self.crop_blur_padding,
+            "modes": [m.strip() for m in self.modes.split(",") if m.strip()]
+            if self.modes
+            else [],
             "output_dir": self.output_dir,
             "landscape_path": self.landscape_path,
             "vertical_blur_path": self.vertical_blur_path,
@@ -87,6 +99,14 @@ class RenderJob(Base):
             "is_selected_for_upload": bool(self.is_selected_for_upload),
             "selected_format": self.selected_format,
             "upload_metadata": self.upload_metadata,
+            "youtube_video_id": self.youtube_video_id,
+            "youtube_upload_status": self.youtube_upload_status or "not_uploaded",
+            "youtube_upload_progress": self.youtube_upload_progress or 0.0,
+            "youtube_upload_url": self.youtube_upload_url,
+            "youtube_uploaded_at": self.youtube_uploaded_at.isoformat()
+            if self.youtube_uploaded_at
+            else None,
+            "youtube_upload_error": self.youtube_upload_error,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat()

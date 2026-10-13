@@ -25,17 +25,17 @@ export const Pagination: React.FC<PaginationProps> = ({
   const startItem = (currentPage - 1) * itemsPerPage + 1;
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
 
-  // Generate page numbers
-  const pages: number[] = [];
-  for (let p = 1; p <= totalPages; p++) {
-    if (
-      p === 1 ||
-      p === totalPages ||
-      (p >= currentPage - 1 && p <= currentPage + 1)
-    ) {
-      pages.push(p);
+  // Generate page numbers with O(1) window
+  const pageSet = new Set<number>();
+  pageSet.add(1);
+  if (totalPages > 1) pageSet.add(totalPages);
+  for (let offset = -1; offset <= 1; offset++) {
+    const p = currentPage + offset;
+    if (p >= 1 && p <= totalPages) {
+      pageSet.add(p);
     }
   }
+  const pages = Array.from(pageSet).sort((a, b) => a - b);
 
   return (
     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-8 border-t border-white/5 text-sm text-slate-400">

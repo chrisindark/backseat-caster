@@ -3,6 +3,7 @@
 import { RenderJobResponse } from "@/types/video";
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   Clock,
   Film,
@@ -17,6 +18,8 @@ interface RenderJobRowProps {
   onRetry: (jobId: string) => Promise<void>;
   onDelete: (clipId: string) => Promise<void>;
   onViewRender?: (clipId: string) => void;
+  isJobSelected?: boolean;
+  onToggleJobSelect?: (clipId: string) => void;
 }
 
 export const RenderJobRow: React.FC<RenderJobRowProps> = ({
@@ -24,9 +27,12 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
   onRetry,
   onDelete,
   onViewRender,
+  isJobSelected = false,
+  onToggleJobSelect,
 }) => {
   const [isRetrying, setIsRetrying] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const [showErrorDetails, setShowErrorDetails] = useState<boolean>(false);
 
   const handleRetry = async () => {
@@ -44,6 +50,7 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
       await onDelete(job.clip_id);
     } finally {
       setIsDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -86,17 +93,48 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
     }
   };
 
-  const startFormatted = `${Math.floor(job.start_seconds / 60)}:${Math.floor(
-    job.start_seconds % 60
-  )
-    .toString()
-    .padStart(2, "0")}`;
+  const formatSeconds = (sec: number): string => {
+    if (isNaN(sec) || sec < 0) return "0:00";
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    }
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const startFormatted = formatSeconds(job.start_seconds);
 
   return (
-    <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-white/10 hover:border-white/20 transition-all space-y-3">
+    <div
+      className={`p-4 sm:p-5 rounded-2xl transition-all space-y-3 ${
+        isJobSelected
+          ? "bg-slate-900/95 border-2 border-rose-500 shadow-xl shadow-rose-950/30 ring-2 ring-rose-500/50"
+          : "bg-slate-900/80 border border-white/10 hover:border-white/20"
+      }`}
+    >
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
+          {onToggleJobSelect && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleJobSelect(job.clip_id);
+              }}
+              className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                isJobSelected
+                  ? "bg-rose-600 border-rose-500 text-white shadow-sm shadow-rose-900/50"
+                  : "bg-slate-950/80 border-white/20 hover:border-white/40 text-transparent hover:text-slate-600"
+              }`}
+              title={isJobSelected ? "Deselect job" : "Select job"}
+            >
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+            </button>
+          )}
+
           {/* Status Badge */}
           {getStatusBadge()}
 
@@ -135,15 +173,35 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-            title="Delete Job"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {showDeleteConfirm ? (
+            <div className="flex items-center gap-1.5 animate-in fade-in">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-2 py-1 rounded-lg text-slate-400 hover:text-white text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? "Deleting..." : "Confirm"}</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              title="Delete Job"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 

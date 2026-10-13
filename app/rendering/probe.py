@@ -4,7 +4,8 @@ import json
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,9 @@ class MediaProbeResult(BaseModel):
     fps: float
     video_codec: str
     has_audio: bool
-    audio_codec: Optional[str] = None
-    audio_sample_rate: Optional[int] = None
-    audio_channels: Optional[int] = None
+    audio_codec: str | None = None
+    audio_sample_rate: int | None = None
+    audio_channels: int | None = None
     file_size_bytes: int
 
 
@@ -58,9 +59,7 @@ def probe_media(file_path: Path | str) -> MediaProbeResult:
     ]
 
     try:
-        proc = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
         data = json.loads(proc.stdout)
     except subprocess.CalledProcessError as e:
         logger.error("FFprobe execution failed on %s: %s", path, e.stderr)
@@ -76,8 +75,8 @@ def probe_media(file_path: Path | str) -> MediaProbeResult:
     duration = float(format_info.get("duration") or 0.0)
     file_size = int(format_info.get("size") or path.stat().st_size)
 
-    video_stream: Optional[Dict[str, Any]] = None
-    audio_stream: Optional[Dict[str, Any]] = None
+    video_stream: dict[str, Any] | None = None
+    audio_stream: dict[str, Any] | None = None
 
     for s in streams:
         c_type = s.get("codec_type")

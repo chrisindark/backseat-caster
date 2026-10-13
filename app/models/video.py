@@ -1,12 +1,14 @@
 """Video SQLAlchemy model."""
 
-from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+
 from app.database import Base
 
 
 def utc_now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Video(Base):

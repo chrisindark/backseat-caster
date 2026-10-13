@@ -305,3 +305,113 @@ export interface YouTubeBatchUploadResponse {
   results: YouTubeUploadResult[];
   message: string;
 }
+
+// -----------------------------------------------------------------------------
+// AI Highlight Mining Types
+// -----------------------------------------------------------------------------
+
+export interface TriggerEventItem {
+  time: number;
+  label: string;
+  roi_name?: string;
+  confidence?: number;
+  [key: string]: unknown;
+}
+
+export interface HighlightDetailsItem {
+  kill_count?: number | null;
+  has_ultimate?: boolean | null;
+  is_team_wipe?: boolean | null;
+  game_phase?: string | null;
+  trigger_events?: TriggerEventItem[];
+  [key: string]: unknown;
+}
+
+export interface HighlightCandidateItem {
+  candidate_id: string;
+  video_id: string;
+  start_seconds: number;
+  end_seconds: number;
+  duration_seconds: number;
+  score: number;
+  event_type: string;
+  game: string;
+  details: HighlightDetailsItem;
+  thumbnail_url?: string | null;
+  thumbnail_path?: string | null;
+  peak_timestamp: number;
+  suggested_title: string;
+  suggested_tags: string[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface HighlightRunItem {
+  id: string;
+  video_id: string;
+  status: "pending" | "scanning" | "completed" | "failed" | string;
+  game: string;
+  detector_used?: string | null;
+  parameters?: Record<string, unknown>;
+  audio_scan_duration_seconds?: number | null;
+  roi_extract_duration_seconds?: number | null;
+  visual_match_duration_seconds?: number | null;
+  cluster_duration_seconds?: number | null;
+  total_duration_seconds?: number | null;
+  video_duration_seconds?: number | null;
+  audio_windows_count: number;
+  frames_analyzed_count: number;
+  visual_events_count: number;
+  candidates_produced_count: number;
+  speedup_factor?: number | null;
+  celery_task_id?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface HighlightCandidateListResponse {
+  video_id: string;
+  status: string;
+  count: number;
+  candidates: HighlightCandidateItem[];
+}
+
+export interface HighlightRunListResponse {
+  video_id: string;
+  count: number;
+  runs: HighlightRunItem[];
+}
+
+export interface HighlightStatusResponse {
+  video_id: string;
+  status: "idle" | "pending" | "scanning" | "completed" | "failed" | string;
+  progress: number;
+  stage: string;
+  error?: string | null;
+  candidate_count: number;
+  task_id?: string | null;
+  latest_run?: HighlightRunItem | null;
+}
+
+export interface DetectHighlightsRequest {
+  game?: string | null;
+  force_rescan?: boolean;
+  min_score?: number;
+  sync?: boolean;
+}
+
+export interface DetectHighlightsResponse {
+  video_id: string;
+  status: string;
+  message: string;
+  task_id?: string | null;
+  run_id?: string | null;
+}
+
+export interface DeleteHighlightsResponse {
+  video_id: string;
+  deleted_count: number;
+  message: string;
+}

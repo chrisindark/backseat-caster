@@ -41,6 +41,8 @@ data/downloads/*
 !data/downloads/.gitkeep
 data/renders/*
 !data/renders/.gitkeep
+data/highlights/*
+!data/highlights/.gitkeep
 data/*.db
 data/*.sqlite
 data/*.sqlite3

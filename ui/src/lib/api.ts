@@ -1,5 +1,11 @@
 import {
+  DeleteHighlightsResponse,
+  DetectHighlightsRequest,
+  DetectHighlightsResponse,
   DownloadResponse,
+  HighlightCandidateListResponse,
+  HighlightRunListResponse,
+  HighlightStatusResponse,
   RenderClipResponse,
   RenderJobListResponse,
   RenderJobResponse,
@@ -471,4 +477,75 @@ export async function revokeYouTubeAuth(): Promise<{
     res,
     "revoke YouTube authorization"
   );
+}
+
+// -----------------------------------------------------------------------------
+// AI Highlight Mining API Helpers
+// -----------------------------------------------------------------------------
+
+export async function detectHighlights(
+  videoId: string,
+  payload: DetectHighlightsRequest = {}
+): Promise<DetectHighlightsResponse> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}/highlights/detect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<DetectHighlightsResponse>(res, "start highlight detection");
+}
+
+export async function getHighlightStatus(
+  videoId: string
+): Promise<HighlightStatusResponse> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}/highlights/status`, {
+    cache: "no-store",
+  });
+  return parseResponse<HighlightStatusResponse>(
+    res,
+    `fetch highlight status for ${videoId}`
+  );
+}
+
+export async function fetchHighlightCandidates(
+  videoId: string
+): Promise<HighlightCandidateListResponse> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}/highlights`, {
+    cache: "no-store",
+  });
+  return parseResponse<HighlightCandidateListResponse>(
+    res,
+    `fetch highlight candidates for ${videoId}`
+  );
+}
+
+export async function deleteHighlightCandidates(
+  videoId: string
+): Promise<DeleteHighlightsResponse> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}/highlights`, {
+    method: "DELETE",
+  });
+  return parseResponse<DeleteHighlightsResponse>(
+    res,
+    `delete highlight candidates for ${videoId}`
+  );
+}
+
+export async function fetchHighlightRuns(
+  videoId: string
+): Promise<HighlightRunListResponse> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}/highlights/runs`, {
+    cache: "no-store",
+  });
+  return parseResponse<HighlightRunListResponse>(
+    res,
+    `fetch highlight runs for ${videoId}`
+  );
+}
+
+export function getHighlightThumbnailUrl(
+  videoId: string,
+  candidateId: string
+): string {
+  return `${API_BASE}/videos/${videoId}/highlights/${candidateId}/thumb.jpg`;
 }

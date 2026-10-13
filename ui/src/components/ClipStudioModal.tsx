@@ -1,8 +1,17 @@
 "use client";
 
-import { createRender, fetchRenders, getDownloadedVideoStreamUrl, getRenderJobStatus, getStreamUrl } from "@/lib/api";
+import { HighlightCandidatesDrawer } from "@/components/HighlightCandidatesDrawer";
+import {
+  createRender,
+  fetchHighlightCandidates,
+  fetchRenders,
+  getDownloadedVideoStreamUrl,
+  getRenderJobStatus,
+  getStreamUrl,
+} from "@/lib/api";
 import {
   ClippingMode,
+  HighlightCandidateItem,
   RenderClipResponse,
   RenderJobResponse,
   RenderManifest,
@@ -155,7 +164,11 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
 
   // Source video preview & playback
   const [showSourcePreview, setShowSourcePreview] = useState<boolean>(false);
-  const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(0);
+  const [sourceCurrentTime, setSourceCurrentTime] = useState<number>(() =>
+    initialStartTime !== undefined && initialStartTime !== null && initialStartTime > 0
+      ? initialStartTime
+      : 0
+  );
   const sourceVideoRef = useRef<HTMLVideoElement | null>(null);
   const isMountedRef = useRef<boolean>(true);
 
@@ -233,6 +246,32 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   // Previous completed renders for this video
   const [existingRenders, setExistingRenders] = useState<RenderManifest[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+
+  // AI Highlights Drawer
+  const [isHighlightDrawerOpen, setIsHighlightDrawerOpen] = useState<boolean>(false);
+  const [highlightCount, setHighlightCount] = useState<number>(0);
+
+  useEffect(() => {
+    if (!video?.id) return;
+    fetchHighlightCandidates(video.id)
+      .then((res) => {
+        if (res.candidates) setHighlightCount(res.candidates.length);
+      })
+      .catch(() => {});
+  }, [video?.id]);
+
+  const handleApplyHighlightFromModal = (cand: HighlightCandidateItem) => {
+    setStartSecondsInput(formatSeconds(cand.start_seconds));
+    const dur = Math.round(cand.duration_seconds);
+    const isPreset = [10, 15, 30, 60].includes(dur);
+    setDurationPreset(isPreset ? dur : 15);
+    setIsCustomDuration(!isPreset);
+    setCustomDuration(String(dur));
+    setSourceCurrentTime(cand.start_seconds);
+    if (sourceVideoRef.current) {
+      sourceVideoRef.current.currentTime = cand.start_seconds;
+    }
+  };
 
   const toggleMode = (mode: ClippingMode) => {
     setSelectedModes((prev) =>
@@ -545,6 +584,20 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         {existingRenders.length} render{existingRenders.length > 1 ? "s" : ""} cached
                       </span>
                     ) : null}
+
+                    {video?.is_downloaded && (
+                      <button
+                        type="button"
+                        onClick={() => setIsHighlightDrawerOpen(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-rose-600/30 to-purple-600/30 hover:from-rose-600/50 hover:to-purple-600/50 text-white border border-rose-500/40 text-[11px] font-bold shadow cursor-pointer active:scale-95 transition-all"
+                      >
+                        <Sparkles className="w-3 h-3 text-rose-400" />
+                        <span>
+                          AI Highlights
+                          {highlightCount > 0 ? ` (${highlightCount})` : ""}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 <p className="text-xs text-slate-400 truncate max-w-xl">
                   {video.title} ({video.duration_formatted})
@@ -598,19 +651,29 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         controls
                         playsInline
                         preload="metadata"
+                        onLoadedMetadata={(e) => {
+                          const target = sourceCurrentTime > 0 ? sourceCurrentTime : parseSeconds(startSecondsInput);
+                          if (target > 0) {
+                            e.currentTarget.currentTime = target;
+                            setSourceCurrentTime(target);
+                          }
+                        }}
                         onTimeUpdate={(e) => setSourceCurrentTime(e.currentTarget.currentTime)}
+                        onSeeked={(e) => setSourceCurrentTime(e.currentTarget.currentTime)}
                         className="w-full h-full object-contain"
                       />
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-400">
-                        Current Playhead: <strong className="font-mono text-white">{formatSeconds(sourceCurrentTime)}</strong>
+                        Current Playhead: <strong className="font-mono text-white">{formatSeconds(sourceCurrentTime)}</strong> ({Math.floor(sourceCurrentTime)}s)
                       </span>
                       <button
                         type="button"
                         onClick={() => {
-                          const sec = Math.floor(sourceCurrentTime);
+                          const currentVal = sourceVideoRef.current ? sourceVideoRef.current.currentTime : sourceCurrentTime;
+                          const sec = Math.floor(currentVal);
                           setStartSecondsInput(formatSeconds(sec));
+                          setSourceCurrentTime(sec);
                         }}
                         className="flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded text-xs transition-colors cursor-pointer"
                       >
@@ -627,13 +690,28 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                     <label className="block text-xs font-medium text-slate-300 mb-1">
                       Start Time (sec or MM:SS)
                     </label>
-                    <input
-                      type="text"
-                      value={startSecondsInput}
-                      onChange={(e) => setStartSecondsInput(e.target.value)}
-                      placeholder="e.g. 0 or 01:30"
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-rose-500 transition-colors"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={startSecondsInput}
+                        onChange={(e) => setStartSecondsInput(e.target.value)}
+                        placeholder="e.g. 0 or 01:30"
+                        className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-rose-500 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = parseSeconds(startSecondsInput);
+                          setSourceCurrentTime(target);
+                          if (sourceVideoRef.current) {
+                            sourceVideoRef.current.currentTime = target;
+                          }
+                        }}
+                        className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg border border-white/10 cursor-pointer shrink-0"
+                      >
+                        Seek
+                      </button>
+                    </div>
                   </div>
 
                   <div>
@@ -1297,6 +1375,18 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
           </div>
         </motion.div>
       </div>
+      )}
+
+      {/* Highlight Mining Slide-over Drawer */}
+      {video && (
+        <HighlightCandidatesDrawer
+          isOpen={isHighlightDrawerOpen}
+          videoId={video.id}
+          videoTitle={video.title}
+          onClose={() => setIsHighlightDrawerOpen(false)}
+          onApplyToStudio={handleApplyHighlightFromModal}
+          onCandidatesCountChange={(count) => setHighlightCount(count)}
+        />
       )}
     </AnimatePresence>
   );

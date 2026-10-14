@@ -148,12 +148,12 @@ def test_extract_window_rois_1080p(roi_test_videos):
     assert ko_frames[1].timestamp == 2.0
     assert ko_frames[2].timestamp == 3.0
 
-    # Verify Kill Feed frames
-    kf_frames = res.frames_by_roi["kill_feed"]
-    assert len(kf_frames) == 3
-    assert kf_frames[0].width == 480
-    assert kf_frames[0].height == 220
-    assert len(kf_frames[0].raw_rgb) == 480 * 220 * 3
+    # Verify Right Streak frames
+    rs_frames = res.frames_by_roi["right_streak"]
+    assert len(rs_frames) == 3
+    assert rs_frames[0].width == 170
+    assert rs_frames[0].height == 120
+    assert len(rs_frames[0].raw_rgb) == 170 * 120 * 3
 
 
 def test_extract_window_rois_720p_normalized(roi_test_videos):

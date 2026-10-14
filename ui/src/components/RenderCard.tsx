@@ -16,7 +16,7 @@ import {
   Tv,
   Volume2,
 } from "lucide-react";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 interface RenderCardProps {
   render: RenderManifest;
@@ -98,6 +98,14 @@ export const RenderCard: React.FC<RenderCardProps> = ({
 
   const blurVideoRef = useRef<HTMLVideoElement | null>(null);
   const cropVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Stop playback when switching preview tabs or on unmount
+  useEffect(() => {
+    return () => {
+      blurVideoRef.current?.pause();
+      cropVideoRef.current?.pause();
+    };
+  }, [activeTab]);
 
   const startSec = render.clip?.start_seconds ?? render.request?.start_seconds ?? 0;
   const durationSec = render.clip?.duration_seconds ?? render.request?.duration_seconds ?? 0;
@@ -340,6 +348,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
                 <div className="w-full aspect-[9/16] rounded-xl overflow-hidden bg-black shadow-xl border border-white/10">
                   <video
                     ref={blurVideoRef}
+                    data-sync-group={`compare-${render.clip_id}`}
                     src={getStreamUrl(render.clip_id, verticalModes[0])}
                     controls
                     playsInline
@@ -358,6 +367,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
                 <div className="w-full aspect-[9/16] rounded-xl overflow-hidden bg-black shadow-xl border border-white/10">
                   <video
                     ref={cropVideoRef}
+                    data-sync-group={`compare-${render.clip_id}`}
                     src={getStreamUrl(render.clip_id, verticalModes[1])}
                     controls
                     playsInline

@@ -1,6 +1,7 @@
 "use client";
 
 import { getDownloadedVideoStreamUrl } from "@/lib/api";
+import { useScrollLock } from "@/lib/useScrollLock";
 import { VideoItem } from "@/types/video";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -13,7 +14,6 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { useScrollLock } from "@/lib/useScrollLock";
 import React, { useEffect, useRef, useState } from "react";
 
 interface VideoModalProps {
@@ -86,6 +86,15 @@ export const VideoModal: React.FC<VideoModalProps> = ({
     if (clipStartTime !== 0) setClipStartTime(0);
     if (startTimeInput !== "0:00") setStartTimeInput("0:00");
   }
+
+  // Stop playback when video changes or unmounts
+  useEffect(() => {
+    return () => {
+      try {
+        videoRef.current?.pause();
+      } catch {}
+    };
+  }, [video?.id]);
 
   // Listen to Escape key to close modal
   useEffect(() => {

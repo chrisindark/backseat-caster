@@ -71,6 +71,14 @@ MARVEL_RIVALS_HUD_REGIONS: dict[str, HUDRegion] = {
         height=100,
         description="Top-Center Objective / Overtime Banner",
     ),
+    "right_streak": HUDRegion(
+        name="right_streak",
+        x=1750,
+        y=480,
+        width=170,
+        height=120,
+        description="Right-Edge Personal Elimination / Streak Badge (e.g. DOUBLE!, TRIPLE!, UNSTOPPABLE!)",
+    ),
 }
 
 
@@ -228,7 +236,7 @@ class ROIExtractorConfig(BaseModel):
         description="Elevated sampling FPS for high-excitement climax windows (score >= 0.70)",
     )
     primary_rois: list[str] = Field(
-        default_factory=lambda: ["center_ko", "kill_feed"],
+        default_factory=lambda: ["center_ko", "right_streak"],
         description="Default ROI region names to extract",
     )
     normalize_to_1080p: bool = Field(

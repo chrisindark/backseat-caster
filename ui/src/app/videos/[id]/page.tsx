@@ -82,6 +82,19 @@ function VideoDetailContent() {
   const [startTimeInput, setStartTimeInput] = useState<string>("0:00");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Stop video playback on unmount or navigation
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
   // Downloads & renders
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [renders, setRenders] = useState<RenderManifest[]>([]);

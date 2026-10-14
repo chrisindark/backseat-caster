@@ -282,6 +282,24 @@ function StudioWorkspace() {
 
   const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
+  const standaloneVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Stop all video playback on unmount or navigation
+  useEffect(() => {
+    return () => {
+      sourceVideoRef.current?.pause();
+      compareLeftVideoRef.current?.pause();
+      compareRightVideoRef.current?.pause();
+      standaloneVideoRef.current?.pause();
+    };
+  }, []);
+
+  // Pause output preview players when switching output tabs
+  useEffect(() => {
+    compareLeftVideoRef.current?.pause();
+    compareRightVideoRef.current?.pause();
+    standaloneVideoRef.current?.pause();
+  }, [activeTab]);
 
   const toggleMode = (mode: ClippingMode) => {
     setSelectedModes((prev) =>
@@ -1451,6 +1469,7 @@ function StudioWorkspace() {
                         <div className="w-[300px] aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareLeftVideoRef}
+                            data-sync-group="studio-compare"
                             src={renderedOutputs[leftCompareMode]}
                             controls
                             playsInline
@@ -1482,6 +1501,7 @@ function StudioWorkspace() {
                         <div className="w-[300px] aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareRightVideoRef}
+                            data-sync-group="studio-compare"
                             src={renderedOutputs[rightCompareMode]}
                             controls
                             playsInline
@@ -1507,6 +1527,7 @@ function StudioWorkspace() {
                       }`}
                     >
                       <video
+                        ref={standaloneVideoRef}
                         src={renderedOutputs[activeTab]}
                         controls
                         playsInline

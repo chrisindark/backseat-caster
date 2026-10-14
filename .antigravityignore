@@ -1,0 +1,109 @@
+# ==============================================================================
+# Antigravity Context Optimization Ignore List (.antigravityignore)
+# 
+# Purpose: Prevent large data files, binaries, build caches, and verbose lockfiles
+# from bloating AI context windows, reducing token consumption and latency.
+# ==============================================================================
+
+# 1. Media, Downloads & Video Processing Storage (Gigabytes of binary data)
+data/
+downloads/
+renders/
+highlights/
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+*.wav
+*.mp3
+*.flac
+*.aac
+*.m4a
+*.ogg
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.ico
+
+# 2. Package Manager Lockfiles (Massive JSON/TOML files consuming tens of thousands of tokens)
+uv.lock
+package-lock.json
+ui/package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+
+# 3. Dependencies & Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+node_modules/
+**/node_modules/
+
+# 4. Frontend & TypeScript Build Outputs and Caches
+.next/
+**/.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+ui/next-env.d.ts
+
+# 5. Python Compilation & Testing Caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# 6. Databases & SQLite Journals
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+backseat.db
+
+# 7. Sensitive Credentials, Secrets & Tokens (Context reduction & Security)
+.env
+.env.*
+*.pem
+*.key
+*client_secret*.json
+client_secrets.json
+youtube_token.json
+token.json
+data/*token*.json
+data/*secret*.json
+data/*oauth*.json
+
+# 8. Version Control, Logs & Temporary Files
+.git/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+tmp/
+temp/
+*.tmp
+
+# 9. OS & IDE Metadata
+.DS_Store
+.DS_Store?
+._*
+.idea/
+.vscode/
+*.swp
+*.swo

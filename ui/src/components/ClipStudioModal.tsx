@@ -175,19 +175,28 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   // Comparison playback element refs
   const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
+  const standaloneVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
-    const sourceEl = sourceVideoRef.current;
-    const leftEl = compareLeftVideoRef.current;
-    const rightEl = compareRightVideoRef.current;
     return () => {
       isMountedRef.current = false;
-      if (sourceEl) sourceEl.pause();
-      if (leftEl) leftEl.pause();
-      if (rightEl) rightEl.pause();
+      sourceVideoRef.current?.pause();
+      compareLeftVideoRef.current?.pause();
+      compareRightVideoRef.current?.pause();
+      standaloneVideoRef.current?.pause();
     };
   }, []);
+
+  // Pause playback when modal closes or video becomes null
+  useEffect(() => {
+    if (!video) {
+      sourceVideoRef.current?.pause();
+      compareLeftVideoRef.current?.pause();
+      compareRightVideoRef.current?.pause();
+      standaloneVideoRef.current?.pause();
+    }
+  }, [video]);
 
   // Listen to Escape key to close modal
   useEffect(() => {
@@ -242,6 +251,13 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   const [activeTab, setActiveTab] = useState<string>("comparison");
   const [leftCompareMode, setLeftCompareMode] = useState<string>("vertical_blur");
   const [rightCompareMode, setRightCompareMode] = useState<string>("third_person");
+
+  // Pause output preview players when switching output tabs
+  useEffect(() => {
+    compareLeftVideoRef.current?.pause();
+    compareRightVideoRef.current?.pause();
+    standaloneVideoRef.current?.pause();
+  }, [activeTab]);
 
   // Previous completed renders for this video
   const [existingRenders, setExistingRenders] = useState<RenderManifest[]>([]);
@@ -1295,6 +1311,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareLeftVideoRef}
+                            data-sync-group="modal-compare"
                             src={renderedOutputs[leftCompareMode]}
                             controls
                             playsInline
@@ -1326,6 +1343,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareRightVideoRef}
+                            data-sync-group="modal-compare"
                             src={renderedOutputs[rightCompareMode]}
                             controls
                             playsInline
@@ -1349,6 +1367,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         : "w-[320px] aspect-[9/16]"
                     }`}>
                       <video
+                        ref={standaloneVideoRef}
                         src={renderedOutputs[activeTab]}
                         controls
                         playsInline

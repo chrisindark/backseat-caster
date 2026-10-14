@@ -78,7 +78,6 @@ class MarvelRivalsDetector(BaseHighlightDetector):
             roi_results = s.extract_candidate_windows_rois(
                 media_path=media_path,
                 windows=candidate_windows,
-                fps=1.5,
             )
             roi_duration = time.perf_counter() - t_roi
             if metrics is not None:

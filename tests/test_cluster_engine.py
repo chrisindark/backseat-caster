@@ -169,7 +169,8 @@ def test_cluster_events_separated():
     assert len(candidates) == 2
     # Candidates are sorted by score descending: team_wipe first
     assert candidates[0].event_type == "team_wipe"
-    assert candidates[0].score == 1.00
+    assert candidates[0].score >= 0.80
+    assert candidates[0].score > candidates[1].score
     assert candidates[1].event_type == "double_ko"
 
 

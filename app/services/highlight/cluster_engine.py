@@ -248,6 +248,7 @@ class ClusterEngine:
         total_duration: float,
         video_id: str = "video_default",
         media_path: Path | str | None = None,
+        audio_windows: list[AudioCandidateWindow] | None = None,
     ) -> list[HighlightCandidate]:
         """
         Cluster visual events into padded, duration-clamped highlight candidates.
@@ -348,12 +349,32 @@ class ClusterEngine:
                 )
             )
 
-            # 5. Calculate ranked score (0.0 to 1.0)
-            base_score = peak_evt.score_weight
-            chain_bonus = min(
-                0.10, (len(cluster) - 1) * 0.03
-            )  # Bonus for chained eliminations
-            final_score = round(min(1.0, base_score + chain_bonus), 2)
+            # 5. Calculate dynamic composite score (0.0 to 1.0)
+            overlapping_audio = 0.60
+            if audio_windows:
+                for aw in audio_windows:
+                    if not (aw.end_seconds < start_t or aw.start_seconds > end_t):
+                        overlapping_audio = max(overlapping_audio, aw.score)
+
+            # Persistence factor: corroborated across >= 2 frames or multiple chained events
+            is_corroborated = (
+                any(getattr(e, "frame_count", 1) >= 2 for e in cluster)
+                or len(cluster) >= 2
+            )
+            persistence_factor = 1.0 if is_corroborated else 0.50
+
+            ocr_conf = peak_evt.confidence
+            tier_weight = peak_evt.score_weight
+            chain_bonus = min(0.05, max(0, len(cluster) - 1) * 0.02)
+
+            composite = (
+                (0.45 * tier_weight)
+                + (0.25 * persistence_factor)
+                + (0.15 * ocr_conf)
+                + (0.15 * overlapping_audio)
+                + chain_bonus
+            )
+            final_score = round(min(1.0, max(0.50, composite)), 2)
 
             # Generate unique deterministic candidate ID
             cid_hash = hashlib.md5(
@@ -490,6 +511,7 @@ class ClusterEngine:
             total_duration=total_duration,
             video_id=video_id,
             media_path=path,
+            audio_windows=audio_windows,
         )
 
         # Secondary: If audio candidate windows exist with no visual overlap, include top action windows

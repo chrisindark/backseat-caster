@@ -71,8 +71,8 @@ class AudioScannerConfig(BaseModel):
         description="Loudness below this LUFS is considered silence (pruned)",
     )
     excitement_percentile: float = Field(
-        default=75.0,
-        description="Percentile threshold among active gameplay buckets (top 25%)",
+        default=68.0,
+        description="Percentile threshold among active gameplay buckets (top 32%)",
     )
     min_excitement_lufs: float = Field(
         default=-26.0,
@@ -83,7 +83,7 @@ class AudioScannerConfig(BaseModel):
         description="Minimum duration in seconds for a candidate action window",
     )
     merge_gap_seconds: float = Field(
-        default=3.0,
+        default=3.5,
         description="Merge action segments separated by less than this interval",
     )
     max_window_duration: float = Field(

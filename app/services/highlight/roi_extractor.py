@@ -41,11 +41,11 @@ class HUDRegion(BaseModel):
 MARVEL_RIVALS_HUD_REGIONS: dict[str, HUDRegion] = {
     "center_ko": HUDRegion(
         name="center_ko",
-        x=720,
-        y=570,
-        width=480,
-        height=160,
-        description="Center Elimination / KO Banner (e.g. TRIPLE KO, TEAM WIPE)",
+        x=700,
+        y=230,
+        width=520,
+        height=140,
+        description="Upper-Center Elimination / Streak Banner (e.g. TRIPLE KO, TEAM WIPE, 5 PLAYER KO STREAK)",
     ),
     "kill_feed": HUDRegion(
         name="kill_feed",
@@ -213,7 +213,19 @@ class ROIExtractorConfig(BaseModel):
 
     fps: float = Field(
         default=1.0,
-        description="Sampling frequency in frames per second (e.g. 1.0 or 2.0)",
+        description="Default sampling frequency in frames per second",
+    )
+    adaptive_sampling: bool = Field(
+        default=True,
+        description="If True, dynamically adapts sampling FPS based on window audio excitement",
+    )
+    fps_baseline: float = Field(
+        default=0.75,
+        description="Baseline sampling FPS for standard candidate windows",
+    )
+    fps_peak: float = Field(
+        default=2.0,
+        description="Elevated sampling FPS for high-excitement climax windows (score >= 0.70)",
     )
     primary_rois: list[str] = Field(
         default_factory=lambda: ["center_ko", "kill_feed"],
@@ -493,7 +505,6 @@ class ROIExtractor:
         source_w = probe.width
         source_h = probe.height
 
-        sampling_fps = fps or self.config.fps
         target_rois = roi_names or self.config.primary_rois
 
         results: list[WindowROIExtractionResult] = []
@@ -508,12 +519,24 @@ class ROIExtractor:
                     f"Extracting HUD ROIs (window {idx}/{total_windows})",
                 )
 
+            # Adaptive sampling: elevate to fps_peak during high-energy climaxes
+            if fps is not None:
+                win_fps = fps
+            elif self.config.adaptive_sampling:
+                win_fps = (
+                    self.config.fps_peak
+                    if getattr(win, "score", 0.0) >= 0.70
+                    else self.config.fps_baseline
+                )
+            else:
+                win_fps = self.config.fps
+
             win_res = self.extract_window_rois(
                 media_path=path,
                 start_seconds=win.start_seconds,
                 duration_seconds=win.duration_seconds,
                 roi_names=target_rois,
-                fps=sampling_fps,
+                fps=win_fps,
                 source_width=source_w,
                 source_height=source_h,
             )
@@ -537,7 +560,7 @@ class ROIExtractor:
             file_path=str(path),
             source_width=source_w,
             source_height=source_h,
-            fps=sampling_fps,
+            fps=fps or self.config.fps,
             windows_extracted=results,
             total_frames=total_frames,
             extraction_duration_seconds=duration_sec,

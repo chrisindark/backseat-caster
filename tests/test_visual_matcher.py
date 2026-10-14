@@ -21,17 +21,20 @@ def _create_synthetic_roi_frame(
     text: str | None = None,
     text_color: tuple[int, int, int] = (255, 215, 0),  # Gold #FFD700
     bg_color: tuple[int, int, int] = (20, 20, 20),
-    width: int = 480,
-    height: int = 180,
+    width: int = 520,
+    height: int = 140,
     timestamp: float = 10.0,
     roi_name: str = "center_ko",
 ) -> ROIFrame:
-    """Helper to generate in-memory synthetic ROIFrame with optional text."""
+    """Helper to generate in-memory synthetic ROIFrame with realistic banner dimensions."""
+    from PIL import ImageFont
+
     img = Image.new("RGB", (width, height), color=bg_color)
     if text:
         draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default(size=28)
         # Position centered
-        draw.text((140, 70), text, fill=text_color)
+        draw.text((120, 50), text, fill=text_color, font=font)
 
     return ROIFrame(
         timestamp=timestamp,
@@ -58,9 +61,9 @@ def test_classify_text_hierarchy():
     assert hexa[0] == "team_wipe"
     assert hexa[2] == 6
 
-    ace = matcher.classify_text("ACE")
-    assert ace is not None
-    assert ace[0] == "team_wipe"
+    # ACE and isolated 6 KO are stripped to prevent scoreboard false positives
+    assert matcher.classify_text("ACE") is None
+    assert matcher.classify_text("6 KO") is None
 
     # Penta KO tier
     penta = matcher.classify_text("PENTA KO")
@@ -252,10 +255,12 @@ def test_evaluate_window_deduplication():
 
     res = matcher.evaluate_window(window_rois)
     assert isinstance(res, WindowVisualMatchResult)
-    # f2 was within 0.5s of f1 with identical DOUBLE KO, so deduplicated
+    # f2 was within 0.5s of f1 with identical DOUBLE KO, so corroborated
     assert len(res.events) == 2
     assert res.events[0].event_type == "double_ko"
+    assert res.events[0].frame_count == 2
     assert res.events[1].event_type == "triple_ko"
+    assert res.events[1].frame_count == 1
     assert res.peak_event_type == "triple_ko"
     assert res.total_kills == 3
 
@@ -305,3 +310,48 @@ def test_evaluate_batch_visuals():
     assert batch_res.windows_matched[1].peak_event_type is None
     assert len(progress_events) >= 1
     assert progress_events[-1][0] == 100.0
+
+
+def test_negative_screen_rejection():
+    """Verify that Tab scoreboard and stats screens are immediately discarded."""
+    matcher = VisualMatcher()
+    for neg_text in [
+        "YOUR TEAM ENEMY TEAM",
+        "DAMAGE BLOCKED 2850",
+        "CAREER STATS HEALING",
+        "PRESS TAB",
+    ]:
+        frame = _create_synthetic_roi_frame(
+            text=neg_text,
+            text_color=(255, 215, 0),
+            timestamp=50.0,
+            roi_name="center_ko",
+        )
+        evt = matcher.evaluate_frame(frame)
+        assert evt is None, f"Expected {neg_text} to be rejected by negative filter"
+
+
+def test_typography_gating_rejects_tiny_text():
+    """Verify that tiny text below minimum bounding box threshold is rejected."""
+    from PIL import Image, ImageDraw
+
+    # Frame with tiny font (default PIL font produces ~12px height)
+    img = Image.new("RGB", (520, 140), color=(20, 20, 20))
+    draw = ImageDraw.Draw(img)
+    draw.text((150, 60), "TRIPLE KO", fill=(255, 215, 0))  # tiny unscaled font
+
+    frame = ROIFrame(
+        timestamp=10.0,
+        roi_name="center_ko",
+        width=520,
+        height=140,
+        raw_rgb=img.tobytes(),
+    )
+    # Configure min_gold_ratio lower so color passes, but typography fails
+    matcher = VisualMatcher(
+        config=VisualMatcherConfig(
+            min_gold_ratio=0.0001, min_box_height=22.0, min_box_width=90.0
+        )
+    )
+    evt = matcher.evaluate_frame(frame)
+    assert evt is None

@@ -79,7 +79,7 @@ def test_compute_crop_geometry_1080p():
     obj = MARVEL_RIVALS_HUD_REGIONS["objective_banner"]
 
     x_ko, y_ko, w_ko, h_ko = compute_crop_geometry(ko, 1920, 1080)
-    assert (x_ko, y_ko, w_ko, h_ko) == (720, 570, 480, 160)
+    assert (x_ko, y_ko, w_ko, h_ko) == (700, 230, 520, 140)
 
     x_kf, y_kf, w_kf, h_kf = compute_crop_geometry(kf, 1920, 1080)
     assert (x_kf, y_kf, w_kf, h_kf) == (1400, 40, 480, 220)
@@ -97,15 +97,15 @@ def test_compute_crop_geometry_scaling():
 
     # 720p (scale factor 2/3)
     x720, y720, w720, h720 = compute_crop_geometry(ko, 1280, 720)
-    assert (x720, y720, w720, h720) == (480, 380, 320, 106)
+    assert (x720, y720, w720, h720) == (467, 153, 346, 92)
 
     # 1440p (scale factor 4/3)
     x1440, y1440, w1440, h1440 = compute_crop_geometry(ko, 2560, 1440)
-    assert (x1440, y1440, w1440, h1440) == (960, 760, 640, 212)
+    assert (x1440, y1440, w1440, h1440) == (933, 307, 692, 186)
 
     # 4K (scale factor 2.0)
     x4k, y4k, w4k, h4k = compute_crop_geometry(ko, 3840, 2160)
-    assert (x4k, y4k, w4k, h4k) == (1440, 1140, 960, 320)
+    assert (x4k, y4k, w4k, h4k) == (1400, 460, 1040, 280)
 
 
 def test_compute_crop_geometry_ultrawide():
@@ -115,8 +115,8 @@ def test_compute_crop_geometry_ultrawide():
 
     # 2560x1080 (21:9)
     x_ko, y_ko, w_ko, h_ko = compute_crop_geometry(ko, 2560, 1080)
-    # Horizontal center offset: (2560 - 1920) / 2 = 320. x = 720 + 320 = 1040
-    assert (x_ko, y_ko, w_ko, h_ko) == (1040, 570, 480, 160)
+    # Horizontal center offset: (2560 - 1920) / 2 = 320. x = 700 + 320 = 1020
+    assert (x_ko, y_ko, w_ko, h_ko) == (1020, 230, 520, 140)
 
     x_kf, y_kf, w_kf, h_kf = compute_crop_geometry(kf, 2560, 1080)
     # Right-anchored: 1920 - (1400 + 480) = 40 margin. 2560 - 40 - 480 = 2040
@@ -141,9 +141,9 @@ def test_extract_window_rois_1080p(roi_test_videos):
     # Verify Center KO frames
     ko_frames = res.frames_by_roi["center_ko"]
     assert len(ko_frames) == 3
-    assert ko_frames[0].width == 480
-    assert ko_frames[0].height == 160
-    assert len(ko_frames[0].raw_rgb) == 480 * 160 * 3
+    assert ko_frames[0].width == 520
+    assert ko_frames[0].height == 140
+    assert len(ko_frames[0].raw_rgb) == 520 * 140 * 3
     assert ko_frames[0].timestamp == 1.0
     assert ko_frames[1].timestamp == 2.0
     assert ko_frames[2].timestamp == 3.0
@@ -167,10 +167,10 @@ def test_extract_window_rois_720p_normalized(roi_test_videos):
 
     assert res.total_frames == 4
     ko_frames = res.frames_by_roi["center_ko"]
-    # Cropped from 720p but normalized back to 480x160
-    assert ko_frames[0].width == 480
-    assert ko_frames[0].height == 160
-    assert len(ko_frames[0].raw_rgb) == 480 * 160 * 3
+    # Cropped from 720p but normalized back to 520x140
+    assert ko_frames[0].width == 520
+    assert ko_frames[0].height == 140
+    assert len(ko_frames[0].raw_rgb) == 520 * 140 * 3
 
 
 def test_extract_window_rois_higher_fps(roi_test_videos):

@@ -29,6 +29,27 @@ from app.services.highlight.roi_extractor import (
 
 logger = logging.getLogger(__name__)
 
+# Rejection pattern for Tab scoreboard overlays, match statistics, and menus
+NEGATIVE_SCREEN_PATTERN: re.Pattern[str] = re.compile(
+    r"\b("
+    r"DAMAGE\s*BLOCKED|"
+    r"HEALING|"
+    r"DAMAGE\s*TAKEN|"
+    r"HERO\s*DAMAGE|"
+    r"CAREER\s*STATS|"
+    r"YOUR\s*TEAM|"
+    r"ENEMY\s*TEAM|"
+    r"SCOREBOARD|"
+    r"PRESS\s*TAB|"
+    r"RESPAWNING\s*(?:IN)?|"
+    r"MATCH\s*SUMMARY|"
+    r"FINAL\s*SCORE|"
+    r"LAUNCH\s*MISSILES|"
+    r"MICRO-MISSILE"
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Event classification priorities and score weights
 EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
     # Top Tier: Full wipes & maximum multi-kills
@@ -37,7 +58,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "TEAM WIPE",
         6,
         1.00,
-        re.compile(r"\b(TEAM\s*WIPE|HEXA\s*KO|6\s*KO|ACE)\b", re.IGNORECASE),
+        re.compile(r"\b(TEAM\s*WIPE|HEXA\s*KO)\b", re.IGNORECASE),
     ),
     (
         "penta_ko",
@@ -45,7 +66,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         5,
         0.95,
         re.compile(
-            r"\b(PENTA\s*KO|QUINTUPLE\s*KO|5\s*KO|MEGA\s*KO)\b",
+            r"\b(PENTA\s*KO|QUINTUPLE\s*KO|MEGA\s*KO)\b",
             re.IGNORECASE,
         ),
     ),
@@ -55,7 +76,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         4,
         0.90,
         re.compile(
-            r"\b(QUAD(?:RA?)?\s*KO|QUADRUPLE\s*KO|4\s*KO|ULTRA\s*KO)\b",
+            r"\b(QUAD(?:RA?)?\s*KO|QUADRUPLE\s*KO|ULTRA\s*KO)\b",
             re.IGNORECASE,
         ),
     ),
@@ -76,7 +97,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         1,
         0.85,
         re.compile(
-            r"\b(UNSTOPPABLE|KILLING\s*SPREE|RAMPAGE|INVINCIBLE|GODLIKE)\b",
+            r"\b([3-6]\s*PLAYER\s*KO\s*STREAK|KILLING\s*SPREE|RAMPAGE|UNSTOPPABLE|GODLIKE)\b",
             re.IGNORECASE,
         ),
     ),
@@ -86,7 +107,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "TRIPLE KO",
         3,
         0.80,
-        re.compile(r"\b(TRIPLE\s*KO|TRIPLE\s*KILL|3\s*KO)\b", re.IGNORECASE),
+        re.compile(r"\b(TRIPLE\s*KO|TRIPLE\s*KILL)\b", re.IGNORECASE),
     ),
     # Objectives & match states (positive / clutch)
     (
@@ -104,7 +125,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "DOUBLE KO",
         2,
         0.70,
-        re.compile(r"\b(DOUBLE\s*KO|DOUBLE\s*KILL|2\s*KO)\b", re.IGNORECASE),
+        re.compile(r"\b(DOUBLE\s*KO|DOUBLE\s*KILL)\b", re.IGNORECASE),
     ),
     # Base single elimination
     (
@@ -113,7 +134,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         1,
         0.50,
         re.compile(
-            r"(?:\+100|\b(?:ELIMINATED|FINAL\s*BLOW|KO|FIRST\s*BLOOD)\b)",
+            r"(?:\+100|\b(?:ELIMINATED|FINAL\s*BLOW|FIRST\s*BLOOD)\b)",
             re.IGNORECASE,
         ),
     ),
@@ -151,6 +172,10 @@ class VisualDetectionEvent(BaseModel):
     raw_text: str = Field(default="", description="Normalized raw OCR text")
     kill_count: int = Field(default=1, description="Associated elimination count")
     score_weight: float = Field(default=0.55, description="Event tier weight")
+    frame_count: int = Field(
+        default=1,
+        description="Number of consecutive/adjacent frames corroborating this event",
+    )
 
 
 class WindowVisualMatchResult(BaseModel):
@@ -194,12 +219,20 @@ class VisualMatcherConfig(BaseModel):
     """Configuration for HSV color gating and OCR trigger matching."""
 
     min_gold_ratio: float = Field(
-        default=0.001,
-        description="Minimum ratio of Gold pixels to trigger OCR (default 0.1% / ~86 pixels)",
+        default=0.006,
+        description="Minimum ratio of Gold pixels to trigger OCR (default 0.6% / ~440 pixels)",
     )
     min_red_ratio: float = Field(
-        default=0.001,
-        description="Minimum ratio of Red pixels to trigger OCR (default 0.1% / ~86 pixels)",
+        default=0.006,
+        description="Minimum ratio of Red pixels to trigger OCR (default 0.6% / ~440 pixels)",
+    )
+    min_box_height: float = Field(
+        default=22.0,
+        description="Minimum bounding box height in pixels for valid banners (filters ammo/KDA numbers)",
+    )
+    min_box_width: float = Field(
+        default=90.0,
+        description="Minimum bounding box width in pixels for valid multi-kill/streak banners",
     )
     ocr_min_confidence: float = Field(
         default=0.35, description="Minimum OCR word confidence threshold"
@@ -287,11 +320,11 @@ class VisualMatcher:
         )
         return has_trigger, round(gold_ratio, 4), round(red_ratio, 4)
 
-    def run_ocr(self, frame: ROIFrame) -> list[tuple[str, float]]:
+    def run_ocr(self, frame: ROIFrame) -> list[tuple[str, float, float, float]]:
         """
         Execute OCR on in-memory frame buffer.
 
-        Returns list of (detected_text, confidence).
+        Returns list of (detected_text, confidence, box_width, box_height).
         """
         if self._ocr_engine is None:
             return []
@@ -304,14 +337,19 @@ class VisualMatcher:
             if not results:
                 return []
 
-            extracted: list[tuple[str, float]] = []
+            extracted: list[tuple[str, float, float, float]] = []
             for item in results:
                 # RapidOCR format: [box, text, confidence]
                 if len(item) >= 3:
+                    box = item[0]
                     text = str(item[1]).strip()
                     conf = float(item[2])
                     if text and conf >= self.config.ocr_min_confidence:
-                        extracted.append((text, conf))
+                        xs = [p[0] for p in box]
+                        ys = [p[1] for p in box]
+                        w = float(max(xs) - min(xs))
+                        h = float(max(ys) - min(ys))
+                        extracted.append((text, conf, w, h))
             return extracted
         except Exception as e:
             logger.warning(
@@ -332,11 +370,10 @@ class VisualMatcher:
         cleaned = re.sub(r"D[0O]UBLE", "DOUBLE", cleaned)
         cleaned = re.sub(r"V[I1L]CT[0O]RY", "VICTORY", cleaned)
 
-        for event_type, _label, kill_count, weight, pattern in EVENT_HIERARCHY:
+        for event_type, label, kill_count, weight, pattern in EVENT_HIERARCHY:
             match = pattern.search(cleaned)
             if match:
-                matched_label = match.group(0).upper()
-                return event_type, matched_label, kill_count, weight
+                return event_type, label, kill_count, weight
         return None
 
     def evaluate_frame(self, frame: ROIFrame) -> VisualDetectionEvent | None:
@@ -352,14 +389,66 @@ class VisualMatcher:
         if not ocr_items:
             return None
 
+        # 1. Negative screen rejection (Scoreboard, stats, hero damage, respawn, menus)
         combined_text = " ".join(t[0] for t in ocr_items)
-        max_conf = max(t[1] for t in ocr_items)
+        if NEGATIVE_SCREEN_PATTERN.search(combined_text):
+            logger.debug(
+                "Frame at %.2fs rejected by negative screen filter: '%s'",
+                frame.timestamp,
+                combined_text,
+            )
+            return None
 
+        # 2. Typography gating & hierarchy classification
+        # Check combined text first
         classification = self.classify_text(combined_text)
+        total_w = sum(t[2] for t in ocr_items)
+        max_h = max((t[3] for t in ocr_items), default=0.0)
+        max_conf = max((t[1] for t in ocr_items), default=0.0)
+
+        if not classification:
+            # Check individual OCR tokens
+            for item_text, item_conf, item_w, item_h in ocr_items:
+                cls_candidate = self.classify_text(item_text)
+                if cls_candidate:
+                    classification = cls_candidate
+                    total_w = item_w
+                    max_h = item_h
+                    max_conf = item_conf
+                    break
+
         if not classification:
             return None
 
         event_type, matched_label, kill_count, weight = classification
+
+        # Typography / Bounding box gating for major announcements
+        # Reject tiny text (< min_box_height or < min_box_width) like ammo numbers or KDA
+        major_announcements = {
+            "team_wipe",
+            "penta_ko",
+            "quad_ko",
+            "triple_ko",
+            "double_ko",
+            "kill_streak",
+            "shutdown",
+            "objective_clutch",
+        }
+        if event_type in major_announcements:
+            if (
+                max_h < self.config.min_box_height
+                or total_w < self.config.min_box_width
+            ):
+                logger.debug(
+                    "Frame at %.2fs rejected by typography gating: '%s' (w=%.1f, h=%.1f < min %dx%d)",
+                    frame.timestamp,
+                    matched_label,
+                    total_w,
+                    max_h,
+                    self.config.min_box_width,
+                    self.config.min_box_height,
+                )
+                return None
 
         return VisualDetectionEvent(
             timestamp=frame.timestamp,
@@ -372,6 +461,7 @@ class VisualMatcher:
             raw_text=combined_text,
             kill_count=kill_count,
             score_weight=weight,
+            frame_count=1,
         )
 
     def evaluate_window(
@@ -397,13 +487,22 @@ class VisualMatcher:
 
                 evt = self.evaluate_frame(f)
                 if evt:
-                    # Deduplicate: if same event on same ROI within 1.0s, skip duplicate frame
-                    if not any(
-                        prev.roi_name == evt.roi_name
-                        and prev.event_type == evt.event_type
-                        and abs(prev.timestamp - evt.timestamp) < 1.0
-                        for prev in events
-                    ):
+                    # Multi-frame temporal persistence:
+                    # If same event occurs on same ROI within 1.5s, corroborate
+                    existing = next(
+                        (
+                            prev
+                            for prev in events
+                            if prev.roi_name == evt.roi_name
+                            and prev.event_type == evt.event_type
+                            and abs(prev.timestamp - evt.timestamp) <= 1.5
+                        ),
+                        None,
+                    )
+                    if existing:
+                        existing.frame_count += 1
+                        existing.confidence = max(existing.confidence, evt.confidence)
+                    else:
                         events.append(evt)
 
         # Sort events chronologically

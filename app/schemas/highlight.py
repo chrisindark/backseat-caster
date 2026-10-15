@@ -35,6 +35,16 @@ class HighlightDetailsSchema(BaseModel):
     game_phase: str | None = Field(
         default="regular", description="Game state: overtime, clutch, or regular"
     )
+    streak_count: int | None = Field(
+        default=None,
+        description="Active kill streak milestone (e.g. 5 for 5-player KO streak)",
+    )
+    climax_start_seconds: float | None = Field(
+        default=None, description="Start timestamp of the core action climax in seconds"
+    )
+    climax_end_seconds: float | None = Field(
+        default=None, description="End timestamp of the core action climax in seconds"
+    )
     trigger_events: list[TriggerEventSchema] = Field(
         default_factory=list,
         description="Chronological event timestamps and labels",

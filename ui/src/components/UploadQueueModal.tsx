@@ -56,12 +56,12 @@ function getDefaultMetadata(item: RenderManifest) {
     item.upload_selection?.description ||
     `Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight`;
   const defaultTags =
-    (item.upload_selection?.tags || ["Gaming", "MarvelRivals", "Highlights"]).join(", ");
+    (item.upload_selection?.tags || ["Gaming", "MarvelRivals", "Highlights", "Shorts"]).join(", ");
   const privacyVal: UploadPrivacy =
     item.upload_selection?.privacy === "private" ||
-    item.upload_selection?.privacy === "public"
+    item.upload_selection?.privacy === "unlisted"
       ? item.upload_selection.privacy
-      : "unlisted";
+      : "public";
 
   return {
     title: defaultTitle,
@@ -161,6 +161,17 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         .map((t) => t.trim())
         .filter(Boolean);
       const isShort = meta.format !== "landscape";
+
+      // Synchronize modified staging metadata with backend DB before uploading
+      await onUpdateSelection(clipId, {
+        is_selected: true,
+        preferred_format: meta.format,
+        title: meta.title,
+        description: meta.description,
+        tags: tagsArray,
+        privacy: meta.privacy,
+      });
+
       const result = await uploadClipToYouTube(clipId, {
         title: meta.title,
         description: meta.description,
@@ -192,6 +203,27 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
     setIsUploadingBatch(true);
     setUploadError(null);
     try {
+      // Synchronize modified staging metadata for all selected clips before batch uploading
+      await Promise.all(
+        selectedRenders.map(async (r) => {
+          const meta = clipMetadata[r.clip_id];
+          if (meta) {
+            const tagsArray = meta.tags
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean);
+            await onUpdateSelection(r.clip_id, {
+              is_selected: true,
+              preferred_format: meta.format,
+              title: meta.title,
+              description: meta.description,
+              tags: tagsArray,
+              privacy: meta.privacy,
+            });
+          }
+        })
+      );
+
       const batchRes = await uploadSelectedClipsToYouTube(true);
       if (batchRes.results) {
         const resultMap: Record<string, YouTubeUploadResult> = {};
@@ -231,8 +263,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
       const existing = prev[clipId] || (renderItem ? getDefaultMetadata(renderItem) : {
         title: clipId,
         description: "",
-        tags: "Gaming, Highlights",
-        privacy: "unlisted" as UploadPrivacy,
+        tags: "Gaming, Highlights, Shorts",
+        privacy: "public" as UploadPrivacy,
         format: "vertical_blur" as UploadFormat,
       });
 
@@ -506,7 +538,17 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             <button
                               key={fmt}
                               type="button"
-                              onClick={() => handleFieldChange(render.clip_id, "format", fmt)}
+                              onClick={() => {
+                                handleFieldChange(render.clip_id, "format", fmt);
+                                onUpdateSelection(render.clip_id, {
+                                  is_selected: true,
+                                  preferred_format: fmt,
+                                  title: meta.title,
+                                  description: meta.description,
+                                  tags: meta.tags.split(",").map((t) => t.trim()).filter(Boolean),
+                                  privacy: meta.privacy,
+                                });
+                              }}
                               className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
                                 chosenFormat === fmt
                                   ? "bg-rose-600 text-white shadow-sm"
@@ -532,6 +574,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           type="text"
                           value={meta.title}
                           onChange={(e) => handleFieldChange(render.clip_id, "title", e.target.value)}
+                          onBlur={() => handleSaveClipMetadata(render.clip_id)}
                           placeholder="Video or Short Title..."
                           className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
                         />
@@ -548,6 +591,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           onChange={(e) =>
                             handleFieldChange(render.clip_id, "description", e.target.value)
                           }
+                          onBlur={() => handleSaveClipMetadata(render.clip_id)}
                           placeholder="Video description, timestamps, and hashtags..."
                           className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 resize-none"
                         />
@@ -565,6 +609,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             onChange={(e) =>
                               handleFieldChange(render.clip_id, "tags", e.target.value)
                             }
+                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
                             placeholder="Gaming, MarvelRivals, Shorts..."
                             className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
                           />
@@ -576,14 +621,23 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           </label>
                           <select
                             value={meta.privacy}
-                            onChange={(e) =>
-                              handleFieldChange(render.clip_id, "privacy", e.target.value)
-                            }
+                            onChange={(e) => {
+                              const val = e.target.value as UploadPrivacy;
+                              handleFieldChange(render.clip_id, "privacy", val);
+                              onUpdateSelection(render.clip_id, {
+                                is_selected: true,
+                                preferred_format: meta.format,
+                                title: meta.title,
+                                description: meta.description,
+                                tags: meta.tags.split(",").map((t) => t.trim()).filter(Boolean),
+                                privacy: val,
+                              });
+                            }}
                             className="px-2.5 py-1 bg-slate-900 border border-white/10 rounded-lg text-slate-200 focus:outline-none focus:border-rose-500 text-xs"
                           >
-                            <option value="unlisted">Unlisted (Recommended)</option>
+                            <option value="public">Public (Default)</option>
+                            <option value="unlisted">Unlisted</option>
                             <option value="private">Private</option>
-                            <option value="public">Public</option>
                           </select>
                         </div>
                       </div>

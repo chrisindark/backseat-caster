@@ -139,8 +139,6 @@ class RenderService:
         resolved_modes = request.modes
         if not resolved_modes:
             resolved_modes = [
-                "landscape",
-                "vertical_blur",
                 request.crop_preset or "third_person",
             ]
 
@@ -157,7 +155,7 @@ class RenderService:
             ):
                 clean_modes.append(m)
         if not clean_modes:
-            clean_modes = ["landscape", "vertical_blur", "third_person"]
+            clean_modes = [request.crop_preset or "third_person"]
 
         job_id = uuid.uuid4()
         job = RenderJob(
@@ -328,7 +326,7 @@ class RenderService:
         job_modes = (
             [m.strip() for m in job.modes.split(",") if m.strip()]
             if job.modes
-            else (["landscape", "vertical_blur", job.crop_preset or "third_person"])
+            else ([job.crop_preset or "third_person"])
         )
         stream_outputs = {}
         if job.status == "completed":
@@ -753,34 +751,107 @@ class RenderService:
         """Update upload/publish selection details in manifest.json and RenderJob database table."""
         renders_root = settings.renders_path
         manifest_file = renders_root / clip_id / "manifest.json"
-        upload_dict = {
-            "is_selected": request.is_selected,
-            "preferred_format": request.preferred_format,
-            "title": request.title,
-            "description": request.description,
-            "tags": request.tags or [],
-            "privacy": request.privacy or "public",
-            "updated_at": datetime.now(UTC).isoformat(),
-        }
-
-        if manifest_file.exists():
-            try:
-                with open(manifest_file) as f:
-                    manifest_data = json.load(f)
-                manifest_data["upload_selection"] = upload_dict
-                with open(manifest_file, "w") as f:
-                    json.dump(manifest_data, f, indent=2)
-            except Exception as e:
-                logger.warning("Could not update manifest.json upload_selection: %s", e)
 
         job = (
             db.query(RenderJob)
             .filter((RenderJob.clip_id == clip_id) | (RenderJob.id == clip_id))
             .first()
         )
+
+        existing_meta: dict[str, Any] = {}
+        manifest_data: dict[str, Any] = {}
+        if manifest_file.exists():
+            try:
+                with open(manifest_file) as f:
+                    manifest_data = json.load(f)
+                existing_meta = manifest_data.get("upload_selection") or {}
+            except Exception as e:
+                logger.warning(
+                    "Could not read manifest.json for upload_selection: %s", e
+                )
+
+        if not existing_meta and job and job.upload_metadata:
+            try:
+                existing_meta = json.loads(job.upload_metadata)
+            except Exception:
+                pass
+
+        video = (
+            db.query(Video).filter(Video.id == job.video_id).first()
+            if job and job.video_id
+            else None
+        )
+
+        # 1. Resolve Title (ensure it never falls back to null)
+        if request.title is not None and request.title.strip():
+            final_title = request.title.strip()
+        elif existing_meta.get("title"):
+            final_title = str(existing_meta["title"]).strip()
+        elif video and video.title:
+            start_s = (
+                int(job.start_seconds) if job and job.start_seconds is not None else 0
+            )
+            dur_s = (
+                int(job.duration_seconds)
+                if job and job.duration_seconds is not None
+                else 15
+            )
+            final_title = (
+                f"{video.title[:50]} - Highlight ({start_s}s-{start_s + dur_s}s)"
+            )
+        else:
+            final_title = f"Gameplay Highlight - {clip_id}"
+
+        # 2. Resolve Description
+        if request.description is not None and request.description.strip():
+            final_description = request.description.strip()
+        elif existing_meta.get("description"):
+            final_description = str(existing_meta["description"]).strip()
+        else:
+            final_description = "Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight"
+
+        # 3. Resolve Tags
+        if request.tags is not None and len(request.tags) > 0:
+            final_tags = [t.strip() for t in request.tags if t and t.strip()]
+        elif existing_meta.get("tags") and len(existing_meta["tags"]) > 0:
+            final_tags = [t.strip() for t in existing_meta["tags"] if t and t.strip()]
+        else:
+            final_tags = ["Gaming", "MarvelRivals", "Highlights", "Shorts"]
+
+        # 4. Resolve Privacy (default to public)
+        final_privacy = request.privacy or existing_meta.get("privacy") or "public"
+        if final_privacy not in ("private", "unlisted", "public"):
+            final_privacy = "public"
+
+        # 5. Resolve Format
+        final_format = (
+            request.preferred_format
+            or (job.selected_format if job else None)
+            or existing_meta.get("preferred_format")
+            or "vertical_blur"
+        )
+
+        upload_dict = {
+            "is_selected": request.is_selected,
+            "preferred_format": final_format,
+            "title": final_title,
+            "description": final_description,
+            "tags": final_tags,
+            "privacy": final_privacy,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+
+        if manifest_file.exists():
+            try:
+                manifest_data["upload_selection"] = upload_dict
+                with open(manifest_file, "w") as f:
+                    json.dump(manifest_data, f, indent=2)
+            except Exception as e:
+                logger.warning("Could not update manifest.json upload_selection: %s", e)
+
         if job:
             job.is_selected_for_upload = request.is_selected
-            job.selected_format = request.preferred_format
+            job.selected_format = final_format
             job.upload_metadata = json.dumps(upload_dict)
             db.commit()
 

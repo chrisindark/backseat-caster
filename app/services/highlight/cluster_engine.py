@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -54,6 +55,16 @@ class HighlightDetails(BaseModel):
     )
     game_phase: str | None = Field(
         default="regular", description="Game state: overtime, clutch, or regular"
+    )
+    streak_count: int | None = Field(
+        default=None,
+        description="Active kill streak milestone (e.g. 5 for 5-player KO streak)",
+    )
+    climax_start_seconds: float | None = Field(
+        default=None, description="Start timestamp of core action climax"
+    )
+    climax_end_seconds: float | None = Field(
+        default=None, description="End timestamp of core action climax"
     )
     trigger_events: list[TriggerEvent] = Field(
         default_factory=list,
@@ -107,16 +118,16 @@ class ClusterConfig(BaseModel):
         description="Merge events occurring within this interval into a single chain",
     )
     pre_roll_seconds: float = Field(
-        default=7.0,
-        description="Cinematic pre-roll before first action event (captures setup/flank)",
+        default=10.0,
+        description="Cinematic pre-roll before first action event (captures neutral zone setup/flank approach)",
     )
     post_roll_seconds: float = Field(
-        default=4.0,
-        description="Cinematic post-roll after last action event (captures aftermath/emote)",
+        default=8.0,
+        description="Cinematic post-roll after last action event (captures aftermath, reaction, emote)",
     )
     min_clip_duration: float = Field(
-        default=30.0,
-        description="Minimum clip duration for YouTube Shorts (clamped floor)",
+        default=35.0,
+        description="Minimum candidate clip duration (provides narrative context for LLM/Gemini trimming)",
     )
     max_clip_duration: float = Field(
         default=60.0,
@@ -138,6 +149,7 @@ def generate_suggested_title(
     game_phase: str = "regular",
     is_team_wipe: bool = False,
     character_name: str | None = None,
+    streak_count: int | None = None,
 ) -> str:
     """Generate a catchy, high-engagement YouTube Shorts title with gaming emojis."""
     hero_prefix = f"{character_name} " if character_name else ""
@@ -165,13 +177,38 @@ def generate_suggested_title(
     if event_type == "shutdown":
         return f"Huge {hero_prefix}Ultimate Shutdown Denied! 🛑 #MarvelRivals"
 
-    if event_type == "kill_streak":
+    if event_type == "kill_streak" or streak_count:
+        if streak_count == 5:
+            return (
+                f"Unreal {hero_prefix}5-Player KO Streak! 🔥 #MarvelRivals"
+                if not is_ot
+                else f"Unreal {hero_prefix}5-Player KO Streak in Overtime! 🔥 #MarvelRivals"
+            )
+        elif streak_count == 4:
+            return (
+                f"Crazy {hero_prefix}4-Player KO Streak! ⚡️ #MarvelRivals"
+                if not is_ot
+                else f"Crazy {hero_prefix}4-Player KO Streak in Overtime! ⚡️ #MarvelRivals"
+            )
+        elif streak_count == 3:
+            return (
+                f"Clean {hero_prefix}3-Player KO Streak! 🔥 #MarvelRivals"
+                if not is_ot
+                else f"Clean {hero_prefix}3-Player KO Streak in Overtime! 🔥 #MarvelRivals"
+            )
+        elif is_ot:
+            return f"Unstoppable {hero_prefix}Kill Streak in Overtime! 🚀 #MarvelRivals"
         return f"Unstoppable {hero_prefix}Kill Streak Unleashed! 🚀 #MarvelRivals"
 
     if event_type == "triple_ko":
         if is_ot:
             return f"Clean {hero_prefix}Triple KO in Overtime! 🔥 #MarvelRivals"
         return f"Clean {hero_prefix}Triple KO Highlight! 🔥 #MarvelRivals"
+
+    if event_type == "double_ko":
+        if is_ot:
+            return f"Fast {hero_prefix}Double KO in Overtime! ⚡️ #MarvelRivals"
+        return f"Fast {hero_prefix}Double KO Highlight! ⚡️ #MarvelRivals"
 
     if event_type == "objective_clutch":
         return (
@@ -392,8 +429,26 @@ class ClusterEngine:
                 for e in cluster
             ]
 
+            # Climax boundaries & streak milestone detection
+            climax_start = round(first_time, 2)
+            climax_end = round(last_time, 2)
+
+            detected_streak = None
+            for e in cluster:
+                if getattr(e, "streak_count", None):
+                    detected_streak = e.streak_count
+                    break
+                if "PLAYER KO STREAK" in e.label.upper():
+                    m_st = re.search(r"(\d+)\s*PLAYER", e.label.upper())
+                    if m_st:
+                        detected_streak = int(m_st.group(1))
+                        break
+
             details = HighlightDetails(
                 kill_count=total_kills,
+                streak_count=detected_streak,
+                climax_start_seconds=climax_start,
+                climax_end_seconds=climax_end,
                 has_ultimate=has_ultimate,
                 is_team_wipe=is_team_wipe,
                 game_phase=game_phase,
@@ -423,6 +478,7 @@ class ClusterEngine:
                 kill_count=total_kills,
                 game_phase=game_phase,
                 is_team_wipe=is_team_wipe,
+                streak_count=detected_streak,
             )
             tags = generate_suggested_tags(peak_type, game_phase=game_phase)
 

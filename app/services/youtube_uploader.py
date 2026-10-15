@@ -523,7 +523,14 @@ class YouTubeUploaderService:
                 if job
                 else manifest_data.get("clip", {}).get("duration_seconds", 15.0)
             )
-            is_vertical = resolved_format in ("vertical_blur", "vertical_crop")
+            is_vertical = resolved_format in (
+                "vertical_blur",
+                "vertical_crop",
+                "third_person",
+                "direct_crop",
+                "cinematic",
+                "custom",
+            ) or (resolved_format != "landscape")
 
             target_is_short = is_short
             if target_is_short is None:
@@ -573,9 +580,9 @@ class YouTubeUploaderService:
                 final_tags.append("Shorts")
 
             # Prepare privacy
-            final_privacy = privacy or staging_meta.get("privacy") or "unlisted"
+            final_privacy = privacy or staging_meta.get("privacy") or "public"
             if final_privacy not in ("private", "unlisted", "public"):
-                final_privacy = "unlisted"
+                final_privacy = "public"
 
             # Update job state in DB: uploading
             if job:
@@ -671,6 +678,17 @@ class YouTubeUploaderService:
 
             uploaded_at_iso = datetime.now(UTC).isoformat()
 
+            # Synchronize DB job and staging metadata with final upload state
+            updated_upload_dict = {
+                "is_selected": bool(job.is_selected_for_upload) if job else True,
+                "preferred_format": resolved_format,
+                "title": final_title,
+                "description": final_desc,
+                "tags": final_tags,
+                "privacy": final_privacy,
+                "updated_at": uploaded_at_iso,
+            }
+
             # Update DB job
             if job:
                 job.youtube_video_id = uploaded_id
@@ -679,11 +697,14 @@ class YouTubeUploaderService:
                 job.youtube_upload_url = youtube_url
                 job.youtube_uploaded_at = datetime.now(UTC)
                 job.youtube_upload_error = None
+                job.upload_metadata = json.dumps(updated_upload_dict)
+                job.selected_format = resolved_format
                 db.commit()
 
-            # Update manifest.json with upload record
+            # Update manifest.json with upload record and sync upload_selection
             if manifest_path.exists():
                 try:
+                    manifest_data["upload_selection"] = updated_upload_dict
                     manifest_data["youtube_upload"] = {
                         "video_id": uploaded_id,
                         "url": youtube_url,
@@ -777,6 +798,13 @@ class YouTubeUploaderService:
                     logger.error(
                         "Failed uploading selected clip %s: %s", job.clip_id, e
                     )
+                    failed_privacy = "public"
+                    if job.upload_metadata:
+                        try:
+                            meta = json.loads(job.upload_metadata)
+                            failed_privacy = meta.get("privacy", "public")
+                        except Exception:
+                            pass
                     results.append(
                         YouTubeUploadResult(
                             clip_id=job.clip_id,
@@ -784,7 +812,7 @@ class YouTubeUploaderService:
                             format=job.selected_format or "vertical_blur",
                             is_short=True,
                             status="failed",
-                            privacy="unlisted",
+                            privacy=failed_privacy,
                             error_message=str(e),
                         )
                     )

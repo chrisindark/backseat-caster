@@ -60,6 +60,17 @@ def test_suggested_title_and_tags_generation():
     t3 = generate_suggested_title("shutdown", kill_count=1)
     assert "Shutdown" in t3
 
+    # Streak milestone titles (tier-aware)
+    t4 = generate_suggested_title("kill_streak", streak_count=5)
+    assert "5-Player KO Streak" in t4
+    assert "🔥" in t4
+
+    t5 = generate_suggested_title("kill_streak", streak_count=4)
+    assert "4-Player KO Streak" in t5
+
+    t6 = generate_suggested_title("double_ko", kill_count=2)
+    assert "Double KO" in t6
+
     # Tags
     tags_ot = generate_suggested_tags("triple_ko", game_phase="overtime")
     assert "MarvelRivals" in tags_ot
@@ -122,6 +133,8 @@ def test_cluster_events_chaining():
     assert cand.video_id == "vod_test_123"
     assert cand.event_type == "triple_ko"
     assert cand.details.kill_count == 3
+    assert cand.details.climax_start_seconds == 20.0
+    assert cand.details.climax_end_seconds == 26.0
     assert len(cand.details.trigger_events) == 3
     # Duration clamped to min 18.0s
     assert cand.duration_seconds >= 18.0

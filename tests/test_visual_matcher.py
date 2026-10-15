@@ -58,7 +58,7 @@ def test_classify_text_hierarchy():
 
     hexa = matcher.classify_text("HEXA KO")
     assert hexa is not None
-    assert hexa[0] == "team_wipe"
+    assert hexa[0] == "hexa_ko"
     assert hexa[2] == 6
 
     # ACE and isolated 6 KO are stripped to prevent scoreboard false positives
@@ -139,6 +139,17 @@ def test_classify_text_hierarchy():
     assert double[0] == "double_ko"
     assert double[2] == 2
     assert double[3] == 0.70
+
+    double_bang = matcher.classify_text("DOUBLE!")
+    assert double_bang is not None
+    assert double_bang[0] == "double_ko"
+    assert double_bang[2] == 2
+
+    # Specific streak milestone
+    streak_5 = matcher.classify_text("5 PLAYER KO STREAK!")
+    assert streak_5 is not None
+    assert streak_5[0] == "kill_streak"
+    assert streak_5[1] == "5 PLAYER KO STREAK"
 
     # Single KO tier
     elim = matcher.classify_text("ELIMINATED")

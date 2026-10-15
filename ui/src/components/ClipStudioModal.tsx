@@ -175,19 +175,28 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   // Comparison playback element refs
   const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
+  const standaloneVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
-    const sourceEl = sourceVideoRef.current;
-    const leftEl = compareLeftVideoRef.current;
-    const rightEl = compareRightVideoRef.current;
     return () => {
       isMountedRef.current = false;
-      if (sourceEl) sourceEl.pause();
-      if (leftEl) leftEl.pause();
-      if (rightEl) rightEl.pause();
+      sourceVideoRef.current?.pause();
+      compareLeftVideoRef.current?.pause();
+      compareRightVideoRef.current?.pause();
+      standaloneVideoRef.current?.pause();
     };
   }, []);
+
+  // Pause playback when modal closes or video becomes null
+  useEffect(() => {
+    if (!video) {
+      sourceVideoRef.current?.pause();
+      compareLeftVideoRef.current?.pause();
+      compareRightVideoRef.current?.pause();
+      standaloneVideoRef.current?.pause();
+    }
+  }, [video]);
 
   // Listen to Escape key to close modal
   useEffect(() => {
@@ -220,10 +229,8 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   const [normalizeAudio, setNormalizeAudio] = useState<boolean>(true);
   const [targetLufs, setTargetLufs] = useState<number>(-14.0);
 
-  // Clipping modes multi-select
+  // Clipping modes multi-select (preselected default: Third-Person Wide Crop)
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
-    "landscape",
-    "vertical_blur",
     "third_person",
   ]);
   const [customBlurPadding, setCustomBlurPadding] = useState<number>(0.33);
@@ -242,6 +249,13 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   const [activeTab, setActiveTab] = useState<string>("comparison");
   const [leftCompareMode, setLeftCompareMode] = useState<string>("vertical_blur");
   const [rightCompareMode, setRightCompareMode] = useState<string>("third_person");
+
+  // Pause output preview players when switching output tabs
+  useEffect(() => {
+    compareLeftVideoRef.current?.pause();
+    compareRightVideoRef.current?.pause();
+    standaloneVideoRef.current?.pause();
+  }, [activeTab]);
 
   // Previous completed renders for this video
   const [existingRenders, setExistingRenders] = useState<RenderManifest[]>([]);
@@ -287,8 +301,21 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
     setSelectedModes(["vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
   };
 
+  const handleSelectDefaultSingle = () => {
+    setSelectedModes(["third_person"]);
+  };
+
   const handleSelectDefaultTriple = () => {
     setSelectedModes(["landscape", "vertical_blur", "third_person"]);
+  };
+
+  const handleQuickRenderHighlightFromModal = (cand: HighlightCandidateItem) => {
+    handleApplyHighlightFromModal(cand);
+    setSelectedModes(["third_person"]);
+    setIsHighlightDrawerOpen(false);
+    setTimeout(() => {
+      handleStartRender(["third_person"]);
+    }, 300);
   };
 
   // Synchronized playback controls for compare mode
@@ -392,9 +419,10 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
     ? Math.max(1, remainingVideoSeconds)
     : activeDuration;
 
-  const handleStartRender = async () => {
+  const handleStartRender = async (modesOverride?: ClippingMode[]) => {
     if (!video) return;
-    if (selectedModes.length === 0) {
+    const targetModes = modesOverride && modesOverride.length > 0 ? modesOverride : selectedModes;
+    if (targetModes.length === 0) {
       setRenderError("Please select at least 1 clipping mode to render.");
       return;
     }
@@ -410,11 +438,11 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
 
     setIsRendering(true);
     setRenderProgress(5);
-    setRenderStatusStage(`Queuing render job for ${selectedModes.length} modes...`);
+    setRenderStatusStage(`Queuing render job for ${targetModes.length} mode${targetModes.length === 1 ? "" : "s"}...`);
 
     try {
       const cropPresetForCompat =
-        selectedModes.find((m) =>
+        targetModes.find((m) =>
           ["third_person", "direct_crop", "cinematic", "custom"].includes(m)
         ) || "third_person";
 
@@ -426,8 +454,8 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
         encoder: "auto",
         overwrite: true,
         crop_preset: cropPresetForCompat,
-        crop_blur_padding: selectedModes.includes("custom") ? customBlurPadding : undefined,
-        modes: selectedModes,
+        crop_blur_padding: targetModes.includes("custom") ? customBlurPadding : undefined,
+        modes: targetModes,
         normalize_audio: normalizeAudio,
         target_lufs: targetLufs,
       });
@@ -941,13 +969,20 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                 </div>
 
                 {/* Quick Presets */}
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                   <button
                     type="button"
-                    onClick={handleSelectAllModes}
+                    onClick={handleSelectDefaultSingle}
                     className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
                   >
-                    All 6 Modes
+                    Third-Person (1)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectDefaultTriple}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                  >
+                    Triple (3)
                   </button>
                   <button
                     type="button"
@@ -958,10 +993,10 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                   </button>
                   <button
                     type="button"
-                    onClick={handleSelectDefaultTriple}
+                    onClick={handleSelectAllModes}
                     className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
                   >
-                    Default Triple (3)
+                    All 6 Modes
                   </button>
                 </div>
               </div>
@@ -1141,7 +1176,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
 
               <button
                 type="button"
-                onClick={handleStartRender}
+                onClick={() => handleStartRender()}
                 disabled={isRendering || selectedModes.length === 0}
                 className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-950/60 transition-all cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -1295,6 +1330,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareLeftVideoRef}
+                            data-sync-group="modal-compare"
                             src={renderedOutputs[leftCompareMode]}
                             controls
                             playsInline
@@ -1326,6 +1362,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         <div className="w-[280px] aspect-[9/16] bg-black rounded-xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareRightVideoRef}
+                            data-sync-group="modal-compare"
                             src={renderedOutputs[rightCompareMode]}
                             controls
                             playsInline
@@ -1349,6 +1386,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         : "w-[320px] aspect-[9/16]"
                     }`}>
                       <video
+                        ref={standaloneVideoRef}
                         src={renderedOutputs[activeTab]}
                         controls
                         playsInline
@@ -1385,6 +1423,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
           videoTitle={video.title}
           onClose={() => setIsHighlightDrawerOpen(false)}
           onApplyToStudio={handleApplyHighlightFromModal}
+          onQuickRender={handleQuickRenderHighlightFromModal}
           onCandidatesCountChange={(count) => setHighlightCount(count)}
         />
       )}

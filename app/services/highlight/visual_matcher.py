@@ -58,7 +58,17 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "TEAM WIPE",
         6,
         1.00,
-        re.compile(r"\b(TEAM\s*WIPE|HEXA\s*KO)\b", re.IGNORECASE),
+        re.compile(r"\b(TEAM\s*WIPE)\b", re.IGNORECASE),
+    ),
+    (
+        "hexa_ko",
+        "HEXA KO",
+        6,
+        0.95,
+        re.compile(
+            r"\b(HEXA\s*K[0O]|HEXA!?)\b",
+            re.IGNORECASE,
+        ),
     ),
     (
         "penta_ko",
@@ -66,7 +76,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         5,
         0.95,
         re.compile(
-            r"\b(PENTA\s*KO|QUINTUPLE\s*KO|MEGA\s*KO)\b",
+            r"\b(PENTA\s*K[0O]|PENTA!?|QUINTUPLE\s*K[0O]|MEGA\s*K[0O])\b",
             re.IGNORECASE,
         ),
     ),
@@ -76,7 +86,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         4,
         0.90,
         re.compile(
-            r"\b(QUAD(?:RA?)?\s*KO|QUADRUPLE\s*KO|ULTRA\s*KO)\b",
+            r"\b(QUAD(?:RA?)?\s*K[0O]|QUADRA!?|QUADRUPLE\s*K[0O]|ULTRA\s*K[0O])\b",
             re.IGNORECASE,
         ),
     ),
@@ -97,7 +107,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         1,
         0.85,
         re.compile(
-            r"\b([3-6]\s*PLAYER\s*KO\s*STREAK|KILLING\s*SPREE|RAMPAGE|UNSTOPPABLE|GODLIKE)\b",
+            r"\b([3-6]\s*PLAYER\s*K[0O]\s*STREAK|KILLING\s*SPREE|RAMPAGE|UNSTOPPABLE|GODLIKE)\b",
             re.IGNORECASE,
         ),
     ),
@@ -107,7 +117,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "TRIPLE KO",
         3,
         0.80,
-        re.compile(r"\b(TRIPLE\s*KO|TRIPLE\s*KILL)\b", re.IGNORECASE),
+        re.compile(r"\b(TRIPLE\s*K[0O]|TRIPLE!?|TRIPLE\s*KILL)\b", re.IGNORECASE),
     ),
     # Objectives & match states (positive / clutch)
     (
@@ -125,7 +135,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "DOUBLE KO",
         2,
         0.70,
-        re.compile(r"\b(DOUBLE\s*KO|DOUBLE\s*KILL)\b", re.IGNORECASE),
+        re.compile(r"\b(DOUBLE\s*K[0O]|DOUBLE!?|DOUBLE\s*KILL)\b", re.IGNORECASE),
     ),
     # Base single elimination
     (
@@ -175,6 +185,10 @@ class VisualDetectionEvent(BaseModel):
     frame_count: int = Field(
         default=1,
         description="Number of consecutive/adjacent frames corroborating this event",
+    )
+    streak_count: int | None = Field(
+        default=None,
+        description="Active streak count if streak milestone (e.g. 5 for 5-player streak)",
     )
 
 
@@ -231,8 +245,8 @@ class VisualMatcherConfig(BaseModel):
         description="Minimum bounding box height in pixels for valid banners (filters ammo/KDA numbers)",
     )
     min_box_width: float = Field(
-        default=90.0,
-        description="Minimum bounding box width in pixels for valid multi-kill/streak banners",
+        default=75.0,
+        description="Minimum bounding box width in pixels for valid multi-kill/streak banners (accepts compact badges like DOUBLE!)",
     )
     ocr_min_confidence: float = Field(
         default=0.35, description="Minimum OCR word confidence threshold"
@@ -373,6 +387,11 @@ class VisualMatcher:
         for event_type, label, kill_count, weight, pattern in EVENT_HIERARCHY:
             match = pattern.search(cleaned)
             if match:
+                # If it's a specific streak milestone like '5 PLAYER KO STREAK', preserve the streak count
+                m_streak = re.search(r"\b([3-6])\s*PLAYER\s*K[0O]\s*STREAK", cleaned)
+                if m_streak:
+                    count = int(m_streak.group(1))
+                    return event_type, f"{count} PLAYER KO STREAK", kill_count, weight
                 return event_type, label, kill_count, weight
         return None
 
@@ -450,6 +469,14 @@ class VisualMatcher:
                 )
                 return None
 
+        # Extract numerical streak milestone if present
+        detected_streak = None
+        m_st = re.search(
+            r"\b([3-6])\s*PLAYER\s*K[0O]\s*STREAK", combined_text, re.IGNORECASE
+        )
+        if m_st:
+            detected_streak = int(m_st.group(1))
+
         return VisualDetectionEvent(
             timestamp=frame.timestamp,
             roi_name=frame.roi_name,
@@ -462,6 +489,7 @@ class VisualMatcher:
             kill_count=kill_count,
             score_weight=weight,
             frame_count=1,
+            streak_count=detected_streak,
         )
 
     def evaluate_window(
@@ -475,7 +503,7 @@ class VisualMatcher:
         frames_passed_color = 0
 
         # Primary ROIs to inspect in order
-        roi_order = ["center_ko", "kill_feed", "objective_banner"]
+        roi_order = ["center_ko", "right_streak", "kill_feed", "objective_banner"]
 
         for roi_name in roi_order:
             frames = window_rois.frames_by_roi.get(roi_name, [])

@@ -23,8 +23,6 @@ ALL_CLIPPING_MODES: list[str] = [
 ]
 
 DEFAULT_CLIPPING_MODES: list[str] = [
-    "landscape",
-    "vertical_blur",
     "third_person",
 ]
 

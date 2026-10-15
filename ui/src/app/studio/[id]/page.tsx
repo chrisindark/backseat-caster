@@ -183,10 +183,8 @@ function StudioWorkspace() {
   const [normalizeAudio, setNormalizeAudio] = useState<boolean>(true);
   const [targetLufs, setTargetLufs] = useState<number>(-14.0);
 
-  // 6 Clipping modes multi-select
+  // 6 Clipping modes multi-select (preselected default: Third-Person Wide Crop)
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
-    "landscape",
-    "vertical_blur",
     "third_person",
   ]);
   const [customBlurPadding, setCustomBlurPadding] = useState<number>(0.33);
@@ -282,6 +280,24 @@ function StudioWorkspace() {
 
   const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
+  const standaloneVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Stop all video playback on unmount or navigation
+  useEffect(() => {
+    return () => {
+      sourceVideoRef.current?.pause();
+      compareLeftVideoRef.current?.pause();
+      compareRightVideoRef.current?.pause();
+      standaloneVideoRef.current?.pause();
+    };
+  }, []);
+
+  // Pause output preview players when switching output tabs
+  useEffect(() => {
+    compareLeftVideoRef.current?.pause();
+    compareRightVideoRef.current?.pause();
+    standaloneVideoRef.current?.pause();
+  }, [activeTab]);
 
   const toggleMode = (mode: ClippingMode) => {
     setSelectedModes((prev) =>
@@ -295,6 +311,10 @@ function StudioWorkspace() {
 
   const handleSelectAllShorts = () => {
     setSelectedModes(["vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
+  };
+
+  const handleSelectDefaultSingle = () => {
+    setSelectedModes(["third_person"]);
   };
 
   const handleSelectDefaultTriple = () => {
@@ -503,16 +523,18 @@ function StudioWorkspace() {
 
   const handleQuickRenderHighlight = (candidate: HighlightCandidateItem) => {
     handleApplyHighlight(candidate);
+    setSelectedModes(["third_person"]);
     setIsHighlightDrawerOpen(false);
-    // Smooth scroll down to render controls and start render
+    // Smooth scroll down to render controls and start quick render of single third_person mode
     setTimeout(() => {
-      handleStartRender();
+      handleStartRender(["third_person"]);
     }, 300);
   };
 
-  const handleStartRender = async () => {
+  const handleStartRender = async (modesOverride?: ClippingMode[]) => {
     if (!video) return;
-    if (selectedModes.length === 0) {
+    const targetModes = modesOverride && modesOverride.length > 0 ? modesOverride : selectedModes;
+    if (targetModes.length === 0) {
       setRenderError("Please select at least 1 clipping mode to render.");
       return;
     }
@@ -530,11 +552,11 @@ function StudioWorkspace() {
 
     setIsRendering(true);
     setRenderProgress(5);
-    setRenderStatusStage(`Queuing render job for ${selectedModes.length} modes...`);
+    setRenderStatusStage(`Queuing render job for ${targetModes.length} mode${targetModes.length === 1 ? "" : "s"}...`);
 
     try {
       const cropPresetForCompat =
-        selectedModes.find((m) =>
+        targetModes.find((m) =>
           ["third_person", "direct_crop", "cinematic", "custom"].includes(m)
         ) || "third_person";
 
@@ -543,8 +565,8 @@ function StudioWorkspace() {
         start_seconds: startSec,
         duration_seconds: effectiveDuration,
         crop_preset: cropPresetForCompat,
-        crop_blur_padding: selectedModes.includes("custom") ? customBlurPadding : undefined,
-        modes: selectedModes,
+        crop_blur_padding: targetModes.includes("custom") ? customBlurPadding : undefined,
+        modes: targetModes,
         narration_path: audioMode === "voiceover" && narrationPath.trim() ? narrationPath.trim() : null,
         normalize_audio: normalizeAudio,
         target_lufs: targetLufs,
@@ -573,7 +595,7 @@ function StudioWorkspace() {
           if (prog < 25) {
             setRenderStatusStage("Analyzing source video & extracting frames...");
           } else if (prog < 75) {
-            setRenderStatusStage(`Rendering ${selectedModes.length} clipping modes in single pass...`);
+            setRenderStatusStage(`Rendering ${targetModes.length} clipping mode${targetModes.length === 1 ? "" : "s"} in single pass...`);
           } else {
             setRenderStatusStage("Generating audit manifest & outputs...");
           }
@@ -1012,10 +1034,17 @@ function StudioWorkspace() {
                     <div className="flex items-center gap-1 shrink-0 flex-wrap">
                       <button
                         type="button"
-                        onClick={handleSelectAllModes}
+                        onClick={handleSelectDefaultSingle}
                         className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
                       >
-                        All 6
+                        Third-Person (1)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSelectDefaultTriple}
+                        className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                      >
+                        Triple (3)
                       </button>
                       <button
                         type="button"
@@ -1026,10 +1055,10 @@ function StudioWorkspace() {
                       </button>
                       <button
                         type="button"
-                        onClick={handleSelectDefaultTriple}
+                        onClick={handleSelectAllModes}
                         className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
                       >
-                        Triple (3)
+                        All 6
                       </button>
                     </div>
                   </div>
@@ -1300,7 +1329,7 @@ function StudioWorkspace() {
 
                   <button
                     type="button"
-                    onClick={handleStartRender}
+                    onClick={() => handleStartRender()}
                     disabled={isRendering || selectedModes.length === 0}
                     className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-950/60 transition-transform active:scale-95 cursor-pointer"
                   >
@@ -1451,6 +1480,7 @@ function StudioWorkspace() {
                         <div className="w-[300px] aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareLeftVideoRef}
+                            data-sync-group="studio-compare"
                             src={renderedOutputs[leftCompareMode]}
                             controls
                             playsInline
@@ -1482,6 +1512,7 @@ function StudioWorkspace() {
                         <div className="w-[300px] aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative">
                           <video
                             ref={compareRightVideoRef}
+                            data-sync-group="studio-compare"
                             src={renderedOutputs[rightCompareMode]}
                             controls
                             playsInline
@@ -1507,6 +1538,7 @@ function StudioWorkspace() {
                       }`}
                     >
                       <video
+                        ref={standaloneVideoRef}
                         src={renderedOutputs[activeTab]}
                         controls
                         playsInline

@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import { MediaPlaybackCoordinator } from "@/components/MediaPlaybackCoordinator";
 import { Theme } from "@radix-ui/themes";
+import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,9 +17,11 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="bg-[#090a0f] text-slate-100 antialiased selection:bg-rose-500 selection:text-white">
         <Theme appearance="dark" accentColor="crimson" grayColor="slate" radius="large">
+          <MediaPlaybackCoordinator />
           {children}
         </Theme>
       </body>
     </html>
   );
 }
+

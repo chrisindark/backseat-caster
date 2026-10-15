@@ -45,7 +45,7 @@ class YouTubeUploadRequest(BaseModel):
     )
     tags: list[str] | None = Field(None, description="Video tags")
     privacy: str | None = Field(
-        "public", description="Privacy status: 'private', 'unlisted', or 'public'"
+        None, description="Privacy status: 'private', 'unlisted', or 'public' (unset defers to staged metadata / public)"
     )
     format: str | None = Field(
         None,

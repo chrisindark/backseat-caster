@@ -24,6 +24,10 @@ from app.schemas.render import (
     RenderJobUpdateRequest,
     UploadSelectionRequest,
 )
+from app.services.upload_metadata import (
+    build_description,
+    build_tags,
+)
 from app.worker import helpers
 from app.worker.celery_app import celery_app
 
@@ -535,7 +539,7 @@ class RenderService:
                 try:
                     with open(manifest_file) as f:
                         manifest = json.load(f)
-                    clip_data = manifest.get("clip", {})
+                    clip_data = manifest.get("request", {}) or manifest.get("clip", {})
                     vid_id = (
                         manifest.get("source_metadata", {}).get("video_id")
                         or manifest.get("video_id")
@@ -802,21 +806,23 @@ class RenderService:
         else:
             final_title = f"Gameplay Highlight - {clip_id}"
 
-        # 2. Resolve Description
+        # 2. Resolve Description (dynamic default when not staged/user-supplied)
         if request.description is not None and request.description.strip():
             final_description = request.description.strip()
         elif existing_meta.get("description"):
             final_description = str(existing_meta["description"]).strip()
         else:
-            final_description = "Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight"
+            final_description = build_description(
+                video, job, clip_id, is_short=False
+            )
 
-        # 3. Resolve Tags
+        # 3. Resolve Tags (dynamic default when not staged/user-supplied)
         if request.tags is not None and len(request.tags) > 0:
             final_tags = [t.strip() for t in request.tags if t and t.strip()]
         elif existing_meta.get("tags") and len(existing_meta["tags"]) > 0:
             final_tags = [t.strip() for t in existing_meta["tags"] if t and t.strip()]
         else:
-            final_tags = ["Gaming", "MarvelRivals", "Highlights", "Shorts"]
+            final_tags = build_tags(video, job, is_short=False)
 
         # 4. Resolve Privacy (default to public)
         final_privacy = request.privacy or existing_meta.get("privacy") or "public"

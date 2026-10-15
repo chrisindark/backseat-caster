@@ -43,10 +43,10 @@ uv sync
 uv run alembic upgrade head
 
 # Start FastAPI server
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 3001
 ```
 
-The API docs will be live at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+The API docs will be live at [http://127.0.0.1:3001/docs](http://127.0.0.1:3001/docs).
 
 #### (Optional) Celery Worker with Redis
 
@@ -71,7 +71,7 @@ docker compose up --build
 ```
 
 - **Next.js UI:** [http://localhost:3000](http://localhost:3000)
-- **FastAPI API:** [http://localhost:8000](http://localhost:8000) (Docs at `/docs`)
+- **FastAPI API:** [http://localhost:3001](http://localhost:3001) (Docs at `/docs`)
 - **Redis:** `localhost:6379`
 - **Data Volume:** Persisted under `./data` (downloads and sqlite database)
 

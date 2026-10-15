@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     YOUTUBE_CLIENT_ID: str | None = None
     YOUTUBE_CLIENT_SECRET: str | None = None
     YOUTUBE_REFRESH_TOKEN: str | None = None
-    YOUTUBE_REDIRECT_URI: str = "http://localhost:8000/api/v1/youtube/auth/callback"
+    YOUTUBE_REDIRECT_URI: str = "http://localhost:3001/api/v1/youtube/auth/callback"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

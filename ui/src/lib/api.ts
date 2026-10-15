@@ -22,7 +22,7 @@ import {
   YouTubeUploadResult,
 } from "@/types/video";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1";
 
 async function parseResponse<T>(res: Response, fallbackActionName: string): Promise<T> {
   if (!res.ok) {

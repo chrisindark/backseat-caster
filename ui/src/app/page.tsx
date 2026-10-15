@@ -47,6 +47,8 @@ function HomeContent() {
   const [backendHealthy, setBackendHealthy] = useState<boolean>(true);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadIdRef = useRef(0);
   const [downloadedTotal, setDownloadedTotal] = useState<number>(0);
   const [cataloguedTotal, setCataloguedTotal] = useState<number>(0);
   const [downloadingTotal, setDownloadingTotal] = useState<number>(0);
@@ -84,7 +86,9 @@ function HomeContent() {
       currentFilter = activeFilter,
       currentSearch = searchQuery
     ) => {
+      const loadId = ++loadIdRef.current;
       setIsLoading(true);
+      setLoadError(null);
       try {
         const data = await fetchVideos({
           page: currentPage,
@@ -93,6 +97,7 @@ function HomeContent() {
           search: currentSearch,
         });
 
+        if (loadId !== loadIdRef.current) return data;
         setVideos(data.items);
         setTotal(data.total);
         setTotalPages(data.total_pages);
@@ -115,17 +120,16 @@ function HomeContent() {
             inProgress.add(v.id);
           }
         });
-        setDownloadingIds((prev) => {
-          const next = new Set(prev);
-          inProgress.forEach((id) => next.add(id));
-          return next;
-        });
+        setDownloadingIds(inProgress);
 
         return data;
       } catch (err) {
         console.error("Error loading videos:", err);
+        if (loadId === loadIdRef.current) {
+          setLoadError(err instanceof Error ? err.message : "Failed to load videos");
+        }
       } finally {
-        setIsLoading(false);
+        if (loadId === loadIdRef.current) setIsLoading(false);
       }
     },
     [page, limit, activeFilter, searchQuery]
@@ -365,7 +369,12 @@ function HomeContent() {
               </div>
             </div>
             <button
-              onClick={() => checkBackendHealth().then(setBackendHealthy)}
+              onClick={async () => {
+                await checkBackendHealth().then(setBackendHealthy);
+                setLoadError(null);
+                await loadVideos();
+                await refreshCounts();
+              }}
               className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/40 cursor-pointer"
             >
               Retry Connection

@@ -190,6 +190,12 @@ function StudioWorkspace() {
   const [customBlurPadding, setCustomBlurPadding] = useState<number>(0.33);
 
   // Rendering state
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const [isRendering, setIsRendering] = useState<boolean>(false);
   const [renderProgress, setRenderProgress] = useState<number>(0);
   const [renderStatusStage, setRenderStatusStage] = useState<string>("Queuing render job...");
@@ -489,7 +495,7 @@ function StudioWorkspace() {
           setAppliedHighlightNotification(
             `Highlight scan complete! ${candRes.candidates?.length || 0} action clips mined.`
           );
-          setTimeout(() => setAppliedHighlightNotification(null), 5000);
+          setTimeout(() => { if (isMountedRef.current) setAppliedHighlightNotification(null); }, 5000);
         } else if (statusRes.status === "failed") {
           setIsHighlightScanning(false);
         }
@@ -517,7 +523,7 @@ function StudioWorkspace() {
     const titleStr = candidate.suggested_title || candidate.event_type.replace("_", " ").toUpperCase();
     setAppliedHighlightNotification(`Applied "${titleStr}" (${dur}s) to Studio timeline!`);
     setTimeout(() => {
-      setAppliedHighlightNotification(null);
+      if (isMountedRef.current) setAppliedHighlightNotification(null);
     }, 4000);
   };
 
@@ -581,14 +587,16 @@ function StudioWorkspace() {
         let pollCount = 0;
         const maxPolls = 180;
 
-        while (!isDone && pollCount < maxPolls) {
+        while (isMountedRef.current && !isDone && pollCount < maxPolls) {
           await new Promise((r) => setTimeout(r, 1000));
+          if (!isMountedRef.current) return;
           pollCount++;
           if (pollCount >= maxPolls) {
             throw new Error("Render job timed out. Check server logs or background worker.");
           }
 
           const jobStatus = await getRenderJobStatus(targetId);
+          if (!isMountedRef.current) return;
           const prog = jobStatus.progress || 10;
           setRenderProgress(prog);
 
@@ -611,6 +619,7 @@ function StudioWorkspace() {
         }
       }
 
+      if (!isMountedRef.current) return;
       setRenderResult(completedJob as RenderClipResponse);
 
       const newOutputs: Record<string, string> = {};

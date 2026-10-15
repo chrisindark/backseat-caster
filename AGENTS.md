@@ -111,7 +111,7 @@ uv run alembic upgrade head
 uv run alembic revision --autogenerate -m "describe_migration"
 
 # Start FastAPI development server
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 3001
 
 # (Optional) Start Celery worker
 uv run celery -A app.worker.celery_app worker --loglevel=info

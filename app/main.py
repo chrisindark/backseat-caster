@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
         settings.highlights_path,
     )
     yield
+    await DependencyContainer.shutdown()
     logger.info("BackseatCaster API shutting down.")
 
 

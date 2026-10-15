@@ -302,7 +302,7 @@ class AudioEnergyScanner:
                                     pct, f"Scanning audio excitement ({int(pct)}%)"
                                 )
                                 last_progress_pct = current_time
-                        except ValueError, IndexError:
+                        except (ValueError, IndexError):
                             current_time = None
 
                     elif line.startswith("lavfi.r128.M="):

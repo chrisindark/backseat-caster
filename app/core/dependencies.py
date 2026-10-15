@@ -15,6 +15,19 @@ class DependencyContainer:
         await cls._redis_service.ping()
         return cls._redis_service
 
+    @classmethod
+    async def shutdown(cls) -> None:
+        """Close and drop the cached Redis service.
+
+        The asyncio Redis client is bound to the event loop that created it, so
+        this singleton must not outlive the application lifespan (and, in tests,
+        must not leak across successive ``TestClient`` event loops).
+        """
+        service = cls._redis_service
+        cls._redis_service = None
+        if service is not None:
+            await service.close()
+
 
 # FastAPI Depends compatible functions
 async def get_redis_service() -> RedisService:

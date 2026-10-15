@@ -366,3 +366,101 @@ def test_typography_gating_rejects_tiny_text():
     )
     evt = matcher.evaluate_frame(frame)
     assert evt is None
+
+
+def test_classify_text_returns_matched_text():
+    """classify_text exposes the exact matched substring for box attribution."""
+    matcher = VisualMatcher()
+
+    triple = matcher.classify_text("TRIPLE KO")
+    assert triple is not None
+    assert triple[0] == "triple_ko"
+    assert triple[4].replace(" ", "") == "TRIPLEKO"
+
+    streak = matcher.classify_text("5 PLAYER KO STREAK!")
+    assert streak is not None
+    assert streak[0] == "kill_streak"
+    assert streak[4].replace(" ", "") == "5PLAYERKOSTREAK"
+
+
+def test_matched_typography_uses_only_participating_boxes():
+    """Typography metrics must come from the matched box, not the whole ROI."""
+    # A tiny banner next to a huge unrelated box must report only the banner.
+    items = [
+        ("TEAM WIPE", 0.99, 30.0, 25.0),
+        ("99999", 0.99, 400.0, 40.0),
+    ]
+    width, height = VisualMatcher._matched_typography(items, "TEAM WIPE")
+    assert width == 30.0
+    assert height == 25.0
+
+    # A multi-token banner sums the participating boxes.
+    multi = [("TEAM", 0.9, 40.0, 25.0), ("WIPE", 0.9, 45.0, 25.0)]
+    multi_w, multi_h = VisualMatcher._matched_typography(multi, "TEAM WIPE")
+    assert multi_w == 85.0
+    assert multi_h == 25.0
+
+    # Unattributable match falls back to the largest box in the ROI.
+    fallback = [("ZZZ", 0.9, 12.0, 8.0), ("YYY", 0.9, 70.0, 30.0)]
+    fb_w, fb_h = VisualMatcher._matched_typography(fallback, "NO MATCH HERE")
+    assert fb_w == 70.0
+    assert fb_h == 30.0
+
+
+def test_width_gate_uses_matched_box_not_roi_total(monkeypatch):
+    """A tiny banner must not pass the width gate just because large unrelated
+    HUD text shares the ROI (regression for summed-width gating)."""
+    matcher = VisualMatcher(
+        config=VisualMatcherConfig(min_box_height=22.0, min_box_width=90.0)
+    )
+    monkeypatch.setattr(
+        matcher, "check_color_triggers", lambda frame: (True, 0.02, 0.0)
+    )
+    frame = _create_synthetic_roi_frame(text=None, timestamp=5.0)
+
+    # Tiny "TEAM WIPE" alongside a wide unrelated box -> rejected.
+    monkeypatch.setattr(
+        matcher,
+        "run_ocr",
+        lambda f: [
+            ("TEAM WIPE", 0.99, 30.0, 25.0),
+            ("TEAM KDA 99999", 0.99, 400.0, 40.0),
+        ],
+    )
+    assert matcher.evaluate_frame(frame) is None
+
+    # A genuinely large matched banner still passes the gate.
+    monkeypatch.setattr(
+        matcher, "run_ocr", lambda f: [("TEAM WIPE", 0.99, 150.0, 30.0)]
+    )
+    evt = matcher.evaluate_frame(frame)
+    assert evt is not None
+    assert evt.event_type == "team_wipe"
+
+
+def test_evaluate_window_calls_color_gate_once_per_frame(monkeypatch):
+    """evaluate_window must not run the HSV color gate twice per frame."""
+    matcher = VisualMatcher()
+    calls = {"n": 0}
+    original = matcher.check_color_triggers
+
+    def counting(frame):
+        calls["n"] += 1
+        return original(frame)
+
+    monkeypatch.setattr(matcher, "check_color_triggers", counting)
+
+    frame_a = _create_synthetic_roi_frame(text="TRIPLE KO", timestamp=1.0)
+    frame_b = _create_synthetic_roi_frame(
+        text=None, timestamp=1.5, bg_color=(25, 25, 25)
+    )
+    window_rois = WindowROIExtractionResult(
+        window_start=1.0,
+        window_end=2.0,
+        window_duration=1.0,
+        frames_by_roi={"center_ko": [frame_a, frame_b]},
+        total_frames=2,
+    )
+
+    matcher.evaluate_window(window_rois)
+    assert calls["n"] == 2

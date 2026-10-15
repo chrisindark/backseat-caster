@@ -2,7 +2,7 @@
 name = "backseat-caster"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.14.0",
     "celery>=5.4.0",
@@ -29,7 +29,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pre-commit (>=4.6.2,<5.0.0)",
-    "ruff>=0.16.10,<0.17.0",
+    "ruff==0.14.0",
 ]
 
 [tool.pytest.ini_options]
@@ -38,7 +38,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py314"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [

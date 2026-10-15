@@ -371,18 +371,25 @@ class VisualMatcher:
             )
             return []
 
-    def classify_text(self, text: str) -> tuple[str, str, int, float] | None:
-        """
-        Classify text against Marvel Rivals event hierarchy.
-
-        Returns (event_type, label, kill_count, score_weight) or None.
-        """
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Uppercase text and repair common OCR character substitutions."""
         cleaned = text.upper()
-        # Common OCR substitution normalizations
         cleaned = re.sub(r"[0O]VERTIME", "OVERTIME", cleaned)
         cleaned = re.sub(r"TR[I1L]PLE", "TRIPLE", cleaned)
         cleaned = re.sub(r"D[0O]UBLE", "DOUBLE", cleaned)
         cleaned = re.sub(r"V[I1L]CT[0O]RY", "VICTORY", cleaned)
+        return cleaned
+
+    def classify_text(self, text: str) -> tuple[str, str, int, float, str] | None:
+        """
+        Classify text against Marvel Rivals event hierarchy.
+
+        Returns (event_type, label, kill_count, score_weight, matched_text) or None.
+        ``matched_text`` is the exact substring that matched, allowing callers to
+        attribute the detection back to the OCR box(es) that produced it.
+        """
+        cleaned = self._normalize_text(text)
 
         for event_type, label, kill_count, weight, pattern in EVENT_HIERARCHY:
             match = pattern.search(cleaned)
@@ -391,15 +398,60 @@ class VisualMatcher:
                 m_streak = re.search(r"\b([3-6])\s*PLAYER\s*K[0O]\s*STREAK", cleaned)
                 if m_streak:
                     count = int(m_streak.group(1))
-                    return event_type, f"{count} PLAYER KO STREAK", kill_count, weight
-                return event_type, label, kill_count, weight
+                    return (
+                        event_type,
+                        f"{count} PLAYER KO STREAK",
+                        kill_count,
+                        weight,
+                        m_streak.group(0),
+                    )
+                return event_type, label, kill_count, weight, match.group(0)
         return None
 
-    def evaluate_frame(self, frame: ROIFrame) -> VisualDetectionEvent | None:
+    @staticmethod
+    def _matched_typography(
+        ocr_items: list[tuple[str, float, float, float]], matched_text: str | None
+    ) -> tuple[float, float]:
+        """Return the (width, height) of the OCR boxes that produced a match.
+
+        Restricting to the participating boxes stops large, unrelated HUD text
+        elsewhere in the ROI (kill feed, ammo counters, objective banners) from
+        inflating the typography gate that is meant to filter small text. Falls
+        back to the largest box when a match cannot be attributed to a token.
+        """
+        if matched_text:
+            norm_match = VisualMatcher._normalize_text(matched_text).replace(" ", "")
+            participants: list[tuple[float, float]] = []
+            for text, _conf, w, h in ocr_items:
+                token_norm = VisualMatcher._normalize_text(text).replace(" ", "")
+                if token_norm and token_norm in norm_match:
+                    participants.append((w, h))
+            if participants:
+                return (
+                    sum(w for w, _ in participants),
+                    max(h for _, h in participants),
+                )
+
+        return (
+            max((t[2] for t in ocr_items), default=0.0),
+            max((t[3] for t in ocr_items), default=0.0),
+        )
+
+    def evaluate_frame(
+        self,
+        frame: ROIFrame,
+        color_result: tuple[bool, float, float] | None = None,
+    ) -> VisualDetectionEvent | None:
         """
         Evaluate a single ROI frame using two-phase color gating and OCR trigger matching.
+
+        ``color_result`` may be supplied to reuse an already-computed
+        ``(has_trigger, gold_ratio, red_ratio)`` tuple, avoiding a second HSV
+        pass over the same frame.
         """
-        has_color, gold_ratio, red_ratio = self.check_color_triggers(frame)
+        if color_result is None:
+            color_result = self.check_color_triggers(frame)
+        has_color, gold_ratio, red_ratio = color_result
 
         if self.config.skip_ocr_without_color and not has_color:
             return None
@@ -419,11 +471,12 @@ class VisualMatcher:
             return None
 
         # 2. Typography gating & hierarchy classification
-        # Check combined text first
+        # Check combined text first, then fall back to individual OCR tokens.
         classification = self.classify_text(combined_text)
-        total_w = sum(t[2] for t in ocr_items)
-        max_h = max((t[3] for t in ocr_items), default=0.0)
         max_conf = max((t[1] for t in ocr_items), default=0.0)
+        total_w, max_h = self._matched_typography(
+            ocr_items, classification[4] if classification else None
+        )
 
         if not classification:
             # Check individual OCR tokens
@@ -431,15 +484,14 @@ class VisualMatcher:
                 cls_candidate = self.classify_text(item_text)
                 if cls_candidate:
                     classification = cls_candidate
-                    total_w = item_w
-                    max_h = item_h
+                    total_w, max_h = item_w, item_h
                     max_conf = item_conf
                     break
 
         if not classification:
             return None
 
-        event_type, matched_label, kill_count, weight = classification
+        event_type, matched_label, kill_count, weight, _ = classification
 
         # Typography / Bounding box gating for major announcements
         # Reject tiny text (< min_box_height or < min_box_width) like ammo numbers or KDA
@@ -509,11 +561,12 @@ class VisualMatcher:
             frames = window_rois.frames_by_roi.get(roi_name, [])
             for f in frames:
                 frames_eval += 1
-                has_color, _, _ = self.check_color_triggers(f)
-                if has_color:
+                # Compute the HSV color gate once and reuse it inside evaluate_frame.
+                color_result = self.check_color_triggers(f)
+                if color_result[0]:
                     frames_passed_color += 1
 
-                evt = self.evaluate_frame(f)
+                evt = self.evaluate_frame(f, color_result=color_result)
                 if evt:
                     # Multi-frame temporal persistence:
                     # If same event occurs on same ROI within 1.5s, corroborate

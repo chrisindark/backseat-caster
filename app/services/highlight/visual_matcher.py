@@ -58,7 +58,7 @@ EVENT_HIERARCHY: list[tuple[str, str, int, float, re.Pattern[str]]] = [
         "TEAM WIPE",
         6,
         1.00,
-        re.compile(r"\b(TEAM\s*WIPE|ACE)\b", re.IGNORECASE),
+        re.compile(r"\b(TEAM\s*WIPE)\b", re.IGNORECASE),
     ),
     (
         "hexa_ko",

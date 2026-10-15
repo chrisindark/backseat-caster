@@ -792,6 +792,7 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                             <button
                               type="button"
                               onClick={() => onQuickRender(candidate)}
+                              title="Quick Render (Third-Person Wide Crop)"
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-black/40 hover:bg-black/80 text-slate-300 hover:text-white rounded-xl border border-white/10 text-xs font-semibold transition-colors cursor-pointer"
                             >
                               <Play className="w-3.5 h-3.5" />

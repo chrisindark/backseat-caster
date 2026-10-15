@@ -58,7 +58,7 @@ def test_classify_text_hierarchy():
 
     hexa = matcher.classify_text("HEXA KO")
     assert hexa is not None
-    assert hexa[0] == "team_wipe"
+    assert hexa[0] == "hexa_ko"
     assert hexa[2] == 6
 
     # ACE and isolated 6 KO are stripped to prevent scoreboard false positives

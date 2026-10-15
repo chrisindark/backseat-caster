@@ -1,6 +1,8 @@
 """YouTube API Router for OAuth authentication and programmatic video & Shorts uploads."""
 
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -351,19 +353,27 @@ def upload_selected_queue(
         logger.info("Dispatching batch YouTube upload to BackgroundTasks")
         background_tasks.add_task(YouTubeUploaderService.upload_selected_clips)
 
-    results = [
-        YouTubeUploadResult(
-            clip_id=j.clip_id,
-            title=j.clip_id,
-            format=j.selected_format or "vertical_blur",
-            is_short=(j.selected_format or "vertical_blur")
-            in ("vertical_blur", "vertical_crop"),
-            status="uploading",
-            privacy="unlisted",
-            progress=1.0,
+    results = []
+    for j in selected_jobs:
+        job_privacy = "public"
+        if j.upload_metadata:
+            try:
+                meta = json.loads(j.upload_metadata)
+                job_privacy = meta.get("privacy", "public")
+            except Exception:
+                pass
+        results.append(
+            YouTubeUploadResult(
+                clip_id=j.clip_id,
+                title=j.clip_id,
+                format=j.selected_format or "vertical_blur",
+                is_short=(j.selected_format or "vertical_blur")
+                in ("vertical_blur", "vertical_crop"),
+                status="uploading",
+                privacy=job_privacy,
+                progress=1.0,
+            )
         )
-        for j in selected_jobs
-    ]
 
     return BaseResponse.success_response(
         response=YouTubeBatchUploadResponse(
@@ -408,6 +418,34 @@ def upload_clip(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="YouTube account not authenticated. Please authenticate first via /api/v1/youtube/auth/url",
         )
+
+    if job:
+        existing = {}
+        if job.upload_metadata:
+            try:
+                existing = json.loads(job.upload_metadata)
+            except Exception:
+                pass
+        existing.update(
+            {
+                "is_selected": True,
+                "preferred_format": request.format
+                or existing.get("preferred_format")
+                or job.selected_format
+                or "vertical_blur",
+                "title": request.title or existing.get("title"),
+                "description": request.description or existing.get("description"),
+                "tags": request.tags
+                if request.tags is not None
+                else existing.get("tags", []),
+                "privacy": request.privacy or existing.get("privacy", "public"),
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        job.upload_metadata = json.dumps(existing)
+        if request.format:
+            job.selected_format = request.format
+        db.commit()
 
     if request.sync:
         try:
@@ -480,13 +518,22 @@ def upload_clip(
         else (format_name in ("vertical_blur", "vertical_crop"))
     )
 
+    resolved_privacy = request.privacy
+    if not resolved_privacy and job and job.upload_metadata:
+        try:
+            resolved_privacy = json.loads(job.upload_metadata).get("privacy")
+        except Exception:
+            pass
+    if not resolved_privacy:
+        resolved_privacy = "public"
+
     initial_result = YouTubeUploadResult(
         clip_id=clip_id,
         title=request.title or clip_id,
         format=format_name,
         is_short=target_short,
         status="uploading",
-        privacy=request.privacy or "unlisted",
+        privacy=resolved_privacy,
         progress=1.0,
     )
     return BaseResponse.success_response(response=initial_result)

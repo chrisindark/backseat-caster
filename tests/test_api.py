@@ -338,6 +338,7 @@ def test_render_and_stream_endpoints(client, db_session, tmp_path):
             "start_seconds": 0,
             "duration_seconds": 1,
             "clip_id": clip_id,
+            "modes": ["landscape", "vertical_blur", "third_person"],
             "encoder": "libx264",
             "overwrite": True,
             "sync": True,
@@ -458,6 +459,71 @@ def test_render_and_stream_endpoints(client, db_session, tmp_path):
         f"{settings.API_PREFIX}/renders/{clip_id}/stream/invalid_type"
     )
     assert bad_stream.status_code == 400
+
+
+def test_render_default_mode_single_third_person(client, db_session, tmp_path):
+    """Verify that omitting modes defaults to the single third_person mode."""
+    import subprocess
+
+    dummy_video_path = tmp_path / "test_api_clip_default_mode.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=640x360:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=800:duration=2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(dummy_video_path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+    video = Video(
+        id="api_test_vod_default_mode",
+        title="API Test VOD Default Mode",
+        webpage_url="https://youtube.com/watch?v=api_test_vod_default_mode",
+        is_downloaded=True,
+        download_status="completed",
+        local_file_path=str(dummy_video_path),
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    clip_id = f"test_clip_def_{int(tmp_path.stat().st_mtime)}"
+    response = client.post(
+        f"{settings.API_PREFIX}/renders",
+        json={
+            "video_id": "api_test_vod_default_mode",
+            "start_seconds": 0,
+            "duration_seconds": 1,
+            "clip_id": clip_id,
+            "encoder": "libx264",
+            "overwrite": True,
+            "sync": True,
+        },
+    )
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["success"] is True
+    render_resp = res_data["response"]
+    assert render_resp["clip_id"] == clip_id
+    assert render_resp["modes"] == ["third_person"]
+    assert "third_person" in render_resp["outputs"]
+    assert "landscape" not in render_resp["outputs"]
+    assert "vertical_blur" not in render_resp["outputs"]
+    assert render_resp["vertical_crop_path"] is not None
 
 
 def test_render_with_direct_crop_preset(client, db_session, tmp_path):

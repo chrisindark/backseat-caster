@@ -35,7 +35,7 @@ class RenderClipRequest(BaseModel):
     )
     modes: list[str] | None = Field(
         None,
-        description="List of modes to render: 'landscape', 'vertical_blur', 'third_person', 'direct_crop', 'cinematic', 'custom'. Defaults to ['landscape', 'vertical_blur', crop_preset or 'third_person'].",
+        description="List of modes to render: 'landscape', 'vertical_blur', 'third_person', 'direct_crop', 'cinematic', 'custom'. Defaults to [crop_preset or 'third_person'].",
     )
     normalize_audio: bool = Field(
         True,

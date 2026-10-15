@@ -655,7 +655,7 @@ class RenderEngine:
 
         # Resolve modes to render
         if not modes:
-            modes = ["landscape", "vertical_blur", crop_preset or "third_person"]
+            modes = [crop_preset or effective_preset or "third_person"]
 
         normalized_modes: list[str] = []
         for m in modes:
@@ -671,7 +671,7 @@ class RenderEngine:
                 normalized_modes.append(m)
 
         if not normalized_modes:
-            normalized_modes = ["landscape", "vertical_blur", "third_person"]
+            normalized_modes = [effective_preset or "third_person"]
 
         # Build output targets dictionary
         targets: dict[str, Path] = {

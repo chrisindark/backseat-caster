@@ -312,6 +312,7 @@ def test_render_clip_integration(synthetic_assets, tmp_path):
         duration_seconds=1.5,
         output_dir=output_dir,
         narration_path=None,
+        modes=["landscape", "vertical_blur", "third_person"],
         overwrite=True,
     )
 
@@ -384,6 +385,7 @@ def test_render_with_narration_mixing(synthetic_assets, tmp_path):
         duration_seconds=1.5,
         output_dir=output_dir,
         narration_path=synthetic_assets["narration"],
+        modes=["landscape", "vertical_blur", "third_person"],
         overwrite=True,
     )
 
@@ -471,6 +473,7 @@ def test_render_silent_video(synthetic_assets, tmp_path):
         start_seconds=0.0,
         duration_seconds=1.0,
         output_dir=output_dir,
+        modes=["landscape", "vertical_blur", "third_person"],
         overwrite=True,
     )
 
@@ -507,6 +510,30 @@ def test_render_single_mode_selection(synthetic_assets, tmp_path):
     assert Path(result.local_landscape_path).exists()
     assert (output_dir / "landscape.mp4").exists()
     assert not (output_dir / "vertical_blur.mp4").exists()
+
+
+def test_render_clip_default_single_mode(synthetic_assets, tmp_path):
+    """Verify that omitting modes defaults to the single third_person mode."""
+    config = RenderConfig(
+        preferred_encoder="libx264",
+        libx264_crf=20,
+        libx264_preset="ultrafast",
+    )
+    engine = RenderEngine(config=config)
+    output_dir = tmp_path / "clip_default_single_mode"
+
+    result = engine.render_clip(
+        source_path=synthetic_assets["video"],
+        start_seconds=0.0,
+        duration_seconds=1.0,
+        output_dir=output_dir,
+        overwrite=True,
+    )
+
+    assert result.modes == ["third_person"]
+    assert Path(result.local_vertical_crop_path).exists()
+    assert result.local_landscape_path == ""
+    assert result.local_vertical_blur_path == ""
 
 
 def test_render_all_six_modes(synthetic_assets, tmp_path):

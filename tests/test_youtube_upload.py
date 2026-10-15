@@ -472,3 +472,124 @@ def test_youtube_auth_callback_post_endpoint(client, monkeypatch):
         state="json_state_456",
         code_verifier="explicit_verifier_789",
     )
+
+
+def test_youtube_upload_preserves_and_syncs_metadata_and_public_privacy(
+    client, db_session, tmp_path, monkeypatch
+):
+    """
+    Ensure selecting a render generates non-null metadata defaults with public privacy,
+    and uploading synchronizes job.upload_metadata in DB and sends privacyStatus: public to YouTube.
+    """
+    clip_id = "test_public_clip_sync"
+    clip_dir = tmp_path / clip_id
+    clip_dir.mkdir(parents=True)
+    video_file = clip_dir / "third_person.mp4"
+    video_file.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00isommp42")
+
+    manifest_file = clip_dir / "manifest.json"
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "clip_id": clip_id,
+                "clip": {"start_seconds": 10.0, "duration_seconds": 20.0},
+                "outputs": {"third_person": {"file_path": str(video_file)}},
+            }
+        )
+    )
+
+    job = RenderJob(
+        id=f"job_{clip_id}",
+        clip_id=clip_id,
+        video_id="sample_vid",
+        status="completed",
+        progress=100.0,
+        start_seconds=10.0,
+        duration_seconds=20.0,
+        selected_format="third_person",
+        is_selected_for_upload=False,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path))
+
+    # 1. Select clip for upload without passing title/desc/tags
+    sel_res = client.post(
+        f"{settings.API_PREFIX}/renders/{clip_id}/upload-selection",
+        json={"is_selected": True, "preferred_format": "third_person"},
+    )
+    assert sel_res.status_code == 200
+    sel_data = sel_res.json()["response"]["upload_selection"]
+    assert sel_data["is_selected"] is True
+    assert sel_data["privacy"] == "public"
+    assert sel_data["title"] is not None
+    assert sel_data["description"] is not None
+    assert len(sel_data["tags"]) > 0
+
+    # Verify DB upload_metadata
+    db_session.refresh(job)
+    db_meta = json.loads(job.upload_metadata)
+    assert db_meta["privacy"] == "public"
+    assert db_meta["title"] is not None
+    assert db_meta["description"] is not None
+    assert len(db_meta["tags"]) > 0
+
+    # 2. Upload clip with custom title, description, tags and public privacy
+    monkeypatch.setattr(
+        YouTubeUploaderService,
+        "get_auth_status",
+        lambda: YouTubeAuthStatusResponse(is_authenticated=True),
+    )
+    monkeypatch.setattr(YouTubeUploaderService, "get_credentials", lambda: MagicMock())
+
+    captured_body = {}
+    mock_insert = MagicMock()
+    mock_status = MagicMock()
+    mock_status.progress.return_value = 1.0
+    mock_insert.next_chunk.side_effect = [
+        (mock_status, None),
+        (mock_status, {"id": "yt_public_video_id"}),
+    ]
+
+    mock_videos = MagicMock()
+
+    def mock_insert_call(part, body, media_body):
+        captured_body.update(body)
+        return mock_insert
+
+    mock_videos.insert.side_effect = mock_insert_call
+    mock_youtube = MagicMock()
+    mock_youtube.videos.return_value = mock_videos
+
+    monkeypatch.setattr(
+        "app.services.youtube_uploader.build", lambda *a, **kw: mock_youtube
+    )
+
+    upload_payload = {
+        "title": "Custom Epic Public Highlight",
+        "description": "Public highlight description",
+        "tags": ["gaming", "public", "shorts"],
+        "privacy": "public",
+        "sync": True,
+    }
+    up_res = client.post(
+        f"{settings.API_PREFIX}/youtube/upload/{clip_id}",
+        json=upload_payload,
+    )
+    assert up_res.status_code == 200
+    up_data = up_res.json()["response"]
+    assert up_data["status"] == "completed"
+    assert up_data["privacy"] == "public"
+
+    # Verify that YouTube API received privacyStatus: public
+    assert captured_body["status"]["privacyStatus"] == "public"
+    assert captured_body["snippet"]["title"] == "Custom Epic Public Highlight #Shorts"
+
+    # Verify DB job record has updated upload_metadata with title, desc, tags, privacy
+    db_session.refresh(job)
+    final_db_meta = json.loads(job.upload_metadata)
+    assert final_db_meta["title"] == "Custom Epic Public Highlight #Shorts"
+    assert "Public highlight description" in final_db_meta["description"]
+    assert "gaming" in final_db_meta["tags"]
+    assert final_db_meta["privacy"] == "public"

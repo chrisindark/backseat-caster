@@ -305,10 +305,13 @@ function RendersContent() {
   ) => {
     try {
       const newSelected = !isCurrentlySelected;
-      await updateUploadSelection(clipId, {
+      const res = await updateUploadSelection(clipId, {
         is_selected: newSelected,
         preferred_format: preferredFormat,
+        privacy: "public",
       });
+
+      const updatedSelection = res?.upload_selection;
 
       // Update local state optimistically
       setRenders((prev) =>
@@ -316,10 +319,11 @@ function RendersContent() {
           r.clip_id === clipId
             ? {
                 ...r,
-                upload_selection: {
+                upload_selection: updatedSelection || {
                   ...(r.upload_selection || {}),
                   is_selected: newSelected,
                   preferred_format: preferredFormat,
+                  privacy: r.upload_selection?.privacy || "public",
                 },
               }
             : r
@@ -333,6 +337,9 @@ function RendersContent() {
                 ...j,
                 is_selected_for_upload: newSelected,
                 selected_format: preferredFormat,
+                upload_metadata: updatedSelection
+                  ? JSON.stringify(updatedSelection)
+                  : j.upload_metadata,
               }
             : j
         )

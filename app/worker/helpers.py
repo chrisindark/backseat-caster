@@ -1,6 +1,7 @@
 import time
 
 import redis
+from celery import Celery
 
 from app.config import settings
 
@@ -14,7 +15,12 @@ def clear_broker_online_cache() -> None:
 
 
 def is_celery_broker_online(force_refresh: bool = False) -> bool:
-    """Check if the Celery Redis broker is reachable, caching status for 5 seconds."""
+    """Check if Celery can actually process tasks.
+
+    Redis being reachable is not sufficient: jobs dispatched to a broker with
+    no live worker never run and leave the UI stuck indefinitely. We therefore
+    also require at least one responsive worker before claiming Celery is online.
+    """
     cache_key = settings.CELERY_BROKER_URL
     now = time.monotonic()
 
@@ -23,15 +29,22 @@ def is_celery_broker_online(force_refresh: bool = False) -> bool:
         if now - timestamp < _CACHE_TTL_SECONDS:
             return status
 
-    client = None
     online = False
+    client = None
     try:
         client = redis.from_url(
             settings.CELERY_BROKER_URL, socket_timeout=0.2, socket_connect_timeout=0.2
         )
         client.ping()
-        online = True
-    except (redis.RedisError, OSError):
+
+        app = Celery(broker=settings.CELERY_BROKER_URL, backend=settings.CELERY_RESULT_BACKEND)
+        inspector = app.control.inspect(timeout=0.2)
+        try:
+            workers = inspector.ping()
+        except Exception:
+            workers = None
+        online = isinstance(workers, dict) and bool(workers)
+    except Exception:
         online = False
     finally:
         if client is not None:

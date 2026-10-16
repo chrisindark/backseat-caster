@@ -27,7 +27,11 @@ celery_app.conf.update(
     broker_connection_retry=True,
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=3,
+    worker_pool="solo",
 )
+
+# Avoid spawn/forkserver-specific fast trace failures on Python 3.14.
+celery_app.use_fast_trace_task = False
 
 
 @celery_app.on_after_configure.connect

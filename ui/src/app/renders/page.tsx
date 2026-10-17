@@ -23,6 +23,7 @@ import {
   UploadSelectionPayload,
 } from "@/types/video";
 import {
+  AlertCircle,
   AlertTriangle,
   CheckCircle2,
   CheckSquare,
@@ -156,13 +157,15 @@ function RendersContent() {
 
   // Status notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<"success" | "error">("success");
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const showToast = useCallback((msg: string, durationMs = 3500) => {
+  const showToast = useCallback((msg: string, type: "success" | "error" = "success", durationMs = 3500) => {
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
     }
     setToastMessage(msg);
+    setToastType(type);
     toastTimeoutRef.current = setTimeout(() => {
       setToastMessage(null);
       toastTimeoutRef.current = null;
@@ -353,7 +356,7 @@ function RendersContent() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Failed to update upload selection:", err);
-      showToast(`Error: ${msg || "Failed to update"}`, 4000);
+      showToast(`Error: ${msg || "Failed to update"}`, "error", 4000);
     }
   };
 
@@ -378,7 +381,7 @@ function RendersContent() {
       )
     );
     await loadData();
-    showToast("Cleared all upload staging selections", 3000);
+    showToast("Cleared all upload staging selections", "success", 3000);
   };
 
   // Delete render
@@ -393,11 +396,11 @@ function RendersContent() {
         next.delete(clipId);
         return next;
       });
-      showToast(`Deleted render ${clipId}`, 3000);
+      showToast(`Deleted render ${clipId}`, "success", 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Delete failed:", err);
-      showToast(`Delete failed: ${msg}`, 4000);
+      showToast(`Delete failed: ${msg}`, "error", 4000);
     }
   };
 
@@ -432,11 +435,11 @@ function RendersContent() {
       );
       setSelectedClipIds(new Set());
       setShowBulkDeleteConfirm(false);
-      showToast(res.message || `Deleted ${res.deleted_count} renders`, 3500);
+      showToast(res.message || `Deleted ${res.deleted_count} renders`, "success", 3500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Bulk delete failed:", err);
-      showToast(`Bulk delete failed: ${msg}`, 4500);
+      showToast(`Bulk delete failed: ${msg}`, "error", 4500);
     } finally {
       setIsBulkDeleting(false);
     }
@@ -446,12 +449,12 @@ function RendersContent() {
   const handleRetryJob = async (jobId: string) => {
     try {
       await retryRenderJob(jobId);
-      showToast(`Re-queued job ${jobId}`, 3000);
+      showToast(`Re-queued job ${jobId}`, "success", 3000);
       await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Retry failed:", err);
-      showToast(`Retry failed: ${msg}`, 4000);
+      showToast(`Retry failed: ${msg}`, "error", 4000);
     }
   };
 
@@ -559,7 +562,11 @@ function RendersContent() {
         {toastMessage && (
           <div className="p-3 bg-slate-900 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center justify-between shadow-xl animate-in fade-in">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              {toastType === "error" ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
               <span>{toastMessage}</span>
             </div>
             <button

@@ -14,6 +14,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -24,6 +25,11 @@ from app.schemas.youtube import (
     YouTubeAuthStatusResponse,
     YouTubeAuthUrlResponse,
     YouTubeUploadResult,
+)
+from app.services.upload_metadata import (
+    build_description,
+    build_tags,
+    build_title,
 )
 from app.worker.celery_app import celery_app
 
@@ -504,6 +510,50 @@ class YouTubeUploaderService:
                 except Exception:
                     pass
 
+            # Idempotency guard: never re-upload a clip that has already been
+            # successfully published unless the caller explicitly overrides data.
+            if (
+                job is not None
+                and job.youtube_video_id
+                and (job.youtube_upload_status or "").lower() == "completed"
+                and title is None
+                and description is None
+                and tags is None
+                and privacy is None
+                and format_override is None
+                and is_short is None
+            ):
+                cached_url = job.youtube_upload_url or (
+                    f"https://www.youtube.com/shorts/{job.youtube_video_id}"
+                    if "shorts" in (job.youtube_upload_url or "")
+                    else f"https://youtu.be/{job.youtube_video_id}"
+                )
+                cached_format = job.selected_format or "vertical_blur"
+                cached_is_short = "/shorts/" in cached_url
+                cached_title = f"Gameplay Highlight - {clip_id}"
+                cached_privacy = "public"
+                if job.upload_metadata:
+                    try:
+                        cached_meta = json.loads(job.upload_metadata)
+                        cached_title = cached_meta.get("title") or cached_title
+                        cached_privacy = cached_meta.get("privacy") or cached_privacy
+                    except Exception:
+                        pass
+                return YouTubeUploadResult(
+                    clip_id=clip_id,
+                    youtube_video_id=job.youtube_video_id,
+                    youtube_url=cached_url,
+                    title=cached_title,
+                    format=cached_format,
+                    is_short=cached_is_short,
+                    status="completed",
+                    privacy=cached_privacy,
+                    progress=100.0,
+                    uploaded_at=job.youtube_uploaded_at.isoformat()
+                    if job.youtube_uploaded_at
+                    else None,
+                )
+
             preferred_format = (
                 format_override
                 or (job.selected_format if job else None)
@@ -521,7 +571,11 @@ class YouTubeUploaderService:
             duration = (
                 job.duration_seconds
                 if job
-                else manifest_data.get("clip", {}).get("duration_seconds", 15.0)
+                else (
+                    manifest_data.get("request", {}).get("duration_seconds")
+                    or manifest_data.get("clip", {}).get("duration_seconds")
+                    or 15.0
+                )
             )
             is_vertical = resolved_format in (
                 "vertical_blur",
@@ -542,13 +596,11 @@ class YouTubeUploaderService:
                 if job
                 else None
             )
-            parent_title = parent_video.title if parent_video else None
 
             final_title = (
                 title
                 or staging_meta.get("title")
-                or (f"{parent_title} - Clip" if parent_title else None)
-                or f"Gameplay Highlight - {clip_id}"
+                or build_title(parent_video, job, clip_id)
             ).strip()
 
             if (
@@ -564,7 +616,7 @@ class YouTubeUploaderService:
             final_desc = (
                 description
                 or staging_meta.get("description")
-                or "Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#Gaming #Highlight"
+                or build_description(parent_video, job, clip_id, bool(target_is_short))
             ).strip()
 
             if (
@@ -575,7 +627,11 @@ class YouTubeUploaderService:
                 final_desc = f"{final_desc}\n#Shorts"
 
             # Prepare tags
-            final_tags = tags or staging_meta.get("tags") or ["Gaming", "Highlights"]
+            final_tags = (
+                tags
+                or staging_meta.get("tags")
+                or build_tags(parent_video, job, bool(target_is_short))
+            )
             if target_is_short and "Shorts" not in final_tags:
                 final_tags.append("Shorts")
 
@@ -782,6 +838,10 @@ class YouTubeUploaderService:
                 .filter(
                     RenderJob.is_selected_for_upload.is_(True),
                     RenderJob.status == "completed",
+                    or_(
+                        RenderJob.youtube_video_id.is_(None),
+                        RenderJob.youtube_upload_status != "completed",
+                    ),
                 )
                 .all()
             )

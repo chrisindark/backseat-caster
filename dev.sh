@@ -9,7 +9,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 echo "Starting BackseatCaster Backend (VideoToolbox enabled)..."
-uv run uvicorn app.main:app --port 8000 --reload &
+uv run uvicorn app.main:app --port 3001 --reload &
 
 echo "Starting Next.js UI..."
 (cd ui && npm run dev) &

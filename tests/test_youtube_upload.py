@@ -117,7 +117,7 @@ def test_youtube_auth_url_success(client, monkeypatch):
             "client_secret": "fake-client-secret",
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["http://localhost:8000/api/v1/youtube/auth/callback"],
+            "redirect_uris": ["http://localhost:3001/api/v1/youtube/auth/callback"],
         }
     }
     monkeypatch.setattr(
@@ -390,7 +390,7 @@ def test_youtube_pkce_flow_caching_and_exchange(tmp_path, monkeypatch):
             "client_secret": "test-secret",
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["http://localhost:8000/api/v1/youtube/auth/callback"],
+            "redirect_uris": ["http://localhost:3001/api/v1/youtube/auth/callback"],
         }
     }
     monkeypatch.setattr(

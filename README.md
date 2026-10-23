@@ -1,6 +1,30 @@
 # 🎙️ BackseatCaster (`backseat-caster`)
 
-> AI Gaming Video Editor: Browse gameplay VODs, download highlights via `yt-dlp`, and process them into AI-narrated short-form clips.
+> AI Gaming Video Editor: Browse gameplay VODs, download highlights via `yt-dlp`, process them into AI-narrated short-form clips, and publish them to YouTube Shorts — all locally.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-Required-green.svg)](https://ffmpeg.org/)
+
+---
+
+## 📚 Documentation
+
+| Document | Purpose |
+|---|---|
+| [docs/getting-started.md](docs/getting-started.md) | Install, configure, and run the full stack |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and processing pipeline |
+| [API_REFERENCE.md](API_REFERENCE.md) | HTTP endpoint reference |
+| [CONFIGURATION.md](CONFIGURATION.md) | Environment variables & settings |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Development workflows, testing, linting |
+| [ROADMAP.md](ROADMAP.md) | Phases, status, and planned features |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [CHANGELOG.md](CHANGELOG.md) / [RELEASES.md](RELEASES.md) | Change history and release process |
+| [SECURITY.md](SECURITY.md) | Security model and reporting |
+| [AGENTS.md](AGENTS.md) | Guide for AI agents & pair programmers |
+| [docs/](docs/) | Deep dives: rendering, audio, mining, OAuth, deployment, ADRs |
+| [examples/](examples/) | Runnable API, CLI, and Python examples |
 
 ---
 
@@ -14,6 +38,8 @@
   - **Database Migrations:** [Alembic](https://alembic.sqlalchemy.org/)
   - **Background Worker & Task Queue:** [Celery](https://docs.celeryq.dev/) with resilient FastAPI `BackgroundTasks` fallback
   - **YouTube Ingestion:** [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) for channel metadata extraction and high-quality MP4 downloads
+  - **Media Engine:** FFmpeg / ffprobe (rendering, filtering, ducking, loudness normalization)
+  - **Publishing:** Google OAuth 2.0 + YouTube Data API v3 resumable uploads
   - **Testing:** `pytest` + `httpx`
 
 - **Frontend (`ui/`):**
@@ -33,9 +59,6 @@
 # Clone and enter directory
 cd backseat-caster
 
-# Create environment file
-cp .env.example .env
-
 # Install dependencies using uv
 uv sync
 
@@ -46,7 +69,7 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 3001
 ```
 
-The API docs will be live at [http://127.0.0.1:3001/docs](http://127.0.0.1:3001/docs).
+The API docs will be live at [http://127.0.0.1:3001/docs](http://127.0.0.1:3001/docs). See [docs/getting-started.md](docs/getting-started.md) for environment variables.
 
 #### (Optional) Celery Worker with Redis
 
@@ -57,6 +80,7 @@ redis-server
 # Run Celery worker
 uv run celery -A app.worker.celery_app worker --loglevel=info
 ```
+
 *Note: If Redis is offline, downloads automatically execute via FastAPI background tasks without interruption.*
 
 ---
@@ -95,17 +119,17 @@ The dashboard will be available at [http://localhost:3000](http://localhost:3000
 
 ---
 
-## 📡 API Endpoints
+## 📡 API Overview
 
-| Method | Endpoint | Description |
+Full details in [API_REFERENCE.md](API_REFERENCE.md).
+
+| Group | Prefix | Highlights |
 |---|---|---|
-| `GET` | `/api/health` | Healthcheck and storage status |
-| `GET` | `/api/videos` | Paginated video list with search & status filters |
-| `POST` | `/api/videos/sync` | Scrape & sync latest videos from YouTube channel |
-| `GET` | `/api/videos/{id}` | Video details and local file path |
-| `POST` | `/api/videos/{id}/download` | Queue VOD download via `yt-dlp` |
-| `GET` | `/api/videos/{id}/status` | Live download percentage & ETA |
-| `DELETE` | `/api/videos/{id}/download` | Remove downloaded file from local disk |
+| Health | `/api/v1/health` | Healthcheck and storage status |
+| Videos | `/api/v1/videos` | Catalog search, channel sync, yt-dlp download, OBS upload, streaming |
+| Renders | `/api/v1/renders` | Clip rendering jobs, formats, manifests, bulk delete |
+| Highlights | `/api/v1/videos/{id}/highlights` | Candidate mining runs, detection, thumbnails |
+| YouTube | `/api/v1/youtube` | OAuth 2.0, upload staging queue, resumable Shorts publishing |
 
 ---
 
@@ -114,3 +138,5 @@ The dashboard will be available at [http://localhost:3000](http://localhost:3000
 ```bash
 uv run pytest
 ```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the full test workflow.

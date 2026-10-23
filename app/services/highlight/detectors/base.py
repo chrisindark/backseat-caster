@@ -17,11 +17,15 @@ class DetectionMetrics:
     audio_scan_duration_seconds: float = 0.0
     roi_extract_duration_seconds: float = 0.0
     visual_match_duration_seconds: float = 0.0
+    deep_visual_duration_seconds: float = 0.0
     cluster_duration_seconds: float = 0.0
     video_duration_seconds: float = 0.0
     audio_windows_count: int = 0
     frames_analyzed_count: int = 0
     visual_events_count: int = 0
+    killfeed_sequences_count: int = 0
+    ultimate_casts_count: int = 0
+    ability_activations_count: int = 0
 
 
 class BaseHighlightDetector(ABC):

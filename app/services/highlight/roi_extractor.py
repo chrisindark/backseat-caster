@@ -79,7 +79,31 @@ MARVEL_RIVALS_HUD_REGIONS: dict[str, HUDRegion] = {
         height=120,
         description="Right-Edge Personal Elimination / Streak Badge (e.g. DOUBLE!, TRIPLE!, UNSTOPPABLE!)",
     ),
+    "hero_portrait": HUDRegion(
+        name="hero_portrait",
+        x=780,
+        y=900,
+        width=120,
+        height=120,
+        description="Played hero portrait / character icon used for hero identification",
+    ),
+    "ability_row": HUDRegion(
+        name="ability_row",
+        x=1470,
+        y=870,
+        width=380,
+        height=120,
+        description="Bottom-Right ability icon row used for cooldown/activation tracking",
+    ),
 }
+
+# HUD regions required by the Phase 3 deep visual extraction stages.
+PHASE3_HUD_ROI_NAMES: tuple[str, ...] = (
+    "kill_feed",
+    "ultimate_meter",
+    "hero_portrait",
+    "ability_row",
+)
 
 
 class ROIFrame(BaseModel):
@@ -238,6 +262,10 @@ class ROIExtractorConfig(BaseModel):
     primary_rois: list[str] = Field(
         default_factory=lambda: ["center_ko", "right_streak"],
         description="Default ROI region names to extract",
+    )
+    phase3_rois: list[str] = Field(
+        default_factory=lambda: list(PHASE3_HUD_ROI_NAMES),
+        description="Additional ROI regions sampled for killfeed, ultimate, hero and ability analysis",
     )
     normalize_to_1080p: bool = Field(
         default=True,

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
 
     RENDERS_DIR: str = "./data/renders"
     HIGHLIGHTS_DIR: str = "./data/highlights"
+    HERO_TEMPLATES_DIR: str = "./data/hero_templates"
 
     # YouTube API & OAuth configuration
     YOUTUBE_CLIENT_SECRETS_FILE: str = "./data/client_secrets.json"
@@ -78,6 +79,10 @@ class Settings(BaseSettings):
         return Path(self.HIGHLIGHTS_DIR).resolve()
 
     @property
+    def hero_templates_path(self) -> Path:
+        return Path(self.HERO_TEMPLATES_DIR).resolve()
+
+    @property
     def youtube_token_path(self) -> Path:
         return Path(self.YOUTUBE_TOKEN_FILE).resolve()
 
@@ -90,6 +95,7 @@ class Settings(BaseSettings):
         self.downloads_path.mkdir(parents=True, exist_ok=True)
         self.renders_path.mkdir(parents=True, exist_ok=True)
         self.highlights_path.mkdir(parents=True, exist_ok=True)
+        self.hero_templates_path.mkdir(parents=True, exist_ok=True)
         self.youtube_token_path.parent.mkdir(parents=True, exist_ok=True)
         self.youtube_client_secrets_path.parent.mkdir(parents=True, exist_ok=True)
 

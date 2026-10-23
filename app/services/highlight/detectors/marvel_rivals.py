@@ -9,10 +9,15 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.highlight.cluster_engine import ClusterConfig, HighlightCandidate
+from app.services.highlight.deep_visuals import (
+    DeepVisualConfig,
+    evaluate_deep_visuals,
+)
 from app.services.highlight.detectors.base import (
     BaseHighlightDetector,
     DetectionMetrics,
 )
+from app.services.highlight.roi_extractor import ROIExtractorConfig
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +27,22 @@ class MarvelRivalsDetector(BaseHighlightDetector):
     Marvel Rivals highlight detector.
     Pipeline:
     1. Audio Energy Scanner (~100-400x realtime)
-    2. HUD ROI Extraction (1.5 FPS at center_ko and kill_feed)
+    2. HUD ROI Extraction (1.5 FPS at banners, killfeed, ultimate and hero ROIs)
     3. HSV Color Masking & OCR Trigger Matching
-    4. Window Clustering, Cinematic Padding & Scoring Hierarchy
+    4. Phase 3 Deep Visual Extraction (killfeed chains, ultimate casts, hero)
+    5. Window Clustering, Cinematic Padding & Scoring Hierarchy
     """
 
     game_id: str = "marvel_rivals"
     game_display_name: str = "Marvel Rivals"
+
+    def __init__(
+        self,
+        deep_visual_config: DeepVisualConfig | None = None,
+        enable_deep_visuals: bool = True,
+    ) -> None:
+        self.deep_visual_config = deep_visual_config or DeepVisualConfig()
+        self.enable_deep_visuals = enable_deep_visuals
 
     def detect(
         self,
@@ -74,10 +88,16 @@ class MarvelRivalsDetector(BaseHighlightDetector):
                     f"Extracting HUD ROIs across {len(candidate_windows)} action windows...",
                 )
 
+            roi_config = ROIExtractorConfig()
+            roi_names = list(roi_config.primary_rois)
+            if self.enable_deep_visuals:
+                roi_names.extend(roi_config.phase3_rois)
+
             t_roi = time.perf_counter()
             roi_results = s.extract_candidate_windows_rois(
                 media_path=media_path,
                 windows=candidate_windows,
+                roi_names=roi_names,
             )
             roi_duration = time.perf_counter() - t_roi
             if metrics is not None:
@@ -108,6 +128,35 @@ class MarvelRivalsDetector(BaseHighlightDetector):
                 vis_duration,
             )
 
+        # Phase 3: Deep visual extraction (killfeed, ultimate, hero, abilities)
+        deep_result = None
+        if self.enable_deep_visuals and candidate_windows:
+            if progress_callback:
+                progress_callback(
+                    75.0,
+                    "Extracting killfeed chains, ultimate tracking & hero identity...",
+                )
+
+            t_deep = time.perf_counter()
+            deep_result = evaluate_deep_visuals(
+                roi_results, config=self.deep_visual_config
+            )
+            deep_duration = time.perf_counter() - t_deep
+            if metrics is not None:
+                metrics.deep_visual_duration_seconds = round(deep_duration, 3)
+                metrics.killfeed_sequences_count = len(deep_result.killfeed.windows)
+                metrics.ultimate_casts_count = len(deep_result.ultimate.casts)
+                metrics.ability_activations_count = len(deep_result.abilities)
+
+            logger.info(
+                "Marvel Rivals deep visual extraction completed for %s: %d killfeed sequences, %d ultimate casts, hero=%s (in %.2fs)",
+                video_id,
+                len(deep_result.killfeed.windows),
+                len(deep_result.ultimate.casts),
+                deep_result.hero.hero if deep_result.hero else "unknown",
+                deep_duration,
+            )
+
         # Stage 4: Clustering & Thumbnail Extraction
         if progress_callback:
             progress_callback(
@@ -124,6 +173,16 @@ class MarvelRivalsDetector(BaseHighlightDetector):
             visual_matches=visual_matches,
             audio_windows=candidate_windows,
             total_duration=audio_scan.duration_seconds,
+            killfeed_sequences=(deep_result.killfeed.windows if deep_result else None),
+            ultimate_casts=(deep_result.ultimate.casts if deep_result else None),
+            hero_name=(
+                deep_result.hero.hero if deep_result and deep_result.hero else None
+            ),
+            abilities_used=(
+                [activation.ability for activation in deep_result.abilities]
+                if deep_result
+                else None
+            ),
         )
         cluster_duration = time.perf_counter() - t_cluster
         if metrics is not None:

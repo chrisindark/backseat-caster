@@ -94,8 +94,13 @@ Candidate `details` include Phase 3 signals when available: `hero_name`, `multi_
 | `GET` | `/api/v1/youtube/upload/queue` (alias `/api/v1/youtube/queue`) | Staged/selected clips upload queue |
 | `POST` | `/api/v1/youtube/upload/selected` | Upload all selected completed clips (`sync=true` waits per-upload) |
 | `POST` | `/api/v1/youtube/upload/{clip_id}` | Resumable upload of one clip to YouTube Shorts |
+| `GET` | `/api/v1/youtube/quota` | Today's YouTube Data API units used/remaining and upload headroom |
+| `GET` | `/api/v1/youtube/staging` | Auto-staged clips awaiting review or scheduled release (with quota summary) |
+| `POST` | `/api/v1/youtube/staging/{clip_id}/schedule` | Set or clear the native `publishAt` timestamp (`{"publish_at": ISO \| null}`) |
+| `POST` | `/api/v1/youtube/staging/{clip_id}/publish-now` | Clear the schedule and upload the staged clip immediately |
+| `POST` | `/api/v1/youtube/auto-stage` | Render, enrich and schedule the top N highlight candidates for a video |
 
-Unauthenticated upload attempts return `401` until `GET /auth/url` → consent is complete. See [docs/youtube-authentication.md](docs/youtube-authentication.md) and [docs/publishing.md](docs/publishing.md).
+Unauthenticated upload attempts return `401` until `GET /auth/url` → consent is complete. Uploads are rejected with `429` once the daily quota budget cannot cover another upload. See [docs/youtube-authentication.md](docs/youtube-authentication.md) and [docs/publishing.md](docs/publishing.md).
 
 ---
 

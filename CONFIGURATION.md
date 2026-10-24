@@ -81,6 +81,25 @@ If `is_celery_broker_online()` returns `False`, background work transparently fa
 
 OAuth details: [docs/youtube-authentication.md](docs/youtube-authentication.md), [SECURITY.md](SECURITY.md).
 
+### 6.1 Phase 8 — Auto-Stage, LLM Metadata & Quota
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUTO_STAGE_ENABLED` | `False` | Run auto-staging automatically after highlight detection completes |
+| `AUTO_STAGE_TOP_N` | `3` | How many top-scoring candidates to render and stage (0 disables) |
+| `AUTO_STAGE_MIN_SCORE` | `0.6` | Minimum candidate score eligible for auto-staging |
+| `AUTO_STAGE_CLIPPING_MODE` | `third_person` | Vertical render mode for staged clips (`third_person`, `direct_crop`, `cinematic`, `vertical_blur`) |
+| `AUTO_STAGE_FIRST_SLOT_HOURS` | `1` | Hours from now before the first native `publishAt` slot |
+| `AUTO_STAGE_INTERVAL_HOURS` | `24` | Spacing between consecutive scheduled releases (min 1) |
+| `GEMINI_API_KEY` | `None` | Gemini key for Shorts copy; falls back to `GOOGLE_API_KEY`, then to deterministic metadata |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Model used for metadata generation |
+| `LLM_METADATA_ENABLED` | `True` | Master switch for LLM copy (deterministic generator always available) |
+| `YOUTUBE_DAILY_QUOTA_UNITS` | `10000` | Daily YouTube Data API unit budget |
+| `YOUTUBE_UPLOAD_QUOTA_COST` | `1600` | Units consumed per upload (6 uploads/day at defaults) |
+| `YOUTUBE_QUOTA_TIMEZONE` | `America/Los_Angeles` | Timezone whose midnight resets the quota day |
+
+Staging behaviour: clips are rendered as private vertical Shorts, metadata is generated with Gemini (or the deterministic generator), and staggered `publishAt` slots are assigned so YouTube releases them without the local machine staying online. See [ROADMAP.md](ROADMAP.md) §Phase 8.
+
 ---
 
 ## 7. Render Defaults (not .env)

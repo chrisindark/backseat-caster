@@ -175,6 +175,9 @@ export interface RenderJobResponse {
   youtube_upload_url?: string | null;
   youtube_uploaded_at?: string | null;
   youtube_upload_error?: string | null;
+  auto_staged?: boolean;
+  highlight_candidate_id?: string | null;
+  scheduled_publish_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   completed_at?: string | null;
@@ -304,6 +307,47 @@ export interface YouTubeBatchUploadResponse {
   total_failed: number;
   results: YouTubeUploadResult[];
   message: string;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 8: Auto-Stage, Native Scheduling & Quota Types
+// -----------------------------------------------------------------------------
+
+export interface YouTubeQuota {
+  quota_day: string;
+  daily_limit_units: number;
+  units_used: number;
+  units_remaining: number;
+  upload_quota_cost: number;
+  max_uploads_per_day: number;
+  uploads_today: number;
+  uploads_remaining: number;
+  can_upload: boolean;
+  resets_at: string;
+}
+
+export interface AutoStagedClip {
+  clip_id: string;
+  candidate_id: string;
+  video_id: string;
+  score: number;
+  title: string;
+  is_selected_for_upload: boolean;
+  scheduled_publish_at?: string | null;
+  metadata_source: "llm" | "fallback" | string;
+}
+
+export interface AutoStageResponse {
+  video_id: string;
+  staged_count: number;
+  clips: AutoStagedClip[];
+  message: string;
+}
+
+export interface StagedClipsResponse {
+  items: RenderJobResponse[];
+  total: number;
+  quota?: YouTubeQuota | null;
 }
 
 // -----------------------------------------------------------------------------

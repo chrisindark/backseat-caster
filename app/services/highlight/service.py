@@ -31,6 +31,7 @@ from app.schemas.highlight import (
     HighlightStatusResponse,
     TriggerEventSchema,
 )
+from app.services.auto_stage import AutoStageService
 from app.services.highlight.audio_scanner import scan_audio_energy
 from app.services.highlight.cluster_engine import ClusterConfig, ClusterEngine
 from app.services.highlight.detectors import DetectionMetrics, get_detector
@@ -143,6 +144,8 @@ class HighlightService:
                 min_score=req.min_score,
                 game=req.game,
                 run_id=run_id,
+                auto_render_top_n=req.auto_render_top_n,
+                clipping_mode=req.clipping_mode,
                 db_session=db,
             )
             db.refresh(video)
@@ -162,6 +165,7 @@ class HighlightService:
                 message=msg,
                 task_id=None,
                 run_id=run_id,
+                auto_staged_count=int(result.get("auto_staged_count", 0) or 0),
             )
 
         # Asynchronous dispatch
@@ -169,7 +173,12 @@ class HighlightService:
         if is_celery_broker_online():
             try:
                 task = detect_highlights_celery_task.delay(
-                    video_id, req.min_score, req.game, run_id
+                    video_id,
+                    req.min_score,
+                    req.game,
+                    run_id,
+                    req.auto_render_top_n,
+                    req.clipping_mode,
                 )
                 video.highlight_task_id = task.id
                 video.highlight_status = "scanning"
@@ -202,6 +211,8 @@ class HighlightService:
                     min_score=req.min_score,
                     game=req.game,
                     run_id=run_id,
+                    auto_render_top_n=req.auto_render_top_n,
+                    clipping_mode=req.clipping_mode,
                 )
             else:
                 execute_highlight_detection_job(
@@ -209,6 +220,8 @@ class HighlightService:
                     min_score=req.min_score,
                     game=req.game,
                     run_id=run_id,
+                    auto_render_top_n=req.auto_render_top_n,
+                    clipping_mode=req.clipping_mode,
                 )
 
         return DetectHighlightsResponse(
@@ -415,6 +428,8 @@ def execute_highlight_detection_job(
     min_score: float = 0.5,
     game: str | None = None,
     run_id: str | None = None,
+    auto_render_top_n: int | None = None,
+    clipping_mode: str | None = None,
     celery_task_instance=None,
     db_session: Session | None = None,
 ) -> dict[str, Any]:
@@ -521,6 +536,36 @@ def execute_highlight_detection_job(
             )
             db.add(hc)
 
+        # Flush candidates so the auto-stage query can see them.
+        db.commit()
+
+        # Phase 8: auto-render and stage the top candidates when requested.
+        effective_top_n = (
+            auto_render_top_n
+            if auto_render_top_n is not None
+            else (settings.AUTO_STAGE_TOP_N if settings.AUTO_STAGE_ENABLED else 0)
+        )
+        auto_staged_count = 0
+        if effective_top_n and filtered:
+            update_progress(97.0, "Auto-staging top highlight candidates...")
+            try:
+                stage_result = AutoStageService.stage_top_candidates(
+                    db=db,
+                    video_id=video_id,
+                    top_n=effective_top_n,
+                    min_score=(
+                        min_score
+                        if auto_render_top_n is not None
+                        else settings.AUTO_STAGE_MIN_SCORE
+                    ),
+                    clipping_mode=clipping_mode or settings.AUTO_STAGE_CLIPPING_MODE,
+                )
+                auto_staged_count = int(stage_result.get("staged_count", 0))
+            except Exception as stage_err:
+                logger.warning(
+                    "Auto-stage step failed for video %s: %s", video_id, stage_err
+                )
+
         total_duration = time.perf_counter() - job_start_time
 
         if run:
@@ -546,6 +591,11 @@ def execute_highlight_detection_job(
         video.highlight_progress = 100.0
         video.highlight_stage = (
             f"Highlight scan complete. Found {len(filtered)} candidate clip(s)."
+            + (
+                f" Auto-staged {auto_staged_count} for publishing."
+                if auto_staged_count
+                else ""
+            )
         )
         video.highlight_error = None
         db.commit()
@@ -561,6 +611,7 @@ def execute_highlight_detection_job(
         return {
             "status": "completed",
             "count": len(filtered),
+            "auto_staged_count": auto_staged_count,
             "run_id": run_id,
             "total_duration_seconds": round(total_duration, 3),
         }
@@ -620,6 +671,8 @@ def detect_highlights_celery_task(
     min_score: float = 0.5,
     game: str | None = None,
     run_id: str | None = None,
+    auto_render_top_n: int | None = None,
+    clipping_mode: str | None = None,
 ) -> dict[str, Any]:
     """Celery task for executing highlight candidate detection in the background."""
     logger.info(
@@ -634,5 +687,7 @@ def detect_highlights_celery_task(
         min_score=min_score,
         game=game,
         run_id=run_id,
+        auto_render_top_n=auto_render_top_n,
+        clipping_mode=clipping_mode,
         celery_task_instance=self,
     )

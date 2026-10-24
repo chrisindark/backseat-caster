@@ -1,5 +1,6 @@
 "use client";
 
+import { AutoStagePanel } from "@/components/AutoStagePanel";
 import { YoutubeIcon } from "@/components/icons";
 import { ManifestModal } from "@/components/ManifestModal";
 import { Navbar } from "@/components/Navbar";
@@ -577,6 +578,9 @@ function RendersContent() {
             </button>
           </div>
         )}
+
+        {/* Phase 8: auto-staged highlights & YouTube quota */}
+        <AutoStagePanel onStagedChange={loadData} />
 
         {/* Hero Banner & KPI Stats */}
         <section className="relative rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-rose-950/20 border border-white/10 shadow-2xl backdrop-blur-xl overflow-hidden">

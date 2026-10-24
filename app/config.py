@@ -54,6 +54,31 @@ class Settings(BaseSettings):
     YOUTUBE_REFRESH_TOKEN: str | None = None
     YOUTUBE_REDIRECT_URI: str = "http://localhost:3001/api/v1/youtube/auth/callback"
 
+    # YouTube Data API quota accounting (default: 10,000 units/day, 1,600 per upload)
+    YOUTUBE_DAILY_QUOTA_UNITS: int = 10_000
+    YOUTUBE_UPLOAD_QUOTA_COST: int = 1_600
+    YOUTUBE_QUOTA_TIMEZONE: str = "America/Los_Angeles"
+
+    # Phase 8: autonomous auto-stage & scheduling pipeline
+    AUTO_STAGE_ENABLED: bool = False
+    AUTO_STAGE_TOP_N: int = 3
+    AUTO_STAGE_MIN_SCORE: float = 0.6
+    AUTO_STAGE_CLIPPING_MODE: str = "third_person"
+    AUTO_STAGE_FIRST_SLOT_HOURS: int = 1
+    AUTO_STAGE_INTERVAL_HOURS: int = 24
+
+    # Phase 8: LLM metadata generation (Gemini)
+    GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    LLM_METADATA_ENABLED: bool = True
+
+    @property
+    def gemini_api_key(self) -> str | None:
+        """Resolve the Gemini key from dedicated settings or the shared Google env var."""
+        import os
+
+        return self.GEMINI_API_KEY or os.environ.get("GOOGLE_API_KEY") or None
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:

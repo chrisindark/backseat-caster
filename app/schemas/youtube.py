@@ -1,5 +1,7 @@
 """Pydantic schemas for YouTube OAuth authentication and programmatic video/shorts uploads."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -58,6 +60,10 @@ class YouTubeUploadRequest(BaseModel):
     category_id: str = Field(
         "20", description="YouTube category ID (default '20' for Gaming)"
     )
+    publish_at: datetime | None = Field(
+        None,
+        description="Native YouTube publishAt timestamp. Future timestamps upload the video as private and let YouTube release it.",
+    )
     sync: bool = Field(
         False, description="Whether to wait synchronously for upload completion"
     )
@@ -73,6 +79,7 @@ class YouTubeUploadResult(BaseModel):
     status: str  # "completed", "uploading", "failed"
     privacy: str
     progress: float = 0.0
+    scheduled_publish_at: str | None = None
     error_message: str | None = None
     uploaded_at: str | None = None
 
@@ -83,3 +90,76 @@ class YouTubeBatchUploadResponse(BaseModel):
     total_failed: int
     results: list[YouTubeUploadResult]
     message: str
+
+
+class YouTubeQuotaResponse(BaseModel):
+    """Daily YouTube Data API quota consumption and remaining upload capacity."""
+
+    quota_day: str
+    daily_limit_units: int
+    units_used: int
+    units_remaining: int
+    upload_quota_cost: int
+    max_uploads_per_day: int
+    uploads_today: int
+    uploads_remaining: int
+    can_upload: bool
+    resets_at: str
+
+
+class YouTubeScheduleRequest(BaseModel):
+    """Set or clear the native YouTube publishAt timestamp for a staged clip."""
+
+    publish_at: datetime | None = Field(
+        None,
+        description="Future timestamp for YouTube to release the clip, or null to clear scheduling.",
+    )
+
+
+class AutoStageRequest(BaseModel):
+    """Trigger automatic rendering, metadata generation and scheduling for a video."""
+
+    video_id: str
+    top_n: int | None = Field(
+        None, ge=1, le=20, description="How many top-scoring candidates to stage"
+    )
+    min_score: float | None = Field(
+        None, ge=0.0, le=1.0, description="Minimum candidate score to stage"
+    )
+    clipping_mode: str | None = Field(
+        None,
+        description="Vertical render mode: 'third_person', 'direct_crop', 'cinematic', or 'vertical_blur'",
+    )
+    schedule: bool = Field(
+        True, description="Assign staggered native publishAt slots to staged clips"
+    )
+
+
+class AutoStagedClipResponse(BaseModel):
+    """A clip that the autonomous pipeline rendered and staged for publishing."""
+
+    clip_id: str
+    candidate_id: str
+    video_id: str
+    score: float
+    title: str
+    is_selected_for_upload: bool
+    scheduled_publish_at: str | None = None
+    metadata_source: str = "fallback"
+
+
+class AutoStageResponse(BaseModel):
+    """Result of an auto-stage run."""
+
+    video_id: str
+    staged_count: int
+    clips: list[AutoStagedClipResponse] = Field(default_factory=list)
+    message: str
+
+
+class StagedClipsResponse(BaseModel):
+    """Clips awaiting creator review or scheduled release."""
+
+    items: list[dict] = Field(default_factory=list)
+    total: int = 0
+    quota: YouTubeQuotaResponse | None = None

@@ -388,6 +388,11 @@ class RenderService:
             is_selected_for_upload=bool(job.is_selected_for_upload),
             selected_format=job.selected_format,
             upload_metadata=job.upload_metadata,
+            auto_staged=bool(job.auto_staged),
+            highlight_candidate_id=job.highlight_candidate_id,
+            scheduled_publish_at=job.scheduled_publish_at.isoformat()
+            if job.scheduled_publish_at
+            else None,
             modes=job_modes,
             outputs=stream_outputs,
             youtube_video_id=job.youtube_video_id,

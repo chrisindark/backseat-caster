@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -31,6 +31,7 @@ from app.services.upload_metadata import (
     build_tags,
     build_title,
 )
+from app.services.youtube_quota import YouTubeQuotaService
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -467,6 +468,7 @@ class YouTubeUploaderService:
         format_override: str | None = None,
         is_short: bool | None = None,
         category_id: str = "20",
+        publish_at: datetime | None = None,
         progress_callback: Callable[[float], None] | None = None,
         db_session: Session | None = None,
     ) -> YouTubeUploadResult:
@@ -510,6 +512,18 @@ class YouTubeUploaderService:
                 except Exception:
                     pass
 
+            # Resolve native publishAt scheduling: explicit argument wins,
+            # otherwise fall back to the clip's staged schedule.
+            scheduled_for = publish_at
+            if scheduled_for is None and job is not None:
+                scheduled_for = job.scheduled_publish_at
+            if scheduled_for is not None and scheduled_for.tzinfo is None:
+                scheduled_for = scheduled_for.replace(tzinfo=UTC)
+            if scheduled_for is not None and scheduled_for <= datetime.now(
+                UTC
+            ) + timedelta(minutes=1):
+                scheduled_for = None
+
             # Idempotency guard: never re-upload a clip that has already been
             # successfully published unless the caller explicitly overrides data.
             if (
@@ -549,6 +563,9 @@ class YouTubeUploaderService:
                     status="completed",
                     privacy=cached_privacy,
                     progress=100.0,
+                    scheduled_publish_at=job.scheduled_publish_at.isoformat()
+                    if job.scheduled_publish_at
+                    else None,
                     uploaded_at=job.youtube_uploaded_at.isoformat()
                     if job.youtube_uploaded_at
                     else None,
@@ -635,10 +652,13 @@ class YouTubeUploaderService:
             if target_is_short and "Shorts" not in final_tags:
                 final_tags.append("Shorts")
 
-            # Prepare privacy
+            # Prepare privacy. A future publishAt requires a private upload;
+            # YouTube releases the video at the scheduled instant.
             final_privacy = privacy or staging_meta.get("privacy") or "public"
             if final_privacy not in ("private", "unlisted", "public"):
                 final_privacy = "public"
+            if scheduled_for is not None:
+                final_privacy = "private"
 
             # Update job state in DB: uploading
             if job:
@@ -670,6 +690,21 @@ class YouTubeUploaderService:
                     "selfDeclaredMadeForKids": False,
                 },
             }
+            if scheduled_for is not None:
+                body["status"]["publishAt"] = (
+                    scheduled_for.astimezone(UTC)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z")
+                )
+
+            # Quota guard: uploads cost 1,600 units against the daily budget.
+            quota_summary = YouTubeQuotaService.reserve_upload(db)
+            logger.info(
+                "YouTube quota after reservation: %d/%d units used (%d upload(s) remaining)",
+                quota_summary["units_used"],
+                quota_summary["daily_limit_units"],
+                quota_summary["uploads_remaining"],
+            )
 
             media = MediaFileUpload(
                 str(video_file),
@@ -746,6 +781,10 @@ class YouTubeUploaderService:
             }
 
             # Update DB job
+            if scheduled_for is not None:
+                updated_upload_dict["scheduled_publish_at"] = scheduled_for.isoformat()
+                updated_upload_dict["privacy"] = "private"
+
             if job:
                 job.youtube_video_id = uploaded_id
                 job.youtube_upload_status = "completed"
@@ -755,6 +794,8 @@ class YouTubeUploaderService:
                 job.youtube_upload_error = None
                 job.upload_metadata = json.dumps(updated_upload_dict)
                 job.selected_format = resolved_format
+                if scheduled_for is not None:
+                    job.scheduled_publish_at = scheduled_for
                 db.commit()
 
             # Update manifest.json with upload record and sync upload_selection
@@ -768,6 +809,9 @@ class YouTubeUploaderService:
                         "is_short": target_is_short,
                         "privacy": final_privacy,
                         "title": final_title,
+                        "scheduled_publish_at": scheduled_for.isoformat()
+                        if scheduled_for
+                        else None,
                         "uploaded_at": uploaded_at_iso,
                     }
                     with open(manifest_path, "w") as f:
@@ -794,6 +838,9 @@ class YouTubeUploaderService:
                 status="completed",
                 privacy=final_privacy,
                 progress=100.0,
+                scheduled_publish_at=scheduled_for.isoformat()
+                if scheduled_for
+                else None,
                 uploaded_at=uploaded_at_iso,
             )
 
@@ -906,6 +953,7 @@ def upload_clip_celery_task(
     format_override: str | None = None,
     is_short: bool | None = None,
     category_id: str = "20",
+    publish_at: str | None = None,
 ):
     """Celery task for uploading video clip to YouTube."""
     logger.info("Celery task started: uploading clip %s to YouTube", clip_id)
@@ -922,6 +970,7 @@ def upload_clip_celery_task(
         format_override=format_override,
         is_short=is_short,
         category_id=category_id,
+        publish_at=datetime.fromisoformat(publish_at) if publish_at else None,
         progress_callback=on_progress,
     ).model_dump()
 

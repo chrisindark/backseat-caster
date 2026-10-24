@@ -98,6 +98,9 @@ class RenderJobResponse(BaseModel):
     is_selected_for_upload: bool = False
     selected_format: str | None = None
     upload_metadata: str | None = None
+    auto_staged: bool = False
+    highlight_candidate_id: str | None = None
+    scheduled_publish_at: str | None = None
     modes: list[str] = Field(default_factory=list)
     outputs: dict[str, str] = Field(default_factory=dict)
     youtube_video_id: str | None = None

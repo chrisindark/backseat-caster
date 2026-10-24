@@ -18,7 +18,7 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** tha
 | **Shorts+ Audio** | Engine | **EBU R128 Audio Normalization:** Dual-chain `loudnorm` filter targeting -14 LUFS standard for YouTube Shorts | ✅ Completed |
 | **Phase 6** | UI / Studio | **Creator Studio & Review Interface:** Web studio (`/studio/[id]`), timeline scrubbing, crop overlays, catalog, bulk delete | ✅ Completed |
 | **Phase 7** | Publishing | **YouTube Ingestion & Publishing:** OAuth 2.0 PKCE flow, metadata staging, resumable YouTube Shorts Data API v3 upload | ✅ Completed |
-| **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish | 🚧 Partial Base |
+| **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish | ✅ Completed |
 | **Phase 9** | Multi-Genre | **Generic Video & Speech Mining (STT):** Dialogue-driven highlight discovery via Whisper STT + LLM semantic chunking & sentence snapping | 📋 Planned |
 | **Phase 3** | Vision & OCR | **HUD/OCR & Deep Visual Event Extraction:** Killfeed sequence chains, ultimate charge meters, ability identification | ✅ Completed |
 | **Phase 4** | Multimodal AI | **Gemini Event Verification:** Multimodal clip verification, structured highlight event schema, temporal grounding | 📋 Planned |
@@ -110,21 +110,11 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** tha
 ### Phase 8: Autonomous Pipeline & Scheduler (Auto-Stage, LLM Metadata, publishAt)
 *Zero-touch background pipeline from highlight creation to scheduled YouTube Shorts publication.*
 
-- 🚧 **Auto-Render Top N Candidates (Foundational):**
-  - Parameterized trigger in highlight detection (`auto_render_top_n: int`, `min_score: float`, `clipping_mode: str`).
-  - Automatically enqueues FFmpeg rendering jobs for top-scoring highlight candidates as soon as Stage 4 clustering completes.
-- 📋 **LLM Metadata Generator Service (Gemini):**
-  - Structured output (`google-genai`) generating punchy, mobile-optimized YouTube Shorts titles (<50 chars), engaging descriptions, hashtags, and category tags conditioned on detected OCR events, hero, and gameplay context.
-  - Strict fallback to deterministic [`app/services/upload_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/upload_metadata.py) if Gemini API key is missing or offline.
-- 📋 **Native YouTube `publishAt` Scheduling:**
-  - YouTube Data API v3 `status.publishAt` support uploading clips as private and delegating release timing to YouTube's infrastructure (no local machine uptime requirement).
-  - Staggered release scheduling (e.g. 1 Short per 24 hours).
-- 📋 **YouTube API Quota Safeguards:**
-  - Built-in tracking of the 10,000 units/day quota (1,600 units per video upload; max 6 uploads/day).
-  - Visual quota bar in UI and guard preventing auto-upload dispatch when quota is exhausted.
-- 📋 **UI 1-Click Staging Notification & Review Drawer:**
-  - *"🔥 Highlights Auto-Staged"* notification banner on Studio/Renders pages.
-  - 1-click "Publish Now" button or "Edit & Schedule" modal for creator review before upload.
+- ✅ **Auto-Render Top N Candidates:** Parameterized trigger in highlight detection (`auto_render_top_n: int`, `min_score: float`, `clipping_mode: str`) or the global `AUTO_STAGE_*` settings; enqueues vertical FFmpeg render jobs for the top-scoring candidates as soon as clustering completes, skipping candidates that are already staged ([`app/services/auto_stage.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/auto_stage.py)).
+- ✅ **LLM Metadata Generator Service (Gemini):** Structured output via `google-genai` producing punchy YouTube Shorts titles, descriptions and hashtags conditioned on detected OCR events, hero, multi-kill chain, ultimate payoff and game phase ([`app/services/llm_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/llm_metadata.py)). Degrades to the deterministic [`app/services/upload_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/upload_metadata.py) generator when the API key is missing, the SDK is unavailable, or the model returns unusable copy; every staged clip records its `metadata_source`.
+- ✅ **Native YouTube `publishAt` Scheduling:** Uploads as private with `status.publishAt` so YouTube's infrastructure handles release (no local uptime requirement), with staggered slots (`AUTO_STAGE_FIRST_SLOT_HOURS`, `AUTO_STAGE_INTERVAL_HOURS`) and per-clip rescheduling via `POST /api/v1/youtube/staging/{clip_id}/schedule`.
+- ✅ **YouTube API Quota Safeguards:** Per-quota-day unit accounting (10,000 units/day, 1,600 per upload) in [`app/services/youtube_quota.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/youtube_quota.py) with midnight-Pacific resets, a `429` guard before batch or single upload dispatch, and a quota bar in the renders UI.
+- ✅ **UI 1-Click Staging Notification & Review Drawer:** *"🔥 Highlights Auto-Staged"* banner with quota bar on `/renders`, plus a review drawer offering per-clip schedule editing and 1-click "Publish Now" ([`ui/src/components/AutoStagePanel.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/AutoStagePanel.tsx)).
 
 ---
 

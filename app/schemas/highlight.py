@@ -216,6 +216,16 @@ class DetectHighlightsRequest(BaseModel):
     min_score: float = Field(
         0.5, ge=0.0, le=1.0, description="Minimum candidate score to retain"
     )
+    auto_render_top_n: int | None = Field(
+        None,
+        ge=0,
+        le=20,
+        description="Automatically render and stage the top N candidates after clustering (0 disables).",
+    )
+    clipping_mode: str | None = Field(
+        None,
+        description="Vertical render mode used for auto-staged clips: 'third_person', 'direct_crop', 'cinematic', or 'vertical_blur'.",
+    )
     sync: bool = Field(
         False,
         description="If True, wait for detection to finish synchronously before returning",
@@ -230,6 +240,7 @@ class DetectHighlightsResponse(BaseModel):
     message: str
     task_id: str | None = None
     run_id: str | None = None
+    auto_staged_count: int = 0
 
 
 class DeleteHighlightsResponse(BaseModel):

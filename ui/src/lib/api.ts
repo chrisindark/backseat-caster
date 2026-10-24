@@ -13,12 +13,14 @@ import {
   RenderRequest,
   SyncResponse,
   UploadSelectionPayload,
+  StagedClipsResponse,
   VideoItem,
   VideoListResponse,
   YouTubeAuthStatus,
   YouTubeBatchUploadResponse,
   YouTubeChannelResponse,
   YouTubeChannelVideoItem,
+  YouTubeQuota,
   YouTubeUploadResult,
 } from "@/types/video";
 
@@ -463,6 +465,43 @@ export async function uploadSelectedClipsToYouTube(
   return parseResponse<YouTubeBatchUploadResponse>(
     res,
     "upload selected clips to YouTube"
+  );
+}
+
+export async function fetchYouTubeQuota(): Promise<YouTubeQuota> {
+  const res = await fetch(`${API_BASE}/youtube/quota`, { cache: "no-store" });
+  return parseResponse<YouTubeQuota>(res, "fetch YouTube quota usage");
+}
+
+export async function fetchStagedClips(): Promise<StagedClipsResponse> {
+  const res = await fetch(`${API_BASE}/youtube/staging`, { cache: "no-store" });
+  return parseResponse<StagedClipsResponse>(res, "fetch auto-staged clips");
+}
+
+export async function scheduleStagedClip(
+  clipId: string,
+  publishAt: string | null
+): Promise<RenderJobResponse> {
+  const res = await fetch(`${API_BASE}/youtube/staging/${clipId}/schedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ publish_at: publishAt }),
+  });
+  return parseResponse<RenderJobResponse>(
+    res,
+    `update schedule for ${clipId}`
+  );
+}
+
+export async function publishStagedClipNow(
+  clipId: string
+): Promise<YouTubeUploadResult> {
+  const res = await fetch(`${API_BASE}/youtube/staging/${clipId}/publish-now`, {
+    method: "POST",
+  });
+  return parseResponse<YouTubeUploadResult>(
+    res,
+    `publish staged clip ${clipId}`
   );
 }
 

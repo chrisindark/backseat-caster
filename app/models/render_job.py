@@ -61,6 +61,11 @@ class RenderJob(Base):
     selected_format = Column(String(64), nullable=True)
     upload_metadata = Column(Text, nullable=True)
 
+    # Phase 8: autonomous staging & native YouTube scheduling
+    auto_staged = Column(Boolean, default=False, index=True)
+    highlight_candidate_id = Column(String(64), nullable=True, index=True)
+    scheduled_publish_at = Column(DateTime, nullable=True, index=True)
+
     # YouTube upload tracking
     youtube_video_id = Column(String(64), nullable=True)
     youtube_upload_status = Column(String(32), default="not_uploaded", index=True)
@@ -105,6 +110,11 @@ class RenderJob(Base):
             "is_selected_for_upload": bool(self.is_selected_for_upload),
             "selected_format": self.selected_format,
             "upload_metadata": self.upload_metadata,
+            "auto_staged": bool(self.auto_staged),
+            "highlight_candidate_id": self.highlight_candidate_id,
+            "scheduled_publish_at": self.scheduled_publish_at.isoformat()
+            if self.scheduled_publish_at
+            else None,
             "youtube_video_id": self.youtube_video_id,
             "youtube_upload_status": self.youtube_upload_status or "not_uploaded",
             "youtube_upload_progress": self.youtube_upload_progress or 0.0,

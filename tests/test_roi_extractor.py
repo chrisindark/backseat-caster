@@ -8,6 +8,7 @@ import pytest
 from app.services.highlight.audio_scanner import AudioCandidateWindow
 from app.services.highlight.roi_extractor import (
     MARVEL_RIVALS_HUD_REGIONS,
+    PHASE3_HUD_ROI_NAMES,
     BatchROIExtractionResult,
     HUDRegion,
     ROIExtractor,
@@ -90,6 +91,11 @@ def test_compute_crop_geometry_1080p():
     x_obj, y_obj, w_obj, h_obj = compute_crop_geometry(obj, 1920, 1080)
     assert (x_obj, y_obj, w_obj, h_obj) == (710, 20, 500, 100)
 
+    portrait = MARVEL_RIVALS_HUD_REGIONS["hero_portrait"]
+    ability = MARVEL_RIVALS_HUD_REGIONS["ability_row"]
+    assert compute_crop_geometry(portrait, 1920, 1080) == (780, 900, 120, 120)
+    assert compute_crop_geometry(ability, 1920, 1080) == (1470, 870, 380, 120)
+
 
 def test_compute_crop_geometry_scaling():
     """Verify 720p, 1440p, and 4K resolution scaling."""
@@ -154,6 +160,25 @@ def test_extract_window_rois_1080p(roi_test_videos):
     assert rs_frames[0].width == 170
     assert rs_frames[0].height == 120
     assert len(rs_frames[0].raw_rgb) == 170 * 120 * 3
+
+
+def test_extract_phase3_hud_rois(roi_test_videos):
+    """Verify the killfeed, ultimate, hero and ability ROIs extract at base size."""
+    res = extract_window_rois(
+        roi_test_videos["1080p"],
+        start_seconds=1.0,
+        duration_seconds=1.0,
+        roi_names=list(PHASE3_HUD_ROI_NAMES),
+        fps=1.0,
+    )
+
+    assert set(res.frames_by_roi) == set(PHASE3_HUD_ROI_NAMES)
+    assert res.total_frames == len(PHASE3_HUD_ROI_NAMES)
+    assert res.frames_by_roi["kill_feed"][0].width == 480
+    assert res.frames_by_roi["kill_feed"][0].height == 220
+    assert res.frames_by_roi["ultimate_meter"][0].width == 80
+    assert res.frames_by_roi["hero_portrait"][0].width == 120
+    assert res.frames_by_roi["ability_row"][0].width == 380
 
 
 def test_extract_window_rois_720p_normalized(roi_test_videos):

@@ -58,6 +58,9 @@ def list_supported_detectors() -> list[dict[str, Any]]:
         {
             "id": "marvel_rivals",
             "name": "Marvel Rivals",
-            "description": "Targeted HUD OCR, killfeed parsing, and hero ultimate detector.",
+            "description": (
+                "HUD OCR banners, structured killfeed chains, ultimate meter casts "
+                "and hero/ability template identification."
+            ),
         },
     ]

@@ -49,6 +49,26 @@ class HighlightDetailsSchema(BaseModel):
         default_factory=list,
         description="Chronological event timestamps and labels",
     )
+    hero_name: str | None = Field(
+        default=None,
+        description="Identified played hero from HUD portrait template matching",
+    )
+    multi_kill_chain: int | None = Field(
+        default=None,
+        description="Rapid killfeed eliminations credited inside the clip",
+    )
+    abilities_used: list[str] = Field(
+        default_factory=list,
+        description="Ability names whose cooldown ended inside the clip",
+    )
+    killfeed_chain: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured killfeed rows, attribution and multi-kill chain",
+    )
+    ultimate_casts: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Ultimate casts with their post-cast kill payoff",
+    )
 
     model_config = ConfigDict(from_attributes=True, extra="allow")
 

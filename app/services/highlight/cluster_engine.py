@@ -19,6 +19,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.rendering.probe import probe_media
 from app.services.highlight.audio_scanner import AudioCandidateWindow
+from app.services.highlight.killfeed import (
+    KillfeedSequence,
+    killfeed_sequences_to_events,
+)
+from app.services.highlight.ultimate_meter import UltimateCast
 from app.services.highlight.visual_matcher import (
     BatchVisualMatchResult,
     VisualDetectionEvent,
@@ -69,6 +74,25 @@ class HighlightDetails(BaseModel):
     trigger_events: list[TriggerEvent] = Field(
         default_factory=list,
         description="Chronological event timestamps and labels",
+    )
+    hero_name: str | None = Field(
+        default=None, description="Identified played hero, when HUD templates match"
+    )
+    multi_kill_chain: int | None = Field(
+        default=None,
+        description="Rapid killfeed eliminations credited inside the clip",
+    )
+    killfeed_chain: KillfeedSequence | None = Field(
+        default=None,
+        description="Structured killfeed rows and attribution for the clip",
+    )
+    ultimate_casts: list[UltimateCast] = Field(
+        default_factory=list,
+        description="Ultimate casts observed inside the clip",
+    )
+    abilities_used: list[str] = Field(
+        default_factory=list,
+        description="Ability names whose cooldown ended inside the clip",
     )
 
     model_config = ConfigDict(extra="allow")
@@ -286,9 +310,16 @@ class ClusterEngine:
         video_id: str = "video_default",
         media_path: Path | str | None = None,
         audio_windows: list[AudioCandidateWindow] | None = None,
+        killfeed_sequences: list[KillfeedSequence] | None = None,
+        ultimate_casts: list[UltimateCast] | None = None,
+        hero_name: str | None = None,
+        abilities_used: list[str] | None = None,
     ) -> list[HighlightCandidate]:
         """
         Cluster visual events into padded, duration-clamped highlight candidates.
+
+        Optional Phase 3 signals enrich scoring and metadata: attributed
+        killfeed chains, ultimate casts and hero/ability identification.
         """
         if not events:
             return []
@@ -386,6 +417,33 @@ class ClusterEngine:
                 )
             )
 
+            # Phase 3 enrichment: killfeed chains and ultimate casts inside clip.
+            overlapping_sequences = [
+                seq
+                for seq in (killfeed_sequences or [])
+                if seq.is_player_attributed
+                and not (seq.window_end < start_t or seq.window_start > end_t)
+            ]
+            killfeed_kill_count = max(
+                (seq.kill_count for seq in overlapping_sequences), default=0
+            )
+            best_sequence = max(
+                overlapping_sequences,
+                key=lambda seq: (seq.kill_count, seq.confidence),
+                default=None,
+            )
+            total_kills = max(total_kills, killfeed_kill_count)
+            multi_kill_chain = killfeed_kill_count if killfeed_kill_count >= 2 else None
+            if best_sequence and best_sequence.multi_kill_label == "TEAM WIPE":
+                is_team_wipe = True
+
+            cluster_casts = [
+                cast
+                for cast in (ultimate_casts or [])
+                if start_t <= cast.timestamp <= end_t
+            ]
+            cluster_abilities = sorted(set(abilities_used or []))
+
             # 5. Calculate dynamic composite score (0.0 to 1.0)
             overlapping_audio = 0.60
             if audio_windows:
@@ -404,12 +462,27 @@ class ClusterEngine:
             tier_weight = peak_evt.score_weight
             chain_bonus = min(0.05, max(0, len(cluster) - 1) * 0.02)
 
+            # Killfeed corroboration: credited rapid eliminations are hard evidence.
+            killfeed_bonus = (
+                min(0.06, 0.02 * killfeed_kill_count)
+                if killfeed_kill_count >= 2
+                else 0.0
+            )
+            # Ultimate payoff: cast converted into kills inside the window.
+            ultimate_bonus = 0.0
+            if any(cast.followed_by_multi_kill for cast in cluster_casts):
+                ultimate_bonus = 0.05
+            elif cluster_casts:
+                ultimate_bonus = 0.02
+
             composite = (
                 (0.45 * tier_weight)
                 + (0.25 * persistence_factor)
                 + (0.15 * ocr_conf)
                 + (0.15 * overlapping_audio)
                 + chain_bonus
+                + killfeed_bonus
+                + ultimate_bonus
             )
             final_score = round(min(1.0, max(0.50, composite)), 2)
 
@@ -449,10 +522,15 @@ class ClusterEngine:
                 streak_count=detected_streak,
                 climax_start_seconds=climax_start,
                 climax_end_seconds=climax_end,
-                has_ultimate=has_ultimate,
+                has_ultimate=has_ultimate or bool(cluster_casts),
                 is_team_wipe=is_team_wipe,
                 game_phase=game_phase,
                 trigger_events=triggers,
+                hero_name=hero_name,
+                multi_kill_chain=multi_kill_chain,
+                killfeed_chain=best_sequence,
+                ultimate_casts=cluster_casts,
+                abilities_used=cluster_abilities,
             )
 
             # 6. Generate thumbnail if media path is available
@@ -478,6 +556,7 @@ class ClusterEngine:
                 kill_count=total_kills,
                 game_phase=game_phase,
                 is_team_wipe=is_team_wipe,
+                character_name=hero_name,
                 streak_count=detected_streak,
             )
             tags = generate_suggested_tags(peak_type, game_phase=game_phase)
@@ -547,9 +626,14 @@ class ClusterEngine:
         visual_matches: BatchVisualMatchResult | None = None,
         audio_windows: list[AudioCandidateWindow] | None = None,
         total_duration: float | None = None,
+        killfeed_sequences: list[KillfeedSequence] | None = None,
+        ultimate_casts: list[UltimateCast] | None = None,
+        hero_name: str | None = None,
+        abilities_used: list[str] | None = None,
     ) -> list[HighlightCandidate]:
         """
-        Assemble final ranked highlight candidates combining visual events and audio cues.
+        Assemble final ranked highlight candidates combining visual events,
+        audio cues and optional Phase 3 deep visual signals.
         """
         path = Path(media_path).resolve()
         if total_duration is None:
@@ -561,6 +645,10 @@ class ClusterEngine:
             for w in visual_matches.windows_matched:
                 all_visual_events.extend(w.events)
 
+        # Killfeed chains are first-class events: they can surface highlights
+        # even when no banner OCR anchored the window.
+        all_visual_events.extend(killfeed_sequences_to_events(killfeed_sequences or []))
+
         # Primary: Cluster visual events
         candidates = self.cluster_events(
             events=all_visual_events,
@@ -568,6 +656,10 @@ class ClusterEngine:
             video_id=video_id,
             media_path=path,
             audio_windows=audio_windows,
+            killfeed_sequences=killfeed_sequences,
+            ultimate_casts=ultimate_casts,
+            hero_name=hero_name,
+            abilities_used=abilities_used,
         )
 
         # Secondary: If audio candidate windows exist with no visual overlap, include top action windows
@@ -635,6 +727,8 @@ class ClusterEngine:
                                 has_ultimate=False,
                                 is_team_wipe=False,
                                 game_phase="regular",
+                                hero_name=hero_name,
+                                abilities_used=sorted(set(abilities_used or [])),
                                 trigger_events=[
                                     TriggerEvent(
                                         time=peak_t,
@@ -669,6 +763,10 @@ def cluster_highlight_candidates(
     audio_windows: list[AudioCandidateWindow] | None = None,
     total_duration: float | None = None,
     config: ClusterConfig | None = None,
+    killfeed_sequences: list[KillfeedSequence] | None = None,
+    ultimate_casts: list[UltimateCast] | None = None,
+    hero_name: str | None = None,
+    abilities_used: list[str] | None = None,
 ) -> list[HighlightCandidate]:
     """Convenience function to assemble and rank highlight candidates."""
     engine = ClusterEngine(config=config)
@@ -678,4 +776,8 @@ def cluster_highlight_candidates(
         visual_matches=visual_matches,
         audio_windows=audio_windows,
         total_duration=total_duration,
+        killfeed_sequences=killfeed_sequences,
+        ultimate_casts=ultimate_casts,
+        hero_name=hero_name,
+        abilities_used=abilities_used,
     )

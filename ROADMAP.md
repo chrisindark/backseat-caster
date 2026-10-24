@@ -1,0 +1,263 @@
+# 🗺️ BackseatCaster — Roadmap
+
+> Status legend: **Completed** ✅ · **In Progress / Partial** 🚧 · **Planned** 📋
+
+BackseatCaster is a **local-first AI video editing and publishing pipeline** that transforms raw gameplay recordings and generic video content (VODs) into punchy, high-engagement YouTube Shorts and video clips.
+
+---
+
+## 1. Executive Status Overview
+
+| Phase | Category | Scope / Deliverable | Status |
+|---|---|---|---|
+| **Phase 1** | Engine | **Local Video Rendering Engine:** 16:9 master, 9:16 blur & crop presets, ducking, hardware acceleration, CLI, API | ✅ Completed |
+| **Infra** | Core | **Async Worker System:** Celery + Redis with automatic fallback to FastAPI `BackgroundTasks`, DB lifecycle | ✅ Completed |
+| **Phase 2 (Ingest)** | Ingestion | **Video Ingestion & Local OBS Import:** YouTube scraping/download (`yt-dlp`), direct OBS drag-and-drop, probe & thumbnails | ✅ Completed |
+| **Phase 2 (Mining)** | Mining | **Candidate Highlight Mining:** Audio energy scanning, HUD ROI extraction, color gating, OCR matching, clustering, UI drawer | ✅ Completed |
+| **Phase 2.5** | Accuracy & Perf | **Anti-False-Positive Hardening & Speed Optimization:** Upper-banner ROI alignment, scoreboard rejection, persistence scoring | ✅ Completed |
+| **Shorts+ Audio** | Engine | **EBU R128 Audio Normalization:** Dual-chain `loudnorm` filter targeting -14 LUFS standard for YouTube Shorts | ✅ Completed |
+| **Phase 6** | UI / Studio | **Creator Studio & Review Interface:** Web studio (`/studio/[id]`), timeline scrubbing, crop overlays, catalog, bulk delete | ✅ Completed |
+| **Phase 7** | Publishing | **YouTube Ingestion & Publishing:** OAuth 2.0 PKCE flow, metadata staging, resumable YouTube Shorts Data API v3 upload | ✅ Completed |
+| **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish | 🚧 Partial Base |
+| **Phase 9** | Multi-Genre | **Generic Video & Speech Mining (STT):** Dialogue-driven highlight discovery via Whisper STT + LLM semantic chunking & sentence snapping | 📋 Planned |
+| **Phase 3** | Vision & OCR | **HUD/OCR & Deep Visual Event Extraction:** Killfeed sequence chains, ultimate charge meters, ability identification | ✅ Completed |
+| **Phase 4** | Multimodal AI | **Gemini Event Verification:** Multimodal clip verification, structured highlight event schema, temporal grounding | 📋 Planned |
+| **Phase 5** | AI Audio | **AI Commentary & TTS Generation:** Gemini play-by-play casting script generation, automated TTS narration, hype sync | 🚧 Partial Base |
+| **Shorts+ Captions** | Engagement | **Dynamic Animated Captions (Subtitles):** Whisper word-level transcription, animated karaoke subtitles burned into 9:16 | 📋 Planned |
+| **Shorts+ Layout** | Layouts | **Split-Screen Facecam + Gameplay:** Custom dual-crop filter (top webcam, bottom gameplay) for streamer VODs | 📋 Planned |
+
+---
+
+## 2. Detailed Phase Breakdown & Audit
+
+### Phase 1: Local Video Rendering Engine
+*High-performance local rendering powered by FFmpeg with Apple Silicon VideoToolbox acceleration.*
+
+- ✅ **16:9 Landscape Master Export:** Lanczos scaling and letterbox/pillarbox padding for arbitrary aspect ratio sources (`build_landscape_filter` in [`app/rendering/filters.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/filters.py)).
+- ✅ **9:16 Vertical Blur Composition:** Split background with 1080x1920 heavy boxblur padding (`blur_sigma: 25`) and centered 1080-width crisp foreground (`build_vertical_blur_filter` in [`app/rendering/filters.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/filters.py)).
+- ✅ **9:16 Vertical Crop Composition & Presets:**
+  - `third_person` preset: 33.33% total blur padding (~16.66% top / bottom) providing a 50% wider hero framing ideal for third-person shooters.
+  - `cinematic` preset: 25.0% total blur padding (~12.5% top / bottom).
+  - `direct_crop` preset: 0.0% blur (100% full-height center crop).
+  - `custom` padding parameter support (0.0 to 0.6) (`build_vertical_crop_filter` in [`app/rendering/filters.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/filters.py)).
+- ✅ **Hardware Acceleration & Encoder Fallback:** Auto-detection of macOS `h264_videotoolbox` with fallback to `libx264` (`detect_available_encoders()` and `select_encoder()` in [`app/rendering/engine.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/engine.py)).
+- ✅ **Quality Presets:** Configurable bitrate and CRF presets (`high`: 5M/7M, `compact`: 3.5M/5M, `archive`: 20M/25M) in [`app/rendering/config.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/config.py).
+- ✅ **Audio Ducking Engine:** Sidechain compression ducking game audio (default 30% gain) during voiceover presence, with peak limiting (`alimiter`) to prevent clipping (`build_audio_filter_graph` in [`app/rendering/audio.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/audio.py)).
+- ✅ **Shorts+ Audio Loudness Normalization:** Integrated EBU R128 (`loudnorm`) targeting -14.0 LUFS, -1.5 dBTP True Peak, 11.0 LU LRA for YouTube Shorts compliance on both unducked and ducked tracks.
+- ✅ **Media Probing & Parameter Validation:** `ffprobe` stream metadata inspection in [`app/rendering/probe.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/probe.py) and input validation in [`app/rendering/validator.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/validator.py).
+- ✅ **Standardized Manifest Output:** Multi-format output packaging and `manifest.json` generation in [`app/rendering/manifest.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/manifest.py).
+- ✅ **CLI & REST API:** Standalone CLI tool in [`app/rendering/cli.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/cli.py) and full REST controller suite in [`app/routers/renders.py`](file:///Users/christopherpaul/projects/backseat-caster/app/routers/renders.py).
+
+---
+
+### Infrastructure: Async Worker & Resiliency System
+*Reliable background task dispatching with graceful local degradation.*
+
+- ✅ **Celery Worker Configuration:** Celery instance with JSON serialization, solo worker pool, UTC timezone handling in [`app/worker/celery_app.py`](file:///Users/christopherpaul/projects/backseat-caster/app/worker/celery_app.py).
+- ✅ **Zero-Configuration Fallback:** Active broker and responsive worker ping check (`is_celery_broker_online()` in [`app/worker/helpers.py`](file:///Users/christopherpaul/projects/backseat-caster/app/worker/helpers.py)); automatically switches to FastAPI `BackgroundTasks` when Redis or workers are offline.
+- ✅ **Background Database Session Management:** Dedicated `get_task_db_session()` handling request-independent database lifecycles and test suite dependency overrides.
+- ✅ **Task Retry & Failure Handling:** Automatic retry policies for background jobs and manual retry endpoints for failed render jobs (`POST /api/v1/renders/jobs/{job_id}/retry`).
+
+---
+
+### Phase 2: Ingestion & Local OBS Import
+*Flexible ingest for both remote streaming links and local recording workflows.*
+
+- ✅ **YouTube Channel & VOD Ingestion:** Metadata scraping and async video downloading via `yt-dlp` with progress hooks in [`app/services/youtube.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/youtube.py) and [`app/services/videos.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/videos.py).
+- ✅ **OBS / Local File Direct Upload:** Multipart upload endpoint (`POST /api/v1/videos/upload`) supporting `.mp4`, `.mkv`, `.mov`, `.webm`, `.flv`, `.ts`, `.m4v`.
+- ✅ **Instant Probing & Thumbnail Generation:** Immediate ffprobe metadata extraction and thumbnail frame capture at 1s seek.
+- ✅ **Frontend Drag-and-Drop Dropzone:** Animated OBS dropzone with upload progress bar, custom titles, and instant catalog refresh in [`ui/src/components/OBSUploadDropzone.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/OBSUploadDropzone.tsx).
+
+---
+
+### Phase 2 & 2.5: Highlight Mining & Anti-False-Positive Hardening
+*High-speed local candidate detection combining audio energy and targeted HUD OCR.*
+
+- ✅ **Stage 1 (Audio Excitement Scanner):** FFmpeg `ebur128`/RMS scanning bucketed into 0.5s windows at ~100-400x realtime; top-percentile energy thresholding prunes dead air and loading screens ([`app/services/highlight/audio_scanner.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/highlight/audio_scanner.py)).
+- ✅ **Stage 2 (HUD ROI Extractor):** Targeted in-memory pipe extraction at 1-2 FPS without decoding full video; multi-resolution scaling support (720p, 1080p, 1440p, 4K, 21:9 Ultrawide) in [`app/services/highlight/roi_extractor.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/highlight/roi_extractor.py).
+- ✅ **Stage 3 (Visual Color Gating & OCR Matching):** Fast HSV color thresholding (<1ms) for Marvel Rivals Gold and Red accents before OCR; RapidOCR event classification (`team_wipe`, `hexa_ko`, `penta_ko`, `quad_ko`, `shutdown`, `kill_streak`, `triple_ko`, `double_ko`, `objective_clutch`, `single_ko`) in [`app/services/highlight/visual_matcher.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/highlight/visual_matcher.py).
+- ✅ **Anti-False-Positive Hardening:**
+  - Tab scoreboard & stats menu rejection (`NEGATIVE_SCREEN_PATTERN` rejecting damage/healing stats overlays).
+  - Upper-banner ROI alignment (`center_ko`, `right_streak`, `objective_banner`).
+  - Multi-frame temporal persistence scoring (1.5s window corroboration).
+- ✅ **Stage 4 (Clustering & Padding):** Agglomerative clustering of overlapping / adjacent events; dynamic cinematic padding to 15-45s duration; peak climax thumbnail extraction ([`app/services/highlight/cluster_engine.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/highlight/cluster_engine.py)).
+- ✅ **Stage 5 (Mining API & UI Drawer):** Highlight REST API endpoints (`/api/v1/videos/{video_id}/highlights`) and slide-out candidate drawer with 1-click timeline apply in [`ui/src/components/HighlightCandidatesDrawer.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/HighlightCandidatesDrawer.tsx).
+
+---
+
+### Phase 6: Creator Studio & Review Interface
+*Full web-based studio giving creators precision control over crops and review.*
+
+- ✅ **Web Studio Page (`/studio/[id]`):** Dedicated studio workspace with timeline scrubbing, in/out range handles, playhead controls, and live video previews in [`ui/src/app/studio/[id]/page.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/app/studio/[id]/page.tsx).
+- ✅ **Interactive Crop Overlays:** Aspect ratio and crop frame overlays for 16:9, 9:16 Vertical Blur, and configurable 9:16 Vertical Crop in [`ui/src/components/ClipStudioModal.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/ClipStudioModal.tsx).
+- ✅ **Comparison Player:** Synchronized multi-video playback coordinator for side-by-side format review in [`ui/src/components/MediaPlaybackCoordinator.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/MediaPlaybackCoordinator.tsx).
+- ✅ **Render Catalog (`/renders`):** Dual-view catalog (Gallery grid vs Jobs queue), status filtering, job retry actions, and manifest inspection modal in [`ui/src/app/renders/page.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/app/renders/page.tsx).
+- ✅ **Bulk Delete & Staging Actions:** Bulk selection, batch job cancellation, multi-render deletion with disk cleanup (`POST /api/v1/renders/bulk-delete`).
+
+---
+
+### Phase 7: YouTube Publishing
+*Seamless staging and publishing of rendered clips to YouTube Shorts.*
+
+- ✅ **Google OAuth 2.0 PKCE Flow:** Authorization URL generation with PKCE challenge, code exchange, token persistence, and channel info retrieval in [`app/services/youtube_uploader.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/youtube_uploader.py).
+- ✅ **Resumable Upload Engine:** Resumable chunked upload protocol using Google API Client Library with exponential backoff and progress tracking.
+- ✅ **Automatic Shorts Detection & Tagging:** Dynamic `#Shorts` tagging in title and description for vertical clips under 60 seconds; automatic category and gaming tags.
+- ✅ **Dynamic Metadata Staging:** Centralized metadata generator formatting source links, VOD timestamp references, and commentary attribution in [`app/services/upload_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/upload_metadata.py).
+- ✅ **Upload Queue Modal & Batch Publishing:** Staging drawer and batch publish modal with editable titles, descriptions, tags, and privacy settings in [`ui/src/components/UploadQueueModal.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/UploadQueueModal.tsx).
+
+---
+
+### Phase 8: Autonomous Pipeline & Scheduler (Auto-Stage, LLM Metadata, publishAt)
+*Zero-touch background pipeline from highlight creation to scheduled YouTube Shorts publication.*
+
+- 🚧 **Auto-Render Top N Candidates (Foundational):**
+  - Parameterized trigger in highlight detection (`auto_render_top_n: int`, `min_score: float`, `clipping_mode: str`).
+  - Automatically enqueues FFmpeg rendering jobs for top-scoring highlight candidates as soon as Stage 4 clustering completes.
+- 📋 **LLM Metadata Generator Service (Gemini):**
+  - Structured output (`google-genai`) generating punchy, mobile-optimized YouTube Shorts titles (<50 chars), engaging descriptions, hashtags, and category tags conditioned on detected OCR events, hero, and gameplay context.
+  - Strict fallback to deterministic [`app/services/upload_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/upload_metadata.py) if Gemini API key is missing or offline.
+- 📋 **Native YouTube `publishAt` Scheduling:**
+  - YouTube Data API v3 `status.publishAt` support uploading clips as private and delegating release timing to YouTube's infrastructure (no local machine uptime requirement).
+  - Staggered release scheduling (e.g. 1 Short per 24 hours).
+- 📋 **YouTube API Quota Safeguards:**
+  - Built-in tracking of the 10,000 units/day quota (1,600 units per video upload; max 6 uploads/day).
+  - Visual quota bar in UI and guard preventing auto-upload dispatch when quota is exhausted.
+- 📋 **UI 1-Click Staging Notification & Review Drawer:**
+  - *"🔥 Highlights Auto-Staged"* notification banner on Studio/Renders pages.
+  - 1-click "Publish Now" button or "Edit & Schedule" modal for creator review before upload.
+
+---
+
+### Phase 9: Multi-Game Profiles & Generic Semantic Video Mining (STT / Dialogue-Driven)
+*Extending BackseatCaster from Marvel Rivals to any game and generic conversational/IRL video content.*
+
+- 📋 **Modular Game Profile Architecture:**
+  - Extending [`BaseHighlightDetector`](file:///Users/christopherpaul/projects/backseat-caster/app/services/highlight/detectors/base.py) with game-specific plugin configurations.
+  - Planned profiles: **Valorant** (kill banner, spike status), **Overwatch 2** (elimination skull, ultimate ready), **Apex Legends** (knockdown/kill shields).
+  - Automatic game profile detection based on video title, tags, or initial frame classification.
+- 📋 **Generic Video & Speech Mining Engine (Speech-to-Text):**
+  - **Voice Activity Detection (VAD) & Whisper STT:** Audio-first scanning for dialogue using `faster-whisper` or Whisper API with word-level timestamps.
+  - **LLM Semantic Highlight Discovery:** Prompting Gemini to analyze full transcript chunks for comedic punchlines, viral quotes, high-tension debates, or story climaxes.
+  - **Syntactic Sentence Boundary Snapping:** Automatically snapping candidate clip `start_seconds` and `duration_seconds` to complete sentence boundaries using word timestamps, preventing awkward mid-word cutoffs.
+- 📋 **Universal Reframe Layout for Generic Content:**
+  - Default universal fallback to 9:16 `vertical_blur` (works safely for any content without cropping subjects).
+  - Planned: Smart Face / Speaker tracking (OpenCV/YOLO face detection to keep the active speaker centered in 9:16 vertical crop).
+
+---
+
+### Phase 3: HUD/OCR & Deep Visual Event Extraction
+*Advanced gameplay event extraction beyond banner OCR.*
+
+- ✅ **Killfeed Sequence Chains:** Structured parser for individual killfeed rows (Actor, Ability/Weapon hint, Action, Victim, Assist) via OCR bounding-box geometry; rapid elimination chains attributed to the player (`player_names` match or consistent friendly actor); friendly (blue) vs enemy (red) combatant side inference from row pixel colour (`app/services/highlight/killfeed.py`).
+- ✅ **Ultimate Counter & Meter Tracking:** Numeric percentage OCR (0–100%) with circular gauge ring-fill fallback and `READY` flash detection; ultimate cast detection from sharp charge drains; correlation of each cast with immediate post-cast multi-kills (`app/services/highlight/ultimate_meter.py`).
+- ✅ **Character Ability Identification:** Hero identification via portrait template matching and ability activation/cooldown detection via icon template matching, using project-supplied templates under `data/hero_templates/<game>/` (`app/services/highlight/hero_identifier.py`).
+- ✅ **Deep Visual Orchestration & Scoring:** Shared-OCR stage runner over the Stage 3 ROI batch; killfeed chains promoted to first-class highlight events; candidates enriched with `hero_name`, `multi_kill_chain`, `killfeed_chain`, `ultimate_casts` and `abilities_used`, with score boosts for killfeed-corroborated and ultimate-payoff clips (`app/services/highlight/deep_visuals.py`, `app/services/highlight/cluster_engine.py`).
+
+---
+
+### Phase 4: Gemini Event Verification
+*Multimodal cloud verification for high-confidence highlight curation.*
+
+- 📋 **Google GenAI Integration:** Add `google-genai` SDK dependency and secure API key configuration.
+- 📋 **Multimodal Highlight Verification:** Sending candidate audio/video clips to Gemini 2.5 Flash for multimodal inspection to weed out non-gameplay false positives (killcams, spectator views, death replays).
+- 📋 **Structured Event Schema:** Pydantic schema for structured output: `verified_highlight: bool`, `peak_moment_seconds: float`, `event_tags: list[str]`, `highlight_summary: str`, `confidence: float`.
+- 📋 **Temporal Grounding Checks:** Verify that the audio/visual climax detected by local heuristics aligns with true multimodal gameplay events.
+
+---
+
+### Phase 5: AI Commentary & Automated TTS Generation
+*Automated casting commentary and synthetic voiceover.*
+
+- ✅ **Audio Pipeline Foundations (Completed):** `narration_path` is fully integrated into `RenderJob`, `RenderClipRequest`, and the FFmpeg sidechain ducking engine. Metadata generator automatically flags `"Includes AI-generated commentary."`
+- 📋 **Gemini Play-by-Play Casting Scripts:** Generation of hype caster scripts conditioned on the extracted highlight events and clip duration.
+- 📋 **Automated TTS Narration Engine:** Free local integration with `Edge-TTS` or cloud integration with `ElevenLabs` to synthesize caster voiceover into `.wav`.
+- 📋 **Narration-Gameplay Temporal Sync:** Audio alignment ensuring the caster's punchline or hype inflection aligns exactly with the peak highlight timestamp.
+
+---
+
+### Shorts+ Extra Features: Animated Captions & Streamer Layouts
+*High-engagement visual elements for short-form video algorithms.*
+
+- 📋 **Dynamic Animated Captions (Subtitles):**
+  - Word-level timestamp extraction using `faster-whisper` or Whisper API.
+  - Generating animated/karaoke ASS subtitles burned into 9:16 vertical exports.
+  - Creator-selectable subtitle styling presets (MrBeast style, bold yellow/white highlight font, pop-in animation).
+- 📋 **Split-Screen Facecam + Gameplay Layout:**
+  - FFmpeg dual-crop filtergraph: top region cropped to streamer webcam (e.g. 1080x720), bottom region cropped to gameplay (1080x1200).
+  - Studio UI webcam region selector.
+
+---
+
+## 3. End-to-End Unified Target Architecture
+
+```mermaid
+flowchart TD
+    A["Raw Video Ingestion (YouTube VOD / OBS Recording / Podcast)"] --> B{"Content Classifier / Profile Selection"}
+    
+    %% Game Mining Branch
+    B -->|"Gaming VOD (Marvel Rivals, Valorant, Apex)"| C1["Stage 1: Audio Energy Scanner (~100-400x realtime)"]
+    C1 --> D1["Stage 2: Game HUD ROI Extractor (1-2 FPS)"]
+    D1 --> E1["Stage 3: Color Gating & RapidOCR Event Matching"]
+    E1 --> E1B["Stage 3.5: Killfeed Chains, Ultimate Casts & Hero/Ability ID"]
+    E1B --> F1["Stage 4: Event Clustering & Climax Padding"]
+    
+    %% Generic Speech Mining Branch
+    B -->|"Generic / IRL / Podcast / Talk Show"| C2["Voice Activity Detection (VAD) & Audio Splitting"]
+    C2 --> D2["Whisper STT (Word-Level Timestamp Transcription)"]
+    D2 --> E2["LLM Semantic Chunking (Viral Moments, Punchlines, Debates)"]
+    E2 --> F2["Sentence Boundary Snapping (Natural In/Out Points)"]
+    
+    %% Unified Convergence
+    F1 --> G["Ranked Candidate Windows (Score >= Threshold)"]
+    F2 --> G
+    
+    G --> H{"Execution Mode"}
+    
+    %% Manual Path
+    H -->|"Manual Route"| I["Creator Studio: Timeline Scrubbing & Custom Crop"]
+    
+    %% Automated Path
+    H -->|"Auto-Stage & Scheduler (Phase 8)"| J["Auto-Render Top N Candidates (9:16 Vertical)"]
+    J --> K["Gemini LLM YouTube Metadata Generator (Title, Description, Tags)"]
+    K --> L["Staged in Upload Queue (Pre-filled AI Metadata)"]
+    
+    L --> M{"Publishing Route"}
+    M -->|"1-Click Creator Approval"| N["Instant Resumable Upload to YouTube Shorts"]
+    M -->|"Native YouTube Schedule"| O["Resumable Upload with publishAt Timestamp"]
+    I --> N
+```
+
+### Polymorphic Mining Architecture
+
+```
+                      BaseHighlightDetector
+                               │
+         ┌─────────────────────┴─────────────────────┐
+         ▼                                           ▼
+GameHUDDetector (Vision-Heavy)           SemanticSpeechDetector (Audio/Text-Heavy)
+- Marvel Rivals, Valorant, Overwatch     - Podcasts, Talk Shows, IRL, Vlogs
+- Audio Energy + HUD ROI + Color + OCR   - VAD + Whisper STT + LLM Dialogue Boundaries
+```
+
+### Shared Architecture & Reusability Matrix
+
+| Component | Module | Reusability Across All Genres |
+|---|---|:---:|
+| **Local FFmpeg Rendering Engine** | [`app/rendering/engine.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/engine.py) | **100% Shared** (Hardware-accelerated 16:9 & 9:16 vertical exports) |
+| **Shorts Loudness Normalization** | [`app/rendering/audio.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/audio.py) | **100% Shared** (EBU R128 -14 LUFS standard across all YouTube Shorts) |
+| **Async Worker & Fallback** | [`app/worker/helpers.py`](file:///Users/christopherpaul/projects/backseat-caster/app/worker/helpers.py) | **100% Shared** (Celery + Redis with instant FastAPI `BackgroundTasks` fallback) |
+| **OBS & YouTube Ingestion** | [`app/routers/videos.py`](file:///Users/christopherpaul/projects/backseat-caster/app/routers/videos.py) | **100% Shared** (Scrapes/downloads or direct drag-and-drop local uploads) |
+| **Creator Studio & Timeline** | [`ui/src/app/studio/[id]/page.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/app/studio/[id]/page.tsx) | **100% Shared** (Timeline scrubber, crop overlays, audio controls) |
+| **YouTube Publishing & OAuth** | [`app/services/youtube_uploader.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/youtube_uploader.py) | **100% Shared** (Resumable upload, PKCE flow, `#Shorts` tagging) |
+| **Upload Staging & Queue** | [`ui/src/components/UploadQueueModal.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/UploadQueueModal.tsx) | **100% Shared** (Metadata editing, staging toggle, batch publish) |
+
+
+---
+
+## 4. Guiding Principles
+
+- **Creator control stays in the loop:** AI proposes (candidates, scripts, captions, schedules), creators approve before rendering or publishing.
+- **Local-first media processing:** Video probing, clipping, audio ducking, and rendering execute locally using hardware acceleration (`h264_videotoolbox` on macOS); cloud AI is strictly used as an optional enhancer.
+- **Graceful degradation:** Every component has a zero-config fallback (Celery -> FastAPI BackgroundTasks, Gemini -> Local Heuristics, OAuth -> Local File Save).
+- **Polymorphic Mining:** Specialized Computer Vision for games with HUDs; Speech/Dialogue Semantic Analysis for generic videos; unified rendering and publishing for both.
+- **Tested & Deterministic:** All stages are covered by unit and integration suites with deterministic fixtures (186 passing tests).

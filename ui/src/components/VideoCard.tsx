@@ -10,10 +10,12 @@ import {
   Play,
   Radio,
   Scissors,
-  Trash2
+  Sparkles,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import React from "react";
+import { YoutubeIcon } from "./icons";
 
 import { VideoItem } from "@/types/video";
 
@@ -80,11 +82,22 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
 
-        {/* Hover play gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform">
-            <Play className="w-5 h-5 ml-0.5 fill-current" />
+        {/* Hover play and quick clip gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-2">
+          <div className="w-10 h-10 rounded-full bg-slate-900/90 text-white flex items-center justify-center shadow-lg transform scale-90 group-hover:scale-100 transition-transform border border-white/10 hover:border-white/30">
+            <Play className="w-4 h-4 ml-0.5 fill-current" />
           </div>
+          {isDownloaded && (
+            <Link
+              href={`/studio/${video.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-xl hover:scale-105 transition-transform border border-rose-400/30"
+              title="Quick Clip in Studio"
+            >
+              <Scissors className="w-3.5 h-3.5" />
+              <span>Quick Clip</span>
+            </Link>
+          )}
         </div>
 
         {/* Duration badge */}
@@ -104,6 +117,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             <span>Local MP4</span>
           </div>
         ) : null}
+
+        {/* Uploaded to YouTube Shorts Badge on Thumbnail */}
+        {video.uploaded_clip_count !== undefined && video.uploaded_clip_count > 0 && (
+          <div className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-600/90 text-white text-xs font-bold backdrop-blur-md shadow-md border border-red-400/40">
+            <YoutubeIcon className="w-3 h-3 text-white" />
+            <span>{video.uploaded_clip_count} {video.uploaded_clip_count === 1 ? "Short" : "Shorts"} Uploaded</span>
+          </div>
+        )}
 
         {isProcessing && (
           <div className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/90 text-white text-xs font-semibold backdrop-blur-md shadow-md animate-pulse">
@@ -145,6 +166,39 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               )}
             </div>
           </div>
+
+          {/* Processing Lifecycle Badges (Highlights, YouTube Uploads, Cleanup Ready) */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            {video.highlight_candidate_count !== undefined && video.highlight_candidate_count > 0 && (
+              <span
+                className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30 flex items-center gap-1"
+                title={`${video.highlight_candidate_count} gameplay highlight candidates mined`}
+              >
+                <Sparkles className="w-3 h-3 text-purple-400" />
+                <span>{video.highlight_candidate_count} Highlights</span>
+              </span>
+            )}
+
+            {video.uploaded_clip_count !== undefined && video.uploaded_clip_count > 0 && (
+              <span
+                className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-red-600/15 text-red-300 border border-red-500/30 flex items-center gap-1"
+                title={`${video.uploaded_clip_count} highlight clip(s) published to YouTube Shorts`}
+              >
+                <YoutubeIcon className="w-3 h-3 text-red-400" />
+                <span>{video.uploaded_clip_count} Uploaded</span>
+              </span>
+            )}
+
+            {video.can_cleanup_vod && (
+              <span
+                className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1"
+                title="Highlights have been uploaded to YouTube. Safe to delete source VOD to free up disk space."
+              >
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                <span>Safe to Clean VOD</span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Download Progress Bar if in progress */}
@@ -161,24 +215,56 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <div className="pt-2 border-t border-white/5 flex items-center justify-between gap-2">
           {isDownloaded ? (
             <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+              <div
+                className={`flex items-center gap-1.5 text-xs font-medium ${
+                  video.can_cleanup_vod ? "text-emerald-300" : "text-emerald-400"
+                }`}
+                title={
+                  video.can_cleanup_vod
+                    ? "Highlights uploaded: safe to delete source VOD"
+                    : "Downloaded local file"
+                }
+              >
                 <HardDrive className="w-3.5 h-3.5" />
-                <span>{formatBytes(video.file_size_bytes) || "Saved"}</span>
+                <span>
+                  {formatBytes(video.file_size_bytes) || "Saved"}
+                  {video.can_cleanup_vod && " • Clean Ready"}
+                </span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <Link
                   href={`/studio/${video.id}`}
                   title="Open Clip Studio workspace"
-                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold rounded-lg shadow-md shadow-rose-950/30 transition-all cursor-pointer active:scale-95"
                 >
-                  <Scissors className="w-3 h-3" />
-                  <span>Clip Studio</span>
+                  <Scissors className="w-3.5 h-3.5" />
+                  <span>Create Clips</span>
                 </Link>
 
                 <button
-                  onClick={() => onDeleteDownload(video.id)}
-                  title="Delete local file"
-                  className="p-1 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                  onClick={() => {
+                    if (video.can_cleanup_vod) {
+                      if (
+                        confirm(
+                          `Highlights for "${video.title}" have already been uploaded to YouTube Shorts.\n\nDeleting the local source VOD (${formatBytes(video.file_size_bytes) || "file"}) will free up disk space while preserving all highlights, clips, and YouTube links.\n\nProceed to delete local file?`
+                        )
+                      ) {
+                        onDeleteDownload(video.id);
+                      }
+                    } else {
+                      onDeleteDownload(video.id);
+                    }
+                  }}
+                  title={
+                    video.can_cleanup_vod
+                      ? "Reclaim disk space (Delete local VOD file)"
+                      : "Delete local file"
+                  }
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    video.can_cleanup_vod
+                      ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40 border border-emerald-500/20"
+                      : "text-slate-400 hover:text-rose-400 hover:bg-slate-800"
+                  }`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -204,13 +290,16 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 <span>YouTube</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
-              <button
-                onClick={() => onDownload(video.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-rose-900/30 transition-all cursor-pointer active:scale-95"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download VOD</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onDownload(video.id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-rose-900/30 transition-all cursor-pointer active:scale-95"
+                  title="Download VOD to enable clipping"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download VOD</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
+from app.models.highlight_candidate import HighlightCandidate
 from app.models.render_job import RenderJob
 from app.models.video import Video
 
@@ -1628,3 +1629,212 @@ def test_render_with_audio_normalization(client, db_session, tmp_path, monkeypat
     assert db_job is not None
     assert db_job.normalize_audio is True
     assert db_job.target_lufs == -14.0
+
+
+def test_video_highlight_and_upload_tracking(client, db_session):
+    """Test that videos track highlight candidate mining and uploaded highlight metrics."""
+    # Video 1: Highlights mined, not downloaded
+    v1 = Video(
+        id="vid_hl_mined",
+        title="Mined Highlights VOD",
+        webpage_url="https://youtube.com/watch?v=vid_hl_mined",
+        highlight_status="completed",
+        is_downloaded=False,
+    )
+    # Video 2: Downloaded, 1 render uploaded to YouTube Shorts
+    v2 = Video(
+        id="vid_uploaded_vod",
+        title="Uploaded Highlights VOD",
+        webpage_url="https://youtube.com/watch?v=vid_uploaded_vod",
+        is_downloaded=True,
+        download_status="completed",
+    )
+    db_session.add_all([v1, v2])
+    db_session.commit()
+
+    # Add 2 highlight candidates for v1
+    c1 = HighlightCandidate(
+        id="cand_1",
+        video_id="vid_hl_mined",
+        start_seconds=10.0,
+        end_seconds=25.0,
+        duration_seconds=15.0,
+        score=0.85,
+        event_type="team_wipe",
+        details_json="{}",
+    )
+    c2 = HighlightCandidate(
+        id="cand_2",
+        video_id="vid_hl_mined",
+        start_seconds=40.0,
+        end_seconds=55.0,
+        duration_seconds=15.0,
+        score=0.92,
+        event_type="triple_ko",
+        details_json="{}",
+    )
+    db_session.add_all([c1, c2])
+
+    # Add 2 render jobs for v2 (1 uploaded, 1 not uploaded)
+    r1 = RenderJob(
+        id="job_up_1",
+        clip_id="clip_v2_short1",
+        video_id="vid_uploaded_vod",
+        status="completed",
+        start_seconds=10.0,
+        duration_seconds=30.0,
+        youtube_upload_status="completed",
+        youtube_video_id="ShortId123",
+        youtube_upload_url="https://www.youtube.com/shorts/ShortId123",
+        selected_format="vertical_blur",
+    )
+    r2 = RenderJob(
+        id="job_up_2",
+        clip_id="clip_v2_short2",
+        video_id="vid_uploaded_vod",
+        status="completed",
+        start_seconds=60.0,
+        duration_seconds=30.0,
+        youtube_upload_status="not_uploaded",
+    )
+    db_session.add_all([r1, r2])
+    db_session.commit()
+
+    # Verify single video endpoint for v2
+    res_v2 = client.get(f"{settings.API_PREFIX}/videos/vid_uploaded_vod")
+    assert res_v2.status_code == 200
+    v2_data = res_v2.json()["response"]
+    assert v2_data["rendered_clip_count"] == 2
+    assert v2_data["uploaded_clip_count"] == 1
+    assert v2_data["has_uploaded_highlights"] is True
+    assert v2_data["can_cleanup_vod"] is True
+    assert len(v2_data["uploaded_highlights"]) == 1
+    assert v2_data["uploaded_highlights"][0]["clip_id"] == "clip_v2_short1"
+    assert (
+        v2_data["uploaded_highlights"][0]["youtube_upload_url"]
+        == "https://www.youtube.com/shorts/ShortId123"
+    )
+
+    # Verify single video endpoint for v1
+    res_v1 = client.get(f"{settings.API_PREFIX}/videos/vid_hl_mined")
+    assert res_v1.status_code == 200
+    v1_data = res_v1.json()["response"]
+    assert v1_data["highlight_candidate_count"] == 2
+    assert v1_data["highlight_status"] == "completed"
+    assert v1_data["has_uploaded_highlights"] is False
+
+    # Test status filters
+    # 1. status=highlights_mined
+    res_hl = client.get(f"{settings.API_PREFIX}/videos?status=highlights_mined")
+    assert res_hl.status_code == 200
+    hl_ids = [item["id"] for item in res_hl.json()["response"]["items"]]
+    assert "vid_hl_mined" in hl_ids
+
+    # 2. status=uploaded
+    res_up = client.get(f"{settings.API_PREFIX}/videos?status=uploaded")
+    assert res_up.status_code == 200
+    up_ids = [item["id"] for item in res_up.json()["response"]["items"]]
+    assert "vid_uploaded_vod" in up_ids
+
+    # 3. status=cleanup_ready
+    res_clean = client.get(f"{settings.API_PREFIX}/videos?status=cleanup_ready")
+    assert res_clean.status_code == 200
+    clean_ids = [item["id"] for item in res_clean.json()["response"]["items"]]
+    assert "vid_uploaded_vod" in clean_ids
+    assert "vid_hl_mined" not in clean_ids  # Because v1 is not downloaded
+
+
+def test_video_storage_cleanup_endpoint(client, db_session, tmp_path):
+    """Test POST /api/v1/videos/{video_id}/cleanup reclaims storage and removes files."""
+    dummy_vod = settings.downloads_path / "vid_clean_test.mp4"
+    dummy_vod.write_bytes(b"0" * 1024 * 100)  # 100 KB
+
+    dummy_render_dir = settings.renders_path / "clip_clean_test_1"
+    dummy_render_dir.mkdir(parents=True, exist_ok=True)
+    (dummy_render_dir / "short.mp4").write_bytes(b"0" * 1024 * 50)  # 50 KB
+
+    try:
+        video = Video(
+            id="vid_clean_test",
+            title="Clean Test Video",
+            webpage_url="https://youtube.com/watch?v=vid_clean_test",
+            is_downloaded=True,
+            local_file_path=str(dummy_vod),
+            file_size_bytes=102400,
+            download_status="completed",
+        )
+        job = RenderJob(
+            id="job_clean_1",
+            clip_id="clip_clean_test_1",
+            video_id="vid_clean_test",
+            status="completed",
+            start_seconds=0.0,
+            duration_seconds=15.0,
+            youtube_upload_status="completed",
+            youtube_upload_url="https://www.youtube.com/shorts/clean123",
+        )
+        db_session.add_all([video, job])
+        db_session.commit()
+
+        # Run cleanup
+        cleanup_res = client.post(
+            f"{settings.API_PREFIX}/videos/vid_clean_test/cleanup",
+            json={
+                "clean_vod": True,
+                "clean_uploaded_renders": True,
+                "clean_all_renders": False,
+            },
+        )
+        assert cleanup_res.status_code == 200
+        payload = cleanup_res.json()["response"]
+        assert payload["vod_deleted"] is True
+        assert payload["renders_deleted_count"] == 1
+        assert payload["reclaimed_bytes"] >= 153600  # 100KB + 50KB
+
+        # Verify files removed from disk
+        assert not dummy_vod.exists()
+        assert not dummy_render_dir.exists()
+
+        # Verify database video record preserved with download reset
+        db_video = db_session.query(Video).filter(Video.id == "vid_clean_test").first()
+        assert db_video is not None
+        assert db_video.is_downloaded is False
+        assert db_video.download_status == "not_downloaded"
+    finally:
+        if dummy_vod.exists():
+            dummy_vod.unlink()
+        if dummy_render_dir.exists():
+            import shutil
+
+            shutil.rmtree(dummy_render_dir, ignore_errors=True)
+
+
+def test_list_videos_with_null_highlight_fields(client, db_session):
+    """GET /videos successfully serializes videos when database contains NULL highlight and status fields."""
+    # Video where highlight columns and download columns are None (e.g. from migrations or manual inserts)
+    null_video = Video(
+        id="vid_null_fields_test",
+        title="Video with Null Fields",
+        webpage_url="https://youtube.com/watch?v=vid_null_fields_test",
+        duration=120,
+        highlight_status=None,
+        highlight_progress=None,
+        highlight_stage=None,
+        download_status=None,
+        download_progress=None,
+    )
+    db_session.add(null_video)
+    db_session.commit()
+
+    res = client.get(f"{settings.API_PREFIX}/videos?limit=20&status=all")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    items = data["response"]["items"]
+    found = next((item for item in items if item["id"] == "vid_null_fields_test"), None)
+    assert found is not None
+    assert found["highlight_status"] == "idle"
+    assert found["highlight_progress"] == 0.0
+    assert found["highlight_stage"] == ""
+    assert found["download_status"] == "not_downloaded"
+    assert found["download_progress"] == 0.0

@@ -283,6 +283,7 @@ function StudioWorkspace() {
   const [highlightScanProgress, setHighlightScanProgress] = useState<number>(0);
   const [highlightScanStage, setHighlightScanStage] = useState<string>("");
   const [appliedHighlightNotification, setAppliedHighlightNotification] = useState<string | null>(null);
+  const [appliedCandidate, setAppliedCandidate] = useState<HighlightCandidateItem | null>(null);
 
   const compareLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const compareRightVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -319,12 +320,20 @@ function StudioWorkspace() {
     setSelectedModes(["vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
   };
 
-  const handleSelectDefaultSingle = () => {
+  const handlePresetYouTubeShort = () => {
     setSelectedModes(["third_person"]);
   };
 
-  const handleSelectDefaultTriple = () => {
-    setSelectedModes(["landscape", "vertical_blur", "third_person"]);
+  const handlePresetVerticalCrop = () => {
+    setSelectedModes(["direct_crop", "third_person"]);
+  };
+
+  const handlePresetVerticalBlur = () => {
+    setSelectedModes(["vertical_blur"]);
+  };
+
+  const handlePresetLandscape = () => {
+    setSelectedModes(["landscape"]);
   };
 
   const handlePlayBoth = () => {
@@ -508,6 +517,7 @@ function StudioWorkspace() {
   }, [isHighlightScanning, videoId]);
 
   const handleApplyHighlight = (candidate: HighlightCandidateItem) => {
+    setAppliedCandidate(candidate);
     const startSec = candidate.start_seconds;
     setStartSecondsInput(formatSeconds(startSec));
     const dur = Math.round(candidate.duration_seconds);
@@ -576,6 +586,11 @@ function StudioWorkspace() {
         narration_path: audioMode === "voiceover" && narrationPath.trim() ? narrationPath.trim() : null,
         normalize_audio: normalizeAudio,
         target_lufs: targetLufs,
+        highlight_candidate_id: appliedCandidate?.candidate_id,
+        hero_name:
+          typeof appliedCandidate?.details?.hero_name === "string"
+            ? appliedCandidate.details.hero_name
+            : undefined,
       });
 
       let completedJob: RenderJobResponse | RenderClipResponse = res;
@@ -994,6 +1009,31 @@ function StudioWorkspace() {
                           <span className="text-xs text-slate-400 font-mono">seconds</span>
                         </div>
                       )}
+
+                      {/* YouTube Shorts duration hint / advisory */}
+                      {activeDuration > 60 ? (
+                        <div className="mt-2.5 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-2 text-xs text-amber-200">
+                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-300">
+                              Duration is {activeDuration}s (&gt; 60s) — YouTube Shorts Note
+                            </p>
+                            <p className="text-[11px] text-amber-200/80 leading-snug">
+                              YouTube Shorts requires clips ≤ 60 seconds. Longer videos will render normally and publish as standard YouTube videos.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2.5 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-300">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>{activeDuration}s — Sized for YouTube Shorts (≤ 60s)</span>
+                          </span>
+                          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200">
+                            Shorts Ready
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1043,24 +1083,35 @@ function StudioWorkspace() {
                     <div className="flex items-center gap-1 shrink-0 flex-wrap">
                       <button
                         type="button"
-                        onClick={handleSelectDefaultSingle}
-                        className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                        onClick={handlePresetYouTubeShort}
+                        className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 hover:text-white border border-rose-500/40 transition-all cursor-pointer"
+                        title="YouTube Short preset (9:16 vertical)"
                       >
-                        Third-Person (1)
+                        Shorts (9:16)
                       </button>
                       <button
                         type="button"
-                        onClick={handleSelectDefaultTriple}
+                        onClick={handlePresetVerticalCrop}
                         className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                        title="Direct & Wide Center Crop"
                       >
-                        Triple (3)
+                        Vertical Crop
                       </button>
                       <button
                         type="button"
-                        onClick={handleSelectAllShorts}
+                        onClick={handlePresetVerticalBlur}
                         className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                        title="Full Blur Padding (100% gameplay visible)"
                       >
-                        Shorts (5)
+                        Vertical Blur
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handlePresetLandscape}
+                        className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-blue-500/15 hover:bg-blue-500/30 text-blue-300 hover:text-white border border-blue-500/30 transition-all cursor-pointer"
+                        title="16:9 Landscape Master"
+                      >
+                        Landscape (16:9)
                       </button>
                       <button
                         type="button"

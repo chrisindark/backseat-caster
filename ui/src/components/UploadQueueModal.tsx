@@ -4,6 +4,7 @@ import {
   getStreamUrl,
   getYouTubeAuthStatus,
   getYouTubeAuthUrl,
+  regenerateClipMetadata,
   uploadClipToYouTube,
   uploadSelectedClipsToYouTube,
 } from "@/lib/api";
@@ -20,12 +21,14 @@ import {
   Download,
   ExternalLink,
   FileJson,
+  History,
   Loader2,
   Radio,
   Smartphone,
   Trash2,
   Tv,
   UploadCloud,
+  Wand2,
   X,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
@@ -69,6 +72,8 @@ function getDefaultMetadata(item: RenderManifest) {
     tags: defaultTags,
     privacy: privacyVal,
     format: preferred,
+    hero_name: item.upload_selection?.hero_name || "",
+    clip_context: item.upload_selection?.clip_context || "",
   };
 }
 
@@ -89,6 +94,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         tags: string;
         privacy: UploadPrivacy;
         format: UploadFormat;
+        hero_name?: string;
+        clip_context?: string;
       }
     >
   >(() => {
@@ -100,6 +107,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         tags: string;
         privacy: UploadPrivacy;
         format: UploadFormat;
+        hero_name?: string;
+        clip_context?: string;
       }
     > = {};
     selectedRenders.forEach((item) => {
@@ -118,6 +127,67 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   const [isUploadingBatch, setIsUploadingBatch] = useState<boolean>(false);
   const [uploadedClips, setUploadedClips] = useState<Record<string, YouTubeUploadResult>>({});
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Metadata regeneration: AI vs deterministic copy for the same clip.
+  const [useAiCopy, setUseAiCopy] = useState<boolean>(true);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [previousCopies, setPreviousCopies] = useState<
+    Record<
+      string,
+      { title?: string | null; description?: string | null; metadata_source?: string }
+    >
+  >({});
+
+  const handleRegenerate = async (clipId: string) => {
+    setRegeneratingId(clipId);
+    setUploadError(null);
+    try {
+      const currentMeta = clipMetadata[clipId];
+      const res = await regenerateClipMetadata(clipId, {
+        use_llm: useAiCopy,
+        hero_name: currentMeta?.hero_name || undefined,
+        clip_context: currentMeta?.clip_context || undefined,
+      });
+      if (res.previous && (res.previous.title || res.previous.description)) {
+        setPreviousCopies((prev) => ({ ...prev, [clipId]: res.previous! }));
+      }
+      setClipMetadata((prev) => {
+        const base = prev[clipId] || {
+          title: "",
+          description: "",
+          tags: "",
+          privacy: "public" as UploadPrivacy,
+          format: "vertical_blur" as UploadFormat,
+          hero_name: "",
+          clip_context: "",
+        };
+        return {
+          ...prev,
+          [clipId]: {
+            ...base,
+            title: res.upload_selection.title || base.title,
+            description: res.upload_selection.description || base.description,
+            tags: (res.upload_selection.tags || []).join(", "),
+            privacy: (res.upload_selection.privacy as UploadPrivacy) || base.privacy,
+            format: (res.upload_selection.preferred_format as UploadFormat) || base.format,
+            hero_name: (res.upload_selection.hero_name as string) || base.hero_name,
+            clip_context: (res.upload_selection.clip_context as string) || base.clip_context,
+          },
+        };
+      });
+      setSuccessMessage(
+        res.used_llm
+          ? `Gemini copy generated for ${clipId}.`
+          : `${res.message} (${clipId})`
+      );
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadError(`Failed to regenerate metadata for ${clipId}: ${msg}`);
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -255,7 +325,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
 
   const handleFieldChange = (
     clipId: string,
-    field: "title" | "description" | "tags" | "privacy" | "format",
+    field: "title" | "description" | "tags" | "privacy" | "format" | "hero_name" | "clip_context",
     value: string
   ) => {
     setClipMetadata((prev) => {
@@ -266,6 +336,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         tags: "Gaming, Highlights, Shorts",
         privacy: "public" as UploadPrivacy,
         format: "vertical_blur" as UploadFormat,
+        hero_name: "",
+        clip_context: "",
       });
 
       return {
@@ -294,6 +366,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         description: meta.description,
         tags: tagsArray,
         privacy: meta.privacy,
+        hero_name: meta.hero_name,
+        clip_context: meta.clip_context,
       });
       setSuccessMessage(`Updated staging for ${clipId}`);
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -389,6 +463,15 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
               <p className="text-xs text-slate-400">
                 Review chosen highlight renders, customize upload titles/tags, and stage for YouTube publication.
               </p>
+              <label className="mt-2 inline-flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none w-fit">
+                <input
+                  type="checkbox"
+                  checked={useAiCopy}
+                  onChange={(e) => setUseAiCopy(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded accent-violet-500"
+                />
+                <span>Use AI copy (Gemini) when regenerating</span>
+              </label>
             </div>
           </div>
 
@@ -565,6 +648,39 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
 
                     {/* Form Fields for Publishing */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {/* Hero & Context Hints for LLM copy generation */}
+                      <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-violet-500/20">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-violet-300 flex items-center justify-between">
+                            <span>Hero Identity</span>
+                            <span className="text-[10px] text-slate-500 font-normal">Context for AI</span>
+                          </label>
+                          <input
+                            type="text"
+                            list="marvel-rivals-heroes-list"
+                            value={meta.hero_name || ""}
+                            onChange={(e) => handleFieldChange(render.clip_id, "hero_name", e.target.value)}
+                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                            placeholder="e.g. Magneto, Luna Snow, Spider-Man..."
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-white/10 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-violet-300 flex items-center justify-between">
+                            <span>Clip Context / Notes</span>
+                            <span className="text-[10px] text-slate-500 font-normal">Kills, point, choke</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={meta.clip_context || ""}
+                            onChange={(e) => handleFieldChange(render.clip_id, "clip_context", e.target.value)}
+                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                            placeholder="e.g. 5K streak holding point B..."
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-white/10 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 text-xs"
+                          />
+                        </div>
+                      </div>
+
                       {/* Video Title */}
                       <div className="sm:col-span-2 space-y-1">
                         <label className="text-[11px] font-semibold text-slate-300">
@@ -578,6 +694,18 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           placeholder="Video or Short Title..."
                           className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
                         />
+                        {previousCopies[render.clip_id] && (
+                          <p className="text-[10px] text-slate-500">
+                            Previous ({
+                              previousCopies[render.clip_id].metadata_source === "llm"
+                                ? "Gemini"
+                                : "deterministic"
+                            }):{" "}
+                            <span className="line-through decoration-slate-600">
+                              {previousCopies[render.clip_id].title || "(no title)"}
+                            </span>
+                          </p>
+                        )}
                       </div>
 
                       {/* Description */}
@@ -662,6 +790,36 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                         >
                           {savingId === render.clip_id ? "Saving..." : "Save Staging"}
                         </button>
+
+                        {/* Regenerate title/description/tags without re-rendering */}
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerate(render.clip_id)}
+                          disabled={regeneratingId === render.clip_id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/20 text-violet-300 hover:bg-violet-600/30 border border-violet-500/30 font-medium transition-colors disabled:opacity-50"
+                          title={
+                            useAiCopy
+                              ? "Regenerate copy with Gemini (falls back if no API key)"
+                              : "Regenerate copy deterministically"
+                          }
+                        >
+                          {regeneratingId === render.clip_id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Wand2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {regeneratingId === render.clip_id
+                              ? "Generating..."
+                              : `Regenerate (${useAiCopy ? "AI" : "non-AI"})`}
+                          </span>
+                        </button>
+                        {previousCopies[render.clip_id]?.description && (
+                          <span className="text-[10px] text-slate-500 max-w-[26ch] truncate" title={previousCopies[render.clip_id].description || ""}>
+                            <History className="w-3 h-3 inline -mt-0.5 mr-1" />
+                            Previous description kept for comparison
+                          </span>
+                        )}
 
                         {/* YouTube Upload Button or View Link */}
                         {(() => {
@@ -798,6 +956,20 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
           </div>
         </div>
       </div>
+      <datalist id="marvel-rivals-heroes-list">
+        {[
+          "Adam Warlock", "Angela", "Black Cat", "Black Panther", "Black Widow", "Blade",
+          "Captain America", "Cloak & Dagger", "Cyclops", "Daredevil", "Deadpool",
+          "Doctor Strange", "Emma Frost", "Groot", "Hawkeye", "Hela", "Hulk",
+          "Human Torch", "Invisible Woman", "Iron Fist", "Iron Man", "Jeff the Land Shark",
+          "Loki", "Luna Snow", "Magik", "Magneto", "Mantis", "Mister Fantastic",
+          "Moon Knight", "Namor", "Peni Parker", "Psylocke", "Punisher", "Rocket Raccoon",
+          "Scarlet Witch", "Spider-Man", "Star-Lord", "Storm", "The Thing", "Thor",
+          "Venom", "Winter Soldier", "Wolverine",
+        ].map((hero) => (
+          <option key={hero} value={hero} />
+        ))}
+      </datalist>
     </div>
   );
 };

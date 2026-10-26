@@ -1,5 +1,7 @@
 """Celery application instance and configuration."""
 
+from datetime import timedelta
+
 from celery import Celery
 
 from app.config import settings
@@ -13,6 +15,7 @@ celery_app = Celery(
         "app.services.renders",
         "app.services.youtube_uploader",
         "app.services.highlight.service",
+        "app.services.auto_pipeline",
     ],
 )
 
@@ -36,7 +39,22 @@ celery_app.use_fast_trace_task = False
 
 @celery_app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
-    pass
+    """Register the optional maintenance sweep for Celery beat."""
+    interval = settings.AUTO_PIPELINE_INTERVAL_MINUTES
+    if interval <= 0:
+        return
+    sender.add_periodic_task(
+        timedelta(minutes=interval),
+        sender.signature(
+            "auto_pipeline_task",
+            kwargs={
+                "stage": True,
+                "cleanup": settings.AUTO_CLEANUP_UPLOADED_RENDERS,
+                "clean_vod": settings.AUTO_CLEANUP_VOD,
+            },
+        ),
+        name="auto-pipeline-maintenance",
+    )
 
 
 from celery.signals import worker_process_init  # noqa: E402

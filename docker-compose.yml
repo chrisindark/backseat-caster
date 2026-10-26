@@ -42,6 +42,27 @@ services:
       backend:
         condition: service_started
 
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: backseatcaster-beat
+    restart: unless-stopped
+    command: uv run celery -A app.worker.celery_app beat --loglevel=info --schedule=/workspace/data/celerybeat-schedule
+    environment:
+      - DATABASE_URL=sqlite:////workspace/data/visioncaster.db
+      - DOWNLOADS_DIR=/workspace/data/downloads
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - AUTO_PIPELINE_INTERVAL_MINUTES=${AUTO_PIPELINE_INTERVAL_MINUTES:-0}
+    volumes:
+      - ./data:/workspace/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
   redis:
     image: redis:7-alpine
     container_name: backseatcaster-redis

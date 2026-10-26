@@ -2,7 +2,23 @@
 
 > Status legend: **Completed** ✅ · **In Progress / Partial** 🚧 · **Planned** 📋
 
-BackseatCaster is a **local-first AI video editing and publishing pipeline** that transforms raw gameplay recordings and generic video content (VODs) into punchy, high-engagement YouTube Shorts and video clips.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
+[![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-Hardware_Accelerated-black.svg)]()
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-Required-green.svg)](https://ffmpeg.org/)
+
+BackseatCaster is a **local-first AI video editing and publishing pipeline** designed to transform raw gameplay recordings (VODs) into high-impact gaming clips, highlights, and YouTube Shorts.
+
+## 0. Product Overview & Current State
+
+**Current Product Reality:** The foundational manual editing, rendering, and publishing stack is **100% built, tested, and operational**:
+- **Local Rendering Engine:** Apple Silicon `h264_videotoolbox` / `libx264` rendering to 16:9 Landscape Master and 9:16 Vertical formats (Full Blur, Third-Person Wide Crop, Direct Center Crop) with Lanczos scaling.
+- **Audio Pipeline:** Sidechain compression mixing voiceover narration with ducked gameplay audio, peak limiting, and EBU R128 (-14 LUFS) loudness normalization.
+- **Web Studio & Review UI:** Next.js 16 interface with timeline video player, dual-handle range scrubbing, crop guide overlays, live comparison tabs, and job status polling.
+- **Ingestion Suite:** Dual-mode ingestion via YouTube `yt-dlp` channel scraping & download, plus drag-and-drop OBS local video upload with instant probing & thumbnail generation.
+- **YouTube Ingestion & Publishing:** Google OAuth 2.0 authentication, upload staging queue, and direct resumable publishing to YouTube Shorts via YouTube Data API v3.
+- **Background Worker Engine:** Celery + Redis with automatic fallback to FastAPI `BackgroundTasks`.
 
 ---
 
@@ -18,7 +34,7 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** tha
 | **Shorts+ Audio** | Engine | **EBU R128 Audio Normalization:** Dual-chain `loudnorm` filter targeting -14 LUFS standard for YouTube Shorts | ✅ Completed |
 | **Phase 6** | UI / Studio | **Creator Studio & Review Interface:** Web studio (`/studio/[id]`), timeline scrubbing, crop overlays, catalog, bulk delete | ✅ Completed |
 | **Phase 7** | Publishing | **YouTube Ingestion & Publishing:** OAuth 2.0 PKCE flow, metadata staging, resumable YouTube Shorts Data API v3 upload | ✅ Completed |
-| **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish | 🚧 Partial Base |
+| **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish, batched maintenance + storage cleanup | ✅ Completed |
 | **Phase 9** | Multi-Genre | **Generic Video & Speech Mining (STT):** Dialogue-driven highlight discovery via Whisper STT + LLM semantic chunking & sentence snapping | 📋 Planned |
 | **Phase 3** | Vision & OCR | **HUD/OCR & Deep Visual Event Extraction:** Killfeed sequence chains, ultimate charge meters, ability identification | ✅ Completed |
 | **Phase 4** | Multimodal AI | **Gemini Event Verification:** Multimodal clip verification, structured highlight event schema, temporal grounding | 📋 Planned |
@@ -110,21 +126,12 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** tha
 ### Phase 8: Autonomous Pipeline & Scheduler (Auto-Stage, LLM Metadata, publishAt)
 *Zero-touch background pipeline from highlight creation to scheduled YouTube Shorts publication.*
 
-- 🚧 **Auto-Render Top N Candidates (Foundational):**
-  - Parameterized trigger in highlight detection (`auto_render_top_n: int`, `min_score: float`, `clipping_mode: str`).
-  - Automatically enqueues FFmpeg rendering jobs for top-scoring highlight candidates as soon as Stage 4 clustering completes.
-- 📋 **LLM Metadata Generator Service (Gemini):**
-  - Structured output (`google-genai`) generating punchy, mobile-optimized YouTube Shorts titles (<50 chars), engaging descriptions, hashtags, and category tags conditioned on detected OCR events, hero, and gameplay context.
-  - Strict fallback to deterministic [`app/services/upload_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/upload_metadata.py) if Gemini API key is missing or offline.
-- 📋 **Native YouTube `publishAt` Scheduling:**
-  - YouTube Data API v3 `status.publishAt` support uploading clips as private and delegating release timing to YouTube's infrastructure (no local machine uptime requirement).
-  - Staggered release scheduling (e.g. 1 Short per 24 hours).
-- 📋 **YouTube API Quota Safeguards:**
-  - Built-in tracking of the 10,000 units/day quota (1,600 units per video upload; max 6 uploads/day).
-  - Visual quota bar in UI and guard preventing auto-upload dispatch when quota is exhausted.
-- 📋 **UI 1-Click Staging Notification & Review Drawer:**
-  - *"🔥 Highlights Auto-Staged"* notification banner on Studio/Renders pages.
-  - 1-click "Publish Now" button or "Edit & Schedule" modal for creator review before upload.
+- ✅ **Auto-Render Top N Candidates:** Parameterized trigger in highlight detection (`auto_render_top_n: int`, `min_score: float`, `clipping_mode: str`) or the global `AUTO_STAGE_*` settings; enqueues vertical FFmpeg render jobs for the top-scoring candidates as soon as clustering completes, skipping candidates that are already staged ([`app/services/auto_stage.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/auto_stage.py)).
+- ✅ **LLM Metadata Generator Service (Gemini):** Structured output via `google-genai` producing punchy YouTube Shorts titles, descriptions and hashtags conditioned on detected OCR events, hero, multi-kill chain, ultimate payoff and game phase ([`app/services/llm_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/llm_metadata.py)). Degrades to the deterministic [`app/services/upload_metadata.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/upload_metadata.py) generator when the API key is missing, the SDK is unavailable, or the model returns unusable copy; every staged clip records its `metadata_source`.
+- ✅ **Native YouTube `publishAt` Scheduling:** Uploads as private with `status.publishAt` so YouTube's infrastructure handles release (no local uptime requirement), with staggered slots (`AUTO_STAGE_FIRST_SLOT_HOURS`, `AUTO_STAGE_INTERVAL_HOURS`) and per-clip rescheduling via `POST /api/v1/youtube/staging/{clip_id}/schedule`.
+- ✅ **YouTube API Quota Safeguards:** Per-quota-day unit accounting (10,000 units/day, 1,600 per upload) in [`app/services/youtube_quota.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/youtube_quota.py) with midnight-Pacific resets, advisory usage tracking (uploads are never blocked locally; YouTube's `quotaExceeded` is surfaced), a pre-dispatch warning in the UI, and a quota bar in the renders UI.
+- ✅ **UI 1-Click Staging Notification & Review Drawer:** *"🔥 Highlights Auto-Staged"* banner with quota bar on `/renders`, plus a review drawer offering per-clip schedule editing and 1-click "Publish Now" ([`ui/src/components/AutoStagePanel.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/AutoStagePanel.tsx)).
+- ✅ **Automated Maintenance Pipeline:** Uploaded render folders are purged from disk while `RenderJob` upload history is retained, and every downloaded video's next `AUTO_STAGE_TOP_N` highlights are staged in batches so repeated sweeps keep consuming the next-best candidates ([`app/services/auto_pipeline.py`](file:///Users/christopherpaul/projects/backseat-caster/app/services/auto_pipeline.py)). Available on demand via `POST /api/v1/renders/cleanup-uploaded` and `POST /api/v1/renders/auto-pipeline`, or scheduled through Celery beat with `AUTO_PIPELINE_INTERVAL_MINUTES`. Optional source-VOD cleanup (`AUTO_CLEANUP_VOD`) only runs when every completed render for the video is uploaded.
 
 ---
 
@@ -254,10 +261,49 @@ GameHUDDetector (Vision-Heavy)           SemanticSpeechDetector (Audio/Text-Heav
 
 ---
 
-## 4. Guiding Principles
+## 4. UI/UX Improvements: Upload, Create, Track Shorts
+
+*Prioritized improvements for a smoother Shorts workflow.*
+
+### P0 - Clarity (Must Do)
+| Area | Deliverable | Status | Notes |
+|---|---|---|---|
+| **Navigation** | Clearer IA in navbar (Home/Library, Create, Renders/Jobs with badges, Publish/YouTube) | ✅ Completed | Group upload, clip creation, and publishing actions. |
+| **Video Cards** | Add "Create Clips" / "Quick Clip" CTA on library cards | ✅ Completed | Jump directly to Clip Studio from uploaded/downloaded videos. |
+| **Studio Presets** | Default to vertical for Shorts; add "YouTube Short (9:16)", "Vertical Crop", "Vertical Blur", "Landscape" presets with duration hint (>60s warning) | ✅ Completed | Non-blocking duration hint and instant framing presets. |
+| **Renders Tracking** | Add "Shorts" filter/tab (vertical formats, <61s), clearer status colors (queued/rendering/completed/uploaded/published) | ✅ Completed | Easier to find what’s ready to publish. |
+
+### P1 - Upload & Publishing Flow
+| Area | Deliverable | Status | Notes |
+|---|---|---|---|
+| **OBS Upload UX** | Prominent "Start Here" upload panel on home, better progress (ETA/speed/size), file validation preview, cancel/retry | 📋 Planned | Build on existing `OBSUploadDropzone`. |
+| **Post-Upload** | Auto-suggest "Clip from this video" with direct link to studio after successful upload | 📋 Planned | Reduce clicks from upload → clip. |
+| **Upload Queue** | Enhanced staging UI (per-item status, YouTube URL, privacy, scheduled publish), "Upload All", retry failed, clear completed | 📋 Planned | Improve `UploadQueueModal`. |
+| **Metadata Editor** | Character counters, hashtag suggestions, AI auto-generate visible, Shorts preview | 📋 Planned | Better for YouTube Shorts optimization. |
+| **Publishing Dashboard** | Unified view by platform/status (staged/uploading/uploaded/published/failed), link to YouTube Shorts, publish time/errors | 📋 Planned | Track end-to-end publish state. |
+
+### P2 - Polish & Power Features
+| Area | Deliverable | Status | Notes |
+|---|---|---|---|
+| **Auto-Clips Surfacing** | Bring highlights/auto-stage to home/studio with confidence scores, one-click render as Short | 📋 Planned | Leverage existing Phase 8 + mining. |
+| **Batch Creation** | Select multiple ranges and queue renders with shared settings | 📋 Planned | Speed up creating multiple Shorts. |
+| **Timeline UX** | Keyboard shortcuts (J/K/L, I/O), snap, >60s warning, better scrubbing | 📋 Planned | Improve studio efficiency. |
+| **Notifications/Badges** | Navbar badges for active downloads/renders, "X clips ready to publish", toasts for completed uploads/renders | 📋 Planned | Better visibility of processing state. |
+| **Performance** | Virtualize long lists, lazy thumbnails, optimize polling on renders/jobs | 📋 Planned | Smoother with many clips. |
+| **Mobile Responsiveness** | Responsive dropzone/cards/modals, mobile-friendly upload CTA | 📋 Planned | Improve cross-device experience. |
+
+
+## 5. Guiding Principles
 
 - **Creator control stays in the loop:** AI proposes (candidates, scripts, captions, schedules), creators approve before rendering or publishing.
 - **Local-first media processing:** Video probing, clipping, audio ducking, and rendering execute locally using hardware acceleration (`h264_videotoolbox` on macOS); cloud AI is strictly used as an optional enhancer.
 - **Graceful degradation:** Every component has a zero-config fallback (Celery -> FastAPI BackgroundTasks, Gemini -> Local Heuristics, OAuth -> Local File Save).
 - **Polymorphic Mining:** Specialized Computer Vision for games with HUDs; Speech/Dialogue Semantic Analysis for generic videos; unified rendering and publishing for both.
 - **Tested & Deterministic:** All stages are covered by unit and integration suites with deterministic fixtures (186 passing tests).
+
+## 6. Privacy, Cost, and Reliability
+
+1. **Local-First Default:** Audio scanning, HUD cropping, and candidate mining run 100% locally on your machine.
+2. **Selective Cloud Usage:** Only validated candidate clips (not entire multi-hour VODs) are ever sent to Gemini for commentary scripting, metadata generation, or verification.
+3. **Deterministic Testing:** Use synthetic FFmpeg test assets (`testsrc`, `sine`, `drawtext`) to test detection algorithms without requiring multi-gigabyte VOD downloads.
+4. **Creator Control:** Automated candidates are recommendations; human review and approval in Clip Studio remain mandatory before rendering or publishing.

@@ -1,13 +1,17 @@
 "use client";
 
-import { CheckCircle2, DownloadCloud, Film, HardDrive } from "lucide-react";
+import { CheckCircle2, Film, Sparkles, Trash2 } from "lucide-react";
 import React from "react";
+import { YoutubeIcon } from "./icons";
 
 interface StatsBarProps {
   channelTitle?: string | null;
   totalVideos: number;
   downloadedCount: number;
   downloadingCount?: number;
+  highlightsMinedCount?: number;
+  uploadedCount?: number;
+  cleanupReadyCount?: number;
   activeFilter: string;
   onFilterChange: (filter: string) => void;
 }
@@ -17,16 +21,18 @@ export const StatsBar: React.FC<StatsBarProps> = ({
   totalVideos,
   downloadedCount,
   downloadingCount = 0,
+  highlightsMinedCount = 0,
+  uploadedCount = 0,
+  cleanupReadyCount = 0,
   activeFilter,
   onFilterChange,
 }) => {
-  const notDownloadedCount = Math.max(0, totalVideos - downloadedCount - downloadingCount);
-
   const filters = [
     { id: "all", label: "All Videos", icon: Film, count: totalVideos },
     { id: "downloaded", label: "Downloaded", icon: CheckCircle2, count: downloadedCount },
-    { id: "downloading", label: "Downloading", icon: DownloadCloud, count: downloadingCount },
-    { id: "not_downloaded", label: "Not Downloaded", icon: HardDrive, count: notDownloadedCount },
+    { id: "highlights_mined", label: "Highlights Mined", icon: Sparkles, count: highlightsMinedCount },
+    { id: "uploaded", label: "Uploaded to YT", icon: YoutubeIcon, count: uploadedCount },
+    { id: "cleanup_ready", label: "Ready to Clean", icon: Trash2, count: cleanupReadyCount },
   ];
 
   return (

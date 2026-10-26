@@ -61,6 +61,14 @@ A game-specific integration point (`app/services/highlight/detectors/`) that def
 
 Selection state ("this clip goes to YouTube when I'm ready") plus one-click or batch resumable upload to YouTube Shorts. Requires a completed OAuth link. → [publishing.md](publishing.md)
 
+## Auto-stage
+
+Rendering the top-scoring highlight candidates into private vertical Shorts, generating AI (or deterministic) title/description/tags, and assigning staggered native `publishAt` slots. Runs after highlight detection when `AUTO_STAGE_ENABLED` is on, or on demand via `POST /api/v1/youtube/auto-stage`. → [publishing.md](publishing.md)
+
+## Maintenance sweep
+
+Deletes local render folders for clips already uploaded to YouTube while keeping `RenderJob` history and YouTube links, then stages each downloaded video's next `AUTO_STAGE_TOP_N` highlights. Runs on demand via `POST /api/v1/renders/auto-pipeline` or periodically through Celery beat. Source VODs are only removed when every completed render is uploaded. → [publishing.md](publishing.md#5-observability--recovery)
+
 ## BaseResponse
 
 The mandatory response envelope `{ success, response, error }` on every endpoint except file streams. Frontend `api.ts` unwraps it automatically. → [response-envelope.md](response-envelope.md)

@@ -1,6 +1,7 @@
 "use client";
 
 import { RenderJobResponse } from "@/types/video";
+import { YoutubeIcon } from "./icons";
 import {
   AlertCircle,
   Check,
@@ -9,6 +10,8 @@ import {
   Film,
   Loader2,
   RotateCcw,
+  Smartphone,
+  Star,
   Trash2,
 } from "lucide-react";
 import React, { useState } from "react";
@@ -137,6 +140,36 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
 
           {/* Status Badge */}
           {getStatusBadge()}
+
+          {/* Short candidate indicator */}
+          {job.duration_seconds <= 60.5 && job.crop_preset !== "landscape" && (
+            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+              <Smartphone className="w-3 h-3 text-purple-400" />
+              <span>Short (≤60s)</span>
+            </span>
+          )}
+
+          {/* Staged for upload indicator */}
+          {job.is_selected_for_upload && (
+            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+              <Star className="w-3 h-3 text-rose-400 fill-rose-400" />
+              <span>Staged</span>
+            </span>
+          )}
+
+          {/* Published YouTube Link */}
+          {(job.youtube_upload_url || job.youtube_upload_status === "completed") && (
+            <a
+              href={job.youtube_upload_url || `https://youtube.com/shorts/${job.youtube_video_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-red-600/20 text-red-300 border border-red-500/40 flex items-center gap-1 hover:bg-red-600/30 transition-colors"
+              title="View on YouTube"
+            >
+              <YoutubeIcon className="w-3 h-3 text-red-500" />
+              <span>Published</span>
+            </a>
+          )}
 
           {/* Preset Pill */}
           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-white/5">

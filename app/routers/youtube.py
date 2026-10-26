@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -12,16 +12,26 @@ from sqlalchemy.orm import Session
 from app.core.responses import BaseResponse
 from app.database import get_db
 from app.models.render_job import RenderJob
+from app.models.video import Video
+from app.schemas.render import RenderJobResponse
 from app.schemas.youtube import (
+    AutoStageRequest,
+    AutoStageResponse,
+    StagedClipsResponse,
     YouTubeAuthCallbackRequest,
     YouTubeAuthStatusResponse,
     YouTubeAuthUrlResponse,
     YouTubeBatchUploadResponse,
     YouTubeCredentialsRequest,
+    YouTubeQuotaResponse,
+    YouTubeScheduleRequest,
     YouTubeUploadRequest,
     YouTubeUploadResult,
 )
+from app.services.auto_stage import AutoStageService, as_utc
+from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
+from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import (
     YouTubeUploaderService,
     batch_upload_clips_celery_task,
@@ -319,6 +329,9 @@ def upload_selected_queue(
             )
         )
 
+    # Quota usage is advisory: uploads are never blocked locally so an
+    # exhausted budget surfaces as YouTube's own quotaExceeded error instead.
+
     if sync:
         results = YouTubeUploaderService.upload_selected_clips(db=db)
         succeeded = sum(1 for r in results if r.status == "completed")
@@ -458,6 +471,7 @@ def upload_clip(
                 format_override=request.format,
                 is_short=request.is_short,
                 category_id=request.category_id,
+                publish_at=request.publish_at,
                 db_session=db,
             )
             return BaseResponse.success_response(response=result)
@@ -487,6 +501,7 @@ def upload_clip(
                 request.format,
                 request.is_short,
                 request.category_id,
+                request.publish_at.isoformat() if request.publish_at else None,
             )
             dispatched_celery = True
             logger.info("Dispatched YouTube upload task for %s to Celery", clip_id)
@@ -505,6 +520,7 @@ def upload_clip(
             format_override=request.format,
             is_short=request.is_short,
             category_id=request.category_id,
+            publish_at=request.publish_at,
         )
 
     format_name = (
@@ -527,6 +543,14 @@ def upload_clip(
     if not resolved_privacy:
         resolved_privacy = "public"
 
+    scheduled_at = request.publish_at
+    if scheduled_at is None and job and job.scheduled_publish_at:
+        scheduled_at = as_utc(job.scheduled_publish_at)
+    if scheduled_at is not None and scheduled_at <= datetime.now(UTC):
+        scheduled_at = None
+    if scheduled_at is not None:
+        resolved_privacy = "private"
+
     initial_result = YouTubeUploadResult(
         clip_id=clip_id,
         title=request.title or clip_id,
@@ -535,5 +559,192 @@ def upload_clip(
         status="uploading",
         privacy=resolved_privacy,
         progress=1.0,
+        scheduled_publish_at=scheduled_at.isoformat() if scheduled_at else None,
     )
     return BaseResponse.success_response(response=initial_result)
+
+
+# -----------------------------------------------------------------------------
+# Phase 8: Quota, Auto-Stage & Native Scheduling Endpoints
+# -----------------------------------------------------------------------------
+
+
+def _get_render_job(db: Session, clip_id: str) -> RenderJob:
+    job = (
+        db.query(RenderJob)
+        .filter((RenderJob.clip_id == clip_id) | (RenderJob.id == clip_id))
+        .first()
+    )
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Rendered clip '{clip_id}' not found.",
+        )
+    return job
+
+
+def _job_response(db: Session, job: RenderJob) -> RenderJobResponse:
+    video = db.query(Video).filter(Video.id == job.video_id).first()
+    return RenderService.build_render_job_response(job=job, video=video)
+
+
+@router.get("/quota", response_model=BaseResponse[YouTubeQuotaResponse])
+def get_youtube_quota(db: Session = Depends(get_db)):
+    """Return today's YouTube Data API unit consumption and upload headroom."""
+    try:
+        summary = YouTubeQuotaService.get_summary(db)
+        return BaseResponse.success_response(response=YouTubeQuotaResponse(**summary))
+    except Exception as e:
+        logger.exception("Failed to read YouTube quota usage: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read quota usage: {e!s}",
+        )
+
+
+@router.get("/staging", response_model=BaseResponse[StagedClipsResponse])
+def list_staged_clips(db: Session = Depends(get_db)):
+    """List auto-staged clips awaiting creator review or scheduled release."""
+    jobs = (
+        db.query(RenderJob)
+        .filter(
+            (RenderJob.auto_staged.is_(True))
+            | (RenderJob.is_selected_for_upload.is_(True)),
+            (RenderJob.youtube_upload_status.is_(None))
+            | (RenderJob.youtube_upload_status != "completed"),
+        )
+        .order_by(RenderJob.created_at.desc())
+        .all()
+    )
+
+    video_ids = {j.video_id for j in jobs if j.video_id}
+    videos = (
+        {v.id: v for v in db.query(Video).filter(Video.id.in_(video_ids)).all()}
+        if video_ids
+        else {}
+    )
+
+    items = [
+        RenderService.build_render_job_response(
+            job=j, video=videos.get(j.video_id)
+        ).model_dump()
+        for j in jobs
+    ]
+    quota = YouTubeQuotaResponse(**YouTubeQuotaService.get_summary(db))
+    return BaseResponse.success_response(
+        response=StagedClipsResponse(
+            items=items,
+            total=len(items),
+            quota=quota,
+            llm_available=LLMMetadataService.is_configured(),
+        )
+    )
+
+
+@router.post(
+    "/staging/{clip_id}/schedule", response_model=BaseResponse[RenderJobResponse]
+)
+def schedule_staged_clip(
+    clip_id: str,
+    request: YouTubeScheduleRequest,
+    db: Session = Depends(get_db),
+):
+    """Set or clear the native YouTube publishAt timestamp for a staged clip."""
+    job = _get_render_job(db, clip_id)
+
+    publish_at = request.publish_at
+    if publish_at is not None:
+        if publish_at.tzinfo is None:
+            publish_at = publish_at.replace(tzinfo=UTC)
+        if publish_at <= datetime.now(UTC) + timedelta(minutes=1):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="publish_at must be at least one minute in the future (UTC).",
+            )
+
+    metadata: dict[str, Any] = {}
+    if job.upload_metadata:
+        try:
+            metadata = json.loads(job.upload_metadata)
+        except Exception:
+            metadata = {}
+
+    job.scheduled_publish_at = publish_at
+    job.is_selected_for_upload = True
+    metadata["is_selected"] = True
+    metadata["scheduled_publish_at"] = (
+        publish_at.isoformat() if publish_at is not None else None
+    )
+    if publish_at is not None:
+        metadata["privacy"] = "private"
+    job.upload_metadata = json.dumps(metadata)
+    db.commit()
+    db.refresh(job)
+
+    return BaseResponse.success_response(response=_job_response(db, job))
+
+
+@router.post(
+    "/staging/{clip_id}/publish-now",
+    response_model=BaseResponse[YouTubeUploadResult],
+)
+def publish_staged_clip_now(
+    clip_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Clear any schedule and publish a staged clip immediately."""
+    job = _get_render_job(db, clip_id)
+    if job.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Clip '{clip_id}' is not rendered yet (status: {job.status}).",
+        )
+
+    metadata: dict[str, Any] = {}
+    if job.upload_metadata:
+        try:
+            metadata = json.loads(job.upload_metadata)
+        except Exception:
+            metadata = {}
+    job.scheduled_publish_at = None
+    metadata["scheduled_publish_at"] = None
+    metadata["privacy"] = "public"
+    job.upload_metadata = json.dumps(metadata)
+    job.is_selected_for_upload = True
+    db.commit()
+
+    return upload_clip(
+        clip_id=clip_id,
+        request=YouTubeUploadRequest(privacy="public"),
+        background_tasks=background_tasks,
+        db=db,
+    )
+
+
+@router.post("/auto-stage", response_model=BaseResponse[AutoStageResponse])
+def auto_stage_video(
+    request: AutoStageRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Render, enrich and schedule the top highlight candidates for a video."""
+    try:
+        result = AutoStageService.stage_top_candidates(
+            db=db,
+            video_id=request.video_id,
+            top_n=request.top_n,
+            min_score=request.min_score,
+            clipping_mode=request.clipping_mode,
+            schedule=request.schedule,
+            background_tasks=background_tasks,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("Auto-stage failed for video %s: %s", request.video_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Auto-stage failed: {e!s}",
+        )
+    return BaseResponse.success_response(response=AutoStageResponse(**result))

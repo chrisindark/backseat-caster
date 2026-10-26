@@ -57,7 +57,8 @@ HTTP  ─>  routers/          thin controllers: parse, delegate, map exceptions 
               │
               ▼
           services/         business logic: VideoService, RenderService, YouTubeUploaderService,
-              │             YtdlpService, RedisService, highlight pipeline modules
+              │             YtdlpService, RedisService, AutoStageService, AutoPipelineService,
+              │             LLMMetadataService, YouTubeQuotaService, highlight pipeline modules
               ▼
           models/           SQLAlchemy ORM: Video, RenderJob, HighlightRun, HighlightCandidate
               │
@@ -113,6 +114,7 @@ All persistent artifacts live under `./data` (gitignored):
 - **Celery + Redis** is preferred in Docker/production; **FastAPI `BackgroundTasks`** is the zero-config fallback for lightweight local development.
 - Background jobs obtain DB sessions via `get_task_db_session()` (respects test overrides) and always close sessions in `finally` blocks.
 - Job state transitions (`pending → processing → completed/failed`) are persisted on the `RenderJob` / `HighlightRun` models so the UI can poll status endpoints.
+- **Maintenance sweep (optional):** Celery beat can run `auto_pipeline_task` every `AUTO_PIPELINE_INTERVAL_MINUTES` to purge render folders for already-uploaded clips and batch-stage the next `AUTO_STAGE_TOP_N` highlights per downloaded video. It runs on demand via `POST /api/v1/renders/auto-pipeline`; cleanup never deletes `RenderJob` rows.
 
 Details and failure modes: [docs/background-tasks.md](docs/background-tasks.md).
 
@@ -120,10 +122,10 @@ Details and failure modes: [docs/background-tasks.md](docs/background-tasks.md).
 
 ## 5. Frontend Architecture (`ui/`)
 
-- **Next.js 16 App Router** pages: `/` (dashboard), `/videos/[id]`, `/studio/[id]` (clip studio), `/renders`, `/youtube`, `/channel`.
+- **Next.js 16 App Router** pages: `/` (dashboard), `/channel`, `/videos/[id]`, `/studio` + `/studio/[id]` (clip studio), `/renders`, `/staging` (auto-staged review queue), `/youtube`.
 - **`src/lib/api.ts`** is the single API client; it unwraps the `BaseResponse` envelope (`response.response`) and centralizes error handling.
 - **`src/types/video.ts`** mirrors the backend Pydantic schemas.
-- Components: `ClipStudioModal`, `HighlightCandidatesDrawer`, `RenderJobRow`, `OBSUploadDropzone`, `UploadQueueModal`, `YouTubePreviewModal`, pagination and stats widgets.
+- Components: `ClipStudioModal`, `HighlightCandidatesDrawer`, `RenderJobRow`, `RenderCard`, `AutoStagePanel`, `UploadQueueModal`, `OBSUploadDropzone`, `VideoCard`, `StatsBar`, `Navbar`, pagination and stats widgets.
 - The UI is a stateless client: all state of record lives in the backend catalog (SQLite) and the filesystem.
 
 ---

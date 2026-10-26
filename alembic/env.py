@@ -7,7 +7,13 @@ from alembic import context
 # Import models and settings
 from app.config import settings
 from app.database import Base
-from app.models import HighlightCandidate, HighlightRun, RenderJob, Video  # noqa: F401
+from app.models import (  # noqa: F401
+    HighlightCandidate,
+    HighlightRun,
+    RenderJob,
+    Video,
+    YouTubeQuotaUsage,
+)
 
 config = context.config
 

@@ -265,5 +265,7 @@ def test_detect_endpoint_with_game_parameter(client, generic_video):
             min_score=0.6,
             game="generic",
             run_id=data["response"]["run_id"],
+            auto_render_top_n=None,
+            clipping_mode=None,
             db_session=pytest.approx(mock_exec.call_args.kwargs.get("db_session")),
         )

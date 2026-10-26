@@ -26,12 +26,14 @@ docker compose up --build
 |---|---|---|
 | `backend` | FastAPI | 3001 |
 | `worker` | Celery worker (same image, shares `./data`) | — |
+| `celery_beat` | Celery beat scheduler for the maintenance sweep (set `AUTO_PIPELINE_INTERVAL_MINUTES`; `0` disables) | — |
 | `redis` | broker + cache | 6379 |
 | `frontend` | Next.js | 3000 |
 
 Notes:
 
 - `./data` is volume-mounted, so DB, downloads, renders, highlights, and OAuth credentials survive rebuilds ([CONFIGURATION.md](../CONFIGURATION.md) paths).
+- Uploaded render folders can be purged on demand or by the beat sweep; see [publishing.md](publishing.md#5-observability--recovery) for what is retained and when source VODs are safe to delete.
 - The `ffmpeg` toolchain must exist inside the backend/worker image — verify with `docker compose exec backend ffmpeg -version` and check that `libx264` is present (`-encoders` list).
 - The first `uv run alembic upgrade head` migration inside the fresh container has to have been baked in (or run once at startup) before routes can touch the DB.
 

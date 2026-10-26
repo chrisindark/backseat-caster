@@ -1,5 +1,6 @@
 """Video service containing database and business logic for video management."""
 
+import json
 import logging
 import math
 import mimetypes
@@ -12,12 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, UploadFile
-from sqlalchemy import or_
+from fastapi import BackgroundTasks, HTTPException, UploadFile
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_task_db_session
+from app.models.highlight_candidate import HighlightCandidate
 from app.models.render_job import RenderJob
 from app.models.video import Video
 from app.rendering.probe import probe_media
@@ -25,11 +27,13 @@ from app.schemas.video import (
     DeleteVideoResponse,
     DownloadTaskResponse,
     SyncChannelResponse,
+    UploadedHighlightSummary,
     VideoBase,
     VideoCreateRequest,
     VideoListResponse,
     VideoResponse,
     VideoStatusResponse,
+    VideoStorageCleanupResponse,
     VideoUpdateRequest,
     YouTubeChannelVideoItem,
     YouTubeChannelVideosResponse,
@@ -100,6 +104,84 @@ class VideoService:
         return candidate_path, media_type, candidate_path.name
 
     @staticmethod
+    def enrich_video_response(
+        db: Session,
+        video: Video,
+        cand_count: int | None = None,
+        render_count: int | None = None,
+        uploaded_jobs: list[RenderJob] | None = None,
+    ) -> VideoResponse:
+        """Enrich a Video with highlight mining and YouTube upload status metrics."""
+        base_resp = VideoResponse.model_validate(video)
+
+        # 1. Candidate count
+        if cand_count is None:
+            cand_count = (
+                db.query(HighlightCandidate)
+                .filter(HighlightCandidate.video_id == video.id)
+                .count()
+            )
+        base_resp.highlight_candidate_count = cand_count
+
+        # 2. Render jobs count
+        if render_count is None:
+            render_count = (
+                db.query(RenderJob).filter(RenderJob.video_id == video.id).count()
+            )
+        base_resp.rendered_clip_count = render_count
+
+        # 3. Uploaded render jobs & summaries
+        if uploaded_jobs is None:
+            uploaded_jobs = (
+                db.query(RenderJob)
+                .filter(
+                    RenderJob.video_id == video.id,
+                    or_(
+                        RenderJob.youtube_upload_status == "completed",
+                        RenderJob.youtube_upload_url.isnot(None),
+                    ),
+                )
+                .all()
+            )
+
+        base_resp.uploaded_clip_count = len(uploaded_jobs)
+        base_resp.has_uploaded_highlights = len(uploaded_jobs) > 0
+
+        uploaded_summaries: list[UploadedHighlightSummary] = []
+        has_renders_on_disk = False
+        renders_root = settings.renders_path
+
+        for job in uploaded_jobs:
+            title = None
+            if job.upload_metadata:
+                try:
+                    meta = json.loads(job.upload_metadata)
+                    title = meta.get("title")
+                except Exception:
+                    pass
+            uploaded_summaries.append(
+                UploadedHighlightSummary(
+                    clip_id=job.clip_id,
+                    youtube_video_id=job.youtube_video_id,
+                    youtube_upload_url=job.youtube_upload_url,
+                    youtube_uploaded_at=job.youtube_uploaded_at,
+                    title=title,
+                    format=job.selected_format,
+                )
+            )
+            if not has_renders_on_disk and (renders_root / job.clip_id).exists():
+                has_renders_on_disk = True
+
+        base_resp.uploaded_highlights = uploaded_summaries
+        base_resp.can_cleanup_vod = bool(
+            video.is_downloaded
+            and (base_resp.has_uploaded_highlights or cand_count > 0)
+        )
+        base_resp.can_cleanup_renders = has_renders_on_disk
+
+        return base_resp
+
+    @staticmethod
     def list_videos(
         db: Session,
         page: int = 1,
@@ -162,6 +244,41 @@ class VideoService:
                 )
             elif status == "failed":
                 query = query.filter(Video.download_status == "failed")
+            elif status in ["highlights_mined", "highlights_processed"]:
+                cand_subquery = db.query(HighlightCandidate.video_id).distinct()
+                query = query.filter(
+                    or_(
+                        Video.highlight_status == "completed",
+                        Video.id.in_(cand_subquery),
+                    )
+                )
+            elif status in ["uploaded", "has_uploaded_highlights"]:
+                uploaded_subquery = (
+                    db.query(RenderJob.video_id)
+                    .filter(
+                        or_(
+                            RenderJob.youtube_upload_status == "completed",
+                            RenderJob.youtube_upload_url.isnot(None),
+                        )
+                    )
+                    .distinct()
+                )
+                query = query.filter(Video.id.in_(uploaded_subquery))
+            elif status in ["cleanup_ready", "can_cleanup"]:
+                uploaded_subquery = (
+                    db.query(RenderJob.video_id)
+                    .filter(
+                        or_(
+                            RenderJob.youtube_upload_status == "completed",
+                            RenderJob.youtube_upload_url.isnot(None),
+                        )
+                    )
+                    .distinct()
+                )
+                query = query.filter(
+                    Video.is_downloaded.is_(True),
+                    Video.id.in_(uploaded_subquery),
+                )
 
         total = query.count()
         total_pages = math.ceil(total / limit) if total > 0 else 1
@@ -183,8 +300,55 @@ class VideoService:
         channel_title = first_item.channel_name if first_item else None
         channel_url = first_item.channel_url if first_item else None
 
+        # Collect video ids for bulk stats enrichment
+        video_ids = [item.id for item in items]
+        cand_counts_map: dict[str, int] = {}
+        render_counts_map: dict[str, int] = {}
+        uploaded_jobs_map: dict[str, list[RenderJob]] = {}
+
+        if video_ids:
+            for vid_id, count in (
+                db.query(HighlightCandidate.video_id, func.count(HighlightCandidate.id))
+                .filter(HighlightCandidate.video_id.in_(video_ids))
+                .group_by(HighlightCandidate.video_id)
+                .all()
+            ):
+                cand_counts_map[vid_id] = count
+
+            for vid_id, count in (
+                db.query(RenderJob.video_id, func.count(RenderJob.id))
+                .filter(RenderJob.video_id.in_(video_ids))
+                .group_by(RenderJob.video_id)
+                .all()
+            ):
+                render_counts_map[vid_id] = count
+
+            for job in (
+                db.query(RenderJob)
+                .filter(
+                    RenderJob.video_id.in_(video_ids),
+                    or_(
+                        RenderJob.youtube_upload_status == "completed",
+                        RenderJob.youtube_upload_url.isnot(None),
+                    ),
+                )
+                .all()
+            ):
+                uploaded_jobs_map.setdefault(job.video_id, []).append(job)
+
+        enriched_items = [
+            VideoService.enrich_video_response(
+                db=db,
+                video=item,
+                cand_count=cand_counts_map.get(item.id, 0),
+                render_count=render_counts_map.get(item.id, 0),
+                uploaded_jobs=uploaded_jobs_map.get(item.id, []),
+            )
+            for item in items
+        ]
+
         return VideoListResponse(
-            items=[VideoResponse.model_validate(item) for item in items],
+            items=enriched_items,
             total=total,
             page=page,
             limit=limit,
@@ -417,7 +581,117 @@ class VideoService:
         video = db.query(Video).filter(Video.id == video_id).first()
         if not video:
             return None
-        return VideoResponse.model_validate(video)
+        return VideoService.enrich_video_response(db=db, video=video)
+
+    @staticmethod
+    def cleanup_video_storage(
+        db: Session,
+        video_id: str,
+        clean_vod: bool = True,
+        clean_uploaded_renders: bool = True,
+        clean_all_renders: bool = False,
+    ) -> VideoStorageCleanupResponse:
+        """Clean up local video VOD files and/or render folders from disk to reclaim storage."""
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            raise HTTPException(status_code=404, detail=f"Video '{video_id}' not found")
+
+        reclaimed_bytes = 0
+        vod_deleted = False
+        renders_deleted_count = 0
+        renders_root = settings.renders_path
+
+        # 1. Clean downloaded source VOD if requested
+        if clean_vod:
+            if video.local_file_path and os.path.exists(video.local_file_path):
+                try:
+                    file_size = os.path.getsize(video.local_file_path)
+                    os.remove(video.local_file_path)
+                    reclaimed_bytes += file_size
+                    vod_deleted = True
+                except OSError as e:
+                    logger.warning("Error deleting VOD file for %s: %s", video_id, e)
+
+            # Also check expected download path if local_file_path was missing/stale
+            default_path = settings.downloads_path / f"{video_id}.mp4"
+            if not vod_deleted and default_path.exists():
+                try:
+                    file_size = default_path.stat().st_size
+                    default_path.unlink()
+                    reclaimed_bytes += file_size
+                    vod_deleted = True
+                except OSError:
+                    pass
+
+            # Remove thumb if present
+            thumb_path = settings.downloads_path / f"{video_id}_thumb.jpg"
+            if thumb_path.exists():
+                try:
+                    reclaimed_bytes += thumb_path.stat().st_size
+                    thumb_path.unlink()
+                except OSError:
+                    pass
+
+            video.is_downloaded = False
+            video.download_status = "not_downloaded"
+            video.download_progress = 0.0
+            video.local_file_path = None
+            video.file_size_bytes = None
+
+        # 2. Clean render directories if requested
+        if clean_all_renders or clean_uploaded_renders:
+            render_jobs = (
+                db.query(RenderJob).filter(RenderJob.video_id == video_id).all()
+            )
+            for job in render_jobs:
+                is_uploaded = (
+                    job.youtube_upload_status == "completed"
+                    or job.youtube_upload_url is not None
+                )
+                if clean_all_renders or (clean_uploaded_renders and is_uploaded):
+                    clip_dir = renders_root / job.clip_id
+                    if clip_dir.exists() and clip_dir.is_dir():
+                        dir_size = sum(
+                            f.stat().st_size for f in clip_dir.rglob("*") if f.is_file()
+                        )
+                        shutil.rmtree(clip_dir, ignore_errors=True)
+                        reclaimed_bytes += dir_size
+                        renders_deleted_count += 1
+                    elif job.output_dir and Path(job.output_dir).exists():
+                        p = Path(job.output_dir)
+                        if p.is_dir():
+                            dir_size = sum(
+                                f.stat().st_size for f in p.rglob("*") if f.is_file()
+                            )
+                            shutil.rmtree(p, ignore_errors=True)
+                            reclaimed_bytes += dir_size
+                            renders_deleted_count += 1
+
+        db.commit()
+
+        # Format reclaimed size
+        mb = reclaimed_bytes / (1024 * 1024)
+        if mb >= 1024:
+            reclaimed_formatted = f"{(mb / 1024):.2f} GB"
+        else:
+            reclaimed_formatted = f"{mb:.1f} MB"
+
+        messages = []
+        if vod_deleted:
+            messages.append("Source VOD removed from disk")
+        if renders_deleted_count > 0:
+            messages.append(f"{renders_deleted_count} render folder(s) cleaned")
+        if not messages:
+            messages.append("No local files needed removal")
+
+        return VideoStorageCleanupResponse(
+            video_id=video_id,
+            reclaimed_bytes=reclaimed_bytes,
+            reclaimed_formatted=reclaimed_formatted,
+            vod_deleted=vod_deleted,
+            renders_deleted_count=renders_deleted_count,
+            message="; ".join(messages),
+        )
 
     @staticmethod
     def create_video(db: Session, request: VideoCreateRequest) -> VideoResponse:

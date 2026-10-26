@@ -87,7 +87,7 @@ uv run celery -A app.worker.celery_app worker --loglevel=info
 
 ### 🐳 Full Stack Docker Setup (All Services)
 
-You can launch the entire stack (FastAPI backend, Celery worker, Redis, Next.js frontend) with a single command:
+You can launch the entire stack (FastAPI backend, Celery worker, Celery beat scheduler, Redis, Next.js frontend) with a single command:
 
 ```bash
 # Build and run all services
@@ -126,10 +126,10 @@ Full details in [API_REFERENCE.md](API_REFERENCE.md).
 | Group | Prefix | Highlights |
 |---|---|---|
 | Health | `/api/v1/health` | Healthcheck and storage status |
-| Videos | `/api/v1/videos` | Catalog search, channel sync, yt-dlp download, OBS upload, streaming |
-| Renders | `/api/v1/renders` | Clip rendering jobs, formats, manifests, bulk delete |
+| Videos | `/api/v1/videos` | Catalog search, channel sync, yt-dlp download, OBS upload, streaming, storage cleanup |
+| Renders | `/api/v1/renders` | Clip rendering jobs, formats, manifests, bulk delete, uploaded-render cleanup, maintenance sweep |
 | Highlights | `/api/v1/videos/{id}/highlights` | Candidate mining runs, detection, thumbnails |
-| YouTube | `/api/v1/youtube` | OAuth 2.0, upload staging queue, resumable Shorts publishing |
+| YouTube | `/api/v1/youtube` | OAuth 2.0, upload staging queue, resumable Shorts publishing, auto-stage + LLM metadata, native `publishAt` scheduling, quota tracking |
 
 ---
 

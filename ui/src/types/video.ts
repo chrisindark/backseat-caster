@@ -14,6 +14,15 @@ export interface ApiResponse<T = unknown> {
 }
 
 
+export interface UploadedHighlightSummary {
+  clip_id: string;
+  youtube_video_id?: string | null;
+  youtube_upload_url?: string | null;
+  youtube_uploaded_at?: string | null;
+  title?: string | null;
+  format?: string | null;
+}
+
 export interface VideoItem {
   id: string;
   title: string;
@@ -33,8 +42,38 @@ export interface VideoItem {
   download_status: DownloadStatus;
   download_progress: number;
   error_message?: string | null;
+
+  // Highlight mining & YouTube upload tracking
+  highlight_status?: string | null;
+  highlight_progress?: number;
+  highlight_stage?: string;
+  highlight_candidate_count?: number;
+  rendered_clip_count?: number;
+  uploaded_clip_count?: number;
+  has_uploaded_highlights?: boolean;
+  uploaded_highlights?: UploadedHighlightSummary[];
+
+  // Disk storage and cleanup indicators
+  can_cleanup_vod?: boolean;
+  can_cleanup_renders?: boolean;
+
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+export interface VideoStorageCleanupOptions {
+  clean_vod?: boolean;
+  clean_uploaded_renders?: boolean;
+  clean_all_renders?: boolean;
+}
+
+export interface VideoStorageCleanupResult {
+  video_id: string;
+  reclaimed_bytes: number;
+  reclaimed_formatted: string;
+  vod_deleted: boolean;
+  renders_deleted_count: number;
+  message: string;
 }
 
 export interface VideoListResponse {
@@ -118,6 +157,9 @@ export interface RenderRequest {
   normalize_audio?: boolean;
   target_lufs?: number;
   sync?: boolean;
+  highlight_candidate_id?: string | null;
+  hero_name?: string | null;
+  clip_context?: string | null;
 }
 
 export interface RenderClipResponse {
@@ -175,6 +217,9 @@ export interface RenderJobResponse {
   youtube_upload_url?: string | null;
   youtube_uploaded_at?: string | null;
   youtube_upload_error?: string | null;
+  auto_staged?: boolean;
+  highlight_candidate_id?: string | null;
+  scheduled_publish_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   completed_at?: string | null;
@@ -195,6 +240,9 @@ export interface UploadSelectionPayload {
   description?: string;
   tags?: string[];
   privacy?: "private" | "unlisted" | "public" | string;
+  hero_name?: string;
+  clip_context?: string;
+  game?: string;
   updated_at?: string;
 }
 
@@ -261,6 +309,8 @@ export interface RenderManifest {
     total_render_seconds: number;
   };
   render_duration_seconds?: number;
+  auto_staged?: boolean;
+  highlight_candidate_id?: string | null;
   youtube_upload?: {
     video_id: string;
     url: string;
@@ -304,6 +354,83 @@ export interface YouTubeBatchUploadResponse {
   total_failed: number;
   results: YouTubeUploadResult[];
   message: string;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 8: Auto-Stage, Native Scheduling & Quota Types
+// -----------------------------------------------------------------------------
+
+export interface YouTubeQuota {
+  quota_day: string;
+  daily_limit_units: number;
+  units_used: number;
+  units_remaining: number;
+  upload_quota_cost: number;
+  max_uploads_per_day: number;
+  uploads_today: number;
+  uploads_remaining: number;
+  can_upload: boolean;
+  resets_at: string;
+}
+
+export interface AutoStagedClip {
+  clip_id: string;
+  candidate_id: string;
+  video_id: string;
+  score: number;
+  title: string;
+  is_selected_for_upload: boolean;
+  scheduled_publish_at?: string | null;
+  metadata_source: "llm" | "fallback" | string;
+}
+
+export interface AutoStageResponse {
+  video_id: string;
+  staged_count: number;
+  clips: AutoStagedClip[];
+  message: string;
+}
+
+export interface StagedClipsResponse {
+  items: RenderJobResponse[];
+  total: number;
+  quota?: YouTubeQuota | null;
+  llm_available?: boolean;
+}
+
+export interface RegenerateMetadataRequest {
+  use_llm?: boolean | null;
+  hero_name?: string | null;
+  clip_context?: string | null;
+  game?: string | null;
+  highlight_candidate_id?: string | null;
+}
+
+export interface RegenerateMetadataResponse {
+  clip_id: string;
+  metadata_source: "llm" | "fallback" | string;
+  used_llm: boolean;
+  llm_available: boolean;
+  upload_selection: {
+    title?: string;
+    description?: string;
+    tags?: string[];
+    privacy?: string;
+    preferred_format?: string;
+    metadata_source?: string;
+    previous_metadata?: PreviousMetadata;
+    [key: string]: unknown;
+  };
+  previous?: PreviousMetadata | null;
+  message: string;
+}
+
+export interface PreviousMetadata {
+  title?: string | null;
+  description?: string | null;
+  tags?: string[];
+  metadata_source?: string;
+  regenerated_at?: string;
 }
 
 // -----------------------------------------------------------------------------

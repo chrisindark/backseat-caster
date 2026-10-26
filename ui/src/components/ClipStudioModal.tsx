@@ -297,16 +297,20 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
     setSelectedModes(["landscape", "vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
   };
 
-  const handleSelectAllShorts = () => {
-    setSelectedModes(["vertical_blur", "third_person", "direct_crop", "cinematic", "custom"]);
-  };
-
-  const handleSelectDefaultSingle = () => {
+  const handlePresetYouTubeShort = () => {
     setSelectedModes(["third_person"]);
   };
 
-  const handleSelectDefaultTriple = () => {
-    setSelectedModes(["landscape", "vertical_blur", "third_person"]);
+  const handlePresetVerticalCrop = () => {
+    setSelectedModes(["direct_crop", "third_person"]);
+  };
+
+  const handlePresetVerticalBlur = () => {
+    setSelectedModes(["vertical_blur"]);
+  };
+
+  const handlePresetLandscape = () => {
+    setSelectedModes(["landscape"]);
   };
 
   const handleQuickRenderHighlightFromModal = (cand: HighlightCandidateItem) => {
@@ -795,6 +799,31 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                         <span className="text-xs text-slate-400 font-mono">sec</span>
                       </div>
                     )}
+
+                    {/* YouTube Shorts duration hint / advisory */}
+                    {activeDuration > 60 ? (
+                      <div className="mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-2 text-xs text-amber-200">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-amber-300">
+                            Duration is {activeDuration}s (&gt; 60s) — YouTube Shorts Note
+                          </p>
+                          <p className="text-[11px] text-amber-200/80 leading-snug">
+                            YouTube Shorts requires clips ≤ 60s. Longer videos will render normally and publish as standard YouTube videos.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 p-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-300">
+                        <span className="flex items-center gap-1.5 font-medium text-[11px]">
+                          <Sparkles className="w-3 h-3 text-emerald-400" />
+                          <span>{activeDuration}s — Sized for YouTube Shorts (≤ 60s)</span>
+                        </span>
+                        <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200">
+                          Shorts Ready
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -972,24 +1001,35 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                 <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                   <button
                     type="button"
-                    onClick={handleSelectDefaultSingle}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                    onClick={handlePresetYouTubeShort}
+                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 hover:text-white border border-rose-500/40 transition-all cursor-pointer"
+                    title="YouTube Short preset (9:16 vertical)"
                   >
-                    Third-Person (1)
+                    Shorts (9:16)
                   </button>
                   <button
                     type="button"
-                    onClick={handleSelectDefaultTriple}
+                    onClick={handlePresetVerticalCrop}
                     className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                    title="Direct & Wide Center Crop"
                   >
-                    Triple (3)
+                    Vertical Crop
                   </button>
                   <button
                     type="button"
-                    onClick={handleSelectAllShorts}
+                    onClick={handlePresetVerticalBlur}
                     className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                    title="Full Blur Padding (100% gameplay visible)"
                   >
-                    All Shorts (5)
+                    Vertical Blur
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePresetLandscape}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-blue-500/15 hover:bg-blue-500/30 text-blue-300 hover:text-white border border-blue-500/30 transition-all cursor-pointer"
+                    title="16:9 Landscape Master"
+                  >
+                    Landscape (16:9)
                   </button>
                   <button
                     type="button"

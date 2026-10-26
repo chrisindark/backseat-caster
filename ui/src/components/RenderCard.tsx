@@ -2,6 +2,7 @@
 
 import { getStreamUrl } from "@/lib/api";
 import { RenderManifest } from "@/types/video";
+import { YoutubeIcon } from "./icons";
 import {
   Check,
   Clock,
@@ -156,6 +157,9 @@ export const RenderCard: React.FC<RenderCardProps> = ({
     }
   };
 
+  const isShortCandidate = durationSec <= 60.5 && verticalModes.length > 0;
+  const isPublished = Boolean(render.youtube_upload);
+
   return (
     <div
       className={`group relative rounded-2xl transition-all duration-300 overflow-hidden flex flex-col ${
@@ -163,6 +167,8 @@ export const RenderCard: React.FC<RenderCardProps> = ({
           ? "bg-slate-900/95 border-2 border-rose-500 shadow-xl shadow-rose-950/30 ring-2 ring-rose-500/50"
           : isSelected
           ? "bg-slate-900/95 border-2 border-rose-500/60 shadow-xl shadow-rose-950/20"
+          : isPublished
+          ? "bg-slate-900/90 border border-red-500/30 shadow-lg shadow-red-950/20"
           : "bg-slate-900/80 border border-white/10 hover:border-white/20 hover:shadow-xl hover:shadow-black/40"
       }`}
     >
@@ -188,10 +194,32 @@ export const RenderCard: React.FC<RenderCardProps> = ({
               </button>
             )}
             <div className="space-y-1 min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/25">
                   {render.request?.crop_preset || "Highlight"}
                 </span>
+
+                {isShortCandidate && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                    <Smartphone className="w-3 h-3 text-purple-400" />
+                    <span>Short (≤60s)</span>
+                  </span>
+                )}
+
+                {isPublished && (
+                  <a
+                    href={render.youtube_upload?.url || `https://youtube.com/shorts/${render.youtube_upload?.video_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-red-600/20 text-red-300 border border-red-500/40 flex items-center gap-1 hover:bg-red-600/30 transition-colors cursor-pointer"
+                    title="View published on YouTube"
+                  >
+                    <YoutubeIcon className="w-3 h-3 text-red-500" />
+                    <span>Published</span>
+                  </a>
+                )}
+
                 <span className="text-xs text-slate-400 font-medium">
                   {render.channel_name || "VOD"}
                 </span>

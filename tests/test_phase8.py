@@ -21,7 +21,7 @@ from app.schemas.youtube import YouTubeAuthStatusResponse
 from app.services.auto_stage import AutoStageService
 from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
-from app.services.youtube_quota import QuotaExceededError, YouTubeQuotaService
+from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import YouTubeUploaderService
 
 TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -175,7 +175,7 @@ def test_llm_metadata_falls_back_when_gemini_fails(db_session, monkeypatch):
 # -----------------------------------------------------------------------------
 
 
-def test_quota_reserves_six_uploads_then_blocks(db_session):
+def test_quota_reserves_six_uploads_then_allows_overflow(db_session):
     summary = YouTubeQuotaService.get_summary(db_session)
     assert summary["daily_limit_units"] == 10_000
     assert summary["uploads_remaining"] == 6
@@ -185,16 +185,19 @@ def test_quota_reserves_six_uploads_then_blocks(db_session):
         YouTubeQuotaService.reserve_upload(db_session)
         expected = 5 - index
         assert (
-            YouTubeQuotaService.get_summary(db_session)["uploads_remaining"]
-            == expected
+            YouTubeQuotaService.get_summary(db_session)["uploads_remaining"] == expected
         )
 
     summary = YouTubeQuotaService.get_summary(db_session)
     assert summary["units_used"] == 9_600
     assert summary["can_upload"] is False
 
-    with pytest.raises(QuotaExceededError):
-        YouTubeQuotaService.reserve_upload(db_session)
+    # Over-budget uploads are advisory: recording keeps counting beyond the
+    # daily budget so the quota bar stays accurate. YouTube enforces the limit.
+    summary = YouTubeQuotaService.reserve_upload(db_session)
+    assert summary["can_upload"] is False
+    assert summary["uploads_remaining"] == 0
+    assert summary["uploads_today"] == 7
 
 
 def test_quota_reset_day_rolls_over(db_session):
@@ -562,33 +565,29 @@ def test_upload_uses_publish_at_and_private_privacy(
     assert usage.units_used == 1_600
 
 
-def test_upload_blocked_when_quota_exhausted(client, db_session, monkeypatch):
-    video = _video(db_session, "vid_quota_guard")
-    job = RenderJob(
-        id="job_quota_guard",
-        clip_id="whatever_clip",
-        video_id=video.id,
-        status="completed",
-        progress=100.0,
-        start_seconds=0.0,
-        duration_seconds=10.0,
-    )
-    db_session.add(job)
-    db_session.commit()
-
-    monkeypatch.setattr(
-        YouTubeUploaderService,
-        "get_auth_status",
-        lambda: YouTubeAuthStatusResponse(is_authenticated=True),
+def test_upload_allowed_over_quota_with_warning(client, db_session, tmp_path, monkeypatch):
+    """An exhausted daily budget dispatches the upload instead of returning 429."""
+    clip_id = "clip_quota_warn"
+    job, mock_videos = _prepare_scheduled_upload(
+        db_session, tmp_path, monkeypatch, clip_id
     )
     for _ in range(6):
         YouTubeQuotaService.reserve_upload(db_session)
 
     res = client.post(
-        f"{settings.API_PREFIX}/youtube/upload/whatever_clip", json={}
+        f"{settings.API_PREFIX}/youtube/upload/{clip_id}", json={"sync": True}
     )
-    assert res.status_code == 429
-    assert "quota" in res.json()["error_message"].lower()
+    assert res.status_code == 200
+    assert mock_videos.insert.called
+
+    usage = (
+        db_session.query(YouTubeQuotaUsage)
+        .filter_by(day=YouTubeQuotaService.quota_day())
+        .one()
+    )
+    assert usage.units_used == 11_200
+    assert usage.uploads_count == 7
+    assert res.json()["response"]["status"] == "completed"
 
 
 # -----------------------------------------------------------------------------
@@ -596,7 +595,9 @@ def test_upload_blocked_when_quota_exhausted(client, db_session, monkeypatch):
 # -----------------------------------------------------------------------------
 
 
-def test_detect_request_passes_auto_render_top_n(client, db_session, monkeypatch, tmp_path):
+def test_detect_request_passes_auto_render_top_n(
+    client, db_session, monkeypatch, tmp_path
+):
     source = tmp_path / "src.mp4"
     source.write_bytes(b"dummy")
     video = Video(
@@ -628,3 +629,432 @@ def test_detect_request_passes_auto_render_top_n(client, db_session, monkeypatch
     assert res.status_code == 200
     assert captured["auto_render_top_n"] == 3
     assert captured["clipping_mode"] == "direct_crop"
+
+
+# -----------------------------------------------------------------------------
+# Regenerate metadata (AI vs deterministic copy comparison)
+# -----------------------------------------------------------------------------
+
+
+def _staged_clip(db, video, clip_id, job_id, title="Original staged title"):
+    scheduled = datetime.now(UTC) + timedelta(hours=6)
+    job = RenderJob(
+        id=job_id,
+        clip_id=clip_id,
+        video_id=video.id,
+        status="completed",
+        progress=100.0,
+        start_seconds=120.0,
+        duration_seconds=30.0,
+        selected_format="vertical_blur",
+        is_selected_for_upload=True,
+        auto_staged=True,
+        scheduled_publish_at=scheduled,
+        upload_metadata=json.dumps(
+            {
+                "is_selected": True,
+                "preferred_format": "vertical_blur",
+                "title": title,
+                "description": "Original description #Shorts",
+                "tags": ["Gaming", "Shorts"],
+                "privacy": "private",
+                "metadata_source": "llm",
+            }
+        ),
+    )
+    db.add(job)
+    db.commit()
+    return job
+
+
+def test_regenerate_metadata_deterministic(client, db_session):
+    video = _video(db_session, "vid_regen")
+    job = _staged_clip(db_session, video, "clip_regen", "job_regen")
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_regen/regenerate-metadata",
+        json={"use_llm": False},
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+
+    assert body["metadata_source"] == "fallback"
+    assert body["used_llm"] is False
+    # Fresh deterministic copy replaces the staged copy...
+    assert body["upload_selection"]["title"] != "Original staged title"
+    assert body["upload_selection"]["title"]
+    assert body["upload_selection"]["tags"]
+    # ...and the replaced copy is returned for side-by-side comparison.
+    assert body["previous"]["title"] == "Original staged title"
+
+    db_session.refresh(job)
+    meta = json.loads(job.upload_metadata)
+    assert meta["metadata_source"] == "fallback"
+    assert meta["privacy"] == "private"
+    assert meta["scheduled_publish_at"] is not None
+    assert meta["previous_metadata"]["title"] == "Original staged title"
+    # Selection, schedule and render are untouched.
+    assert job.is_selected_for_upload is True
+    assert job.scheduled_publish_at is not None
+    assert job.status == "completed"
+
+
+def test_regenerate_metadata_with_llm(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_METADATA_ENABLED", False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setattr(
+        LLMMetadataService,
+        "_call_gemini",
+        staticmethod(
+            lambda prompt: {
+                "title": "AI generated Short",
+                "description": "AI hook line\n\n#Shorts #MarvelRivals",
+                "tags": ["marvelrivals", "shorts"],
+            }
+        ),
+    )
+
+    video = _video(db_session, "vid_regen_ai")
+    job = _staged_clip(db_session, video, "clip_regen_ai", "job_regen_ai")
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_regen_ai/regenerate-metadata",
+        json={"use_llm": True},
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+
+    assert body["metadata_source"] == "llm"
+    assert body["used_llm"] is True
+    assert body["llm_available"] is True
+    assert body["upload_selection"]["title"] == "AI generated Short"
+    assert body["previous"]["title"] == "Original staged title"
+
+    db_session.refresh(job)
+    meta = json.loads(job.upload_metadata)
+    assert meta["title"] == "AI generated Short"
+    assert meta["metadata_source"] == "llm"
+
+
+def test_regenerate_metadata_llm_without_key_falls_back(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(settings, "LLM_METADATA_ENABLED", True)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    video = _video(db_session, "vid_regen_nokey")
+    _staged_clip(db_session, video, "clip_regen_nokey", "job_regen_nokey")
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_regen_nokey/regenerate-metadata",
+        json={"use_llm": True},
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+    assert body["metadata_source"] == "fallback"
+    assert body["used_llm"] is False
+    assert body["llm_available"] is False
+
+
+def test_regenerate_metadata_defaults_to_server_config(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_METADATA_ENABLED", False)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    video = _video(db_session, "vid_regen_cfg")
+    _staged_clip(db_session, video, "clip_regen_cfg", "job_regen_cfg")
+
+    # No body: follows LLM_METADATA_ENABLED (disabled here) -> deterministic.
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_regen_cfg/regenerate-metadata", json={}
+    )
+    assert res.status_code == 200
+    assert res.json()["response"]["metadata_source"] == "fallback"
+    assert res.json()["response"]["llm_available"] is True
+
+
+def test_regenerate_metadata_unknown_clip(client):
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/no_such_clip/regenerate-metadata",
+        json={"use_llm": False},
+    )
+    assert res.status_code == 404
+
+
+def test_staging_response_reports_llm_availability(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    _video(db_session, "vid_staging_llm")
+
+    res = client.get(f"{settings.API_PREFIX}/youtube/staging")
+    assert res.status_code == 200
+    assert res.json()["response"]["llm_available"] is True
+
+
+def test_llm_metadata_parses_markdown_fences_and_parsed_object(monkeypatch):
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+
+    class MockModel:
+        def model_dump(self):
+            return {
+                "title": "Parsed Title",
+                "description": "Parsed Desc",
+                "tags": ["hero", "game"],
+            }
+
+    class MockResponseParsed:
+        parsed = MockModel()
+        text = "ignored text"
+
+    # 1. Test SDK parsed attribute takes priority
+    monkeypatch.setattr(
+        "google.genai.Client",
+        lambda api_key: type(
+            "C",
+            (),
+            {
+                "models": type(
+                    "M",
+                    (),
+                    {"generate_content": lambda *args, **kwargs: MockResponseParsed()},
+                )()
+            },
+        )(),
+    )
+    result = LLMMetadataService._call_gemini("test prompt")
+    assert result is not None
+    assert result["title"] == "Parsed Title"
+
+    # 2. Test markdown-fenced text parsing
+    class MockResponseFenced:
+        parsed = None
+        text = '```json\n{"title": "Fenced Title", "description": "Fenced Desc", "tags": ["fenced"]}\n```'
+
+    monkeypatch.setattr(
+        "google.genai.Client",
+        lambda api_key: type(
+            "C",
+            (),
+            {
+                "models": type(
+                    "M",
+                    (),
+                    {"generate_content": lambda *args, **kwargs: MockResponseFenced()},
+                )()
+            },
+        )(),
+    )
+    result = LLMMetadataService._call_gemini("test prompt")
+    assert result is not None
+    assert result["title"] == "Fenced Title"
+
+
+def test_regenerate_metadata_with_explicit_hero_and_context(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_METADATA_ENABLED", True)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    captured_prompt = {}
+
+    def mock_call_gemini(prompt: str):
+        captured_prompt["prompt"] = prompt
+        return {
+            "title": "Magneto 5K Defense",
+            "description": "Magneto wipes team on payload.\n\n#Shorts #Magneto",
+            "tags": ["magneto", "shorts"],
+        }
+
+    monkeypatch.setattr(
+        LLMMetadataService, "_call_gemini", staticmethod(mock_call_gemini)
+    )
+
+    video = _video(db_session, "vid_hero_test")
+    _staged_clip(db_session, video, "clip_hero_test", "job_hero_test")
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_hero_test/regenerate-metadata",
+        json={
+            "use_llm": True,
+            "hero_name": "Magneto",
+            "clip_context": "5k defense holding point B",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+    assert body["used_llm"] is True
+    assert body["upload_selection"]["title"] == "Magneto 5K Defense"
+    assert body["upload_selection"]["hero_name"] == "Magneto"
+    assert body["upload_selection"]["clip_context"] == "5k defense holding point B"
+
+    # Verify that the LLM prompt received hero and context
+    assert "Hero: Magneto" in captured_prompt["prompt"]
+    assert "Extra context: 5k defense holding point B" in captured_prompt["prompt"]
+
+
+def test_regenerate_metadata_auto_matches_candidate_by_timestamp(
+    client, db_session, monkeypatch
+):
+    from app.models.highlight_candidate import HighlightCandidate
+
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_METADATA_ENABLED", True)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    captured_prompt = {}
+
+    def mock_call_gemini(prompt: str):
+        captured_prompt["prompt"] = prompt
+        return {
+            "title": "Penta Kill Streak",
+            "description": "Insane 5 kill streak!\n\n#Shorts #Gaming",
+            "tags": ["penta", "shorts"],
+        }
+
+    monkeypatch.setattr(
+        LLMMetadataService, "_call_gemini", staticmethod(mock_call_gemini)
+    )
+
+    video = _video(db_session, "vid_auto_cand")
+    # Candidate at 100.0s - 130.0s with 4 kills
+    cand = HighlightCandidate(
+        id="cand_auto_123",
+        video_id=video.id,
+        start_seconds=100.0,
+        end_seconds=130.0,
+        duration_seconds=30.0,
+        score=0.95,
+        event_type="kill_streak",
+        details_json=json.dumps(
+            {
+                "kill_count": 4,
+                "streak_count": 5,
+                "multi_kill_chain": "Quad KO",
+                "trigger_events": [{"label": "QUAD KO", "time": 115.0}],
+            }
+        ),
+    )
+    db_session.add(cand)
+    db_session.commit()
+
+    # Staged clip at 102.0s with duration 25.0s, highlight_candidate_id=None
+    job = _staged_clip(db_session, video, "clip_auto_cand", "job_auto_cand")
+    job.start_seconds = 102.0
+    job.duration_seconds = 25.0
+    job.highlight_candidate_id = None
+    db_session.commit()
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_auto_cand/regenerate-metadata",
+        json={"use_llm": True},
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+    assert body["upload_selection"]["highlight_candidate_id"] == "cand_auto_123"
+
+    # Prompt now has the real mined candidate kills, streak, and trigger events!
+    assert "Kills in clip: 4" in captured_prompt["prompt"]
+    assert "Player streak: 5" in captured_prompt["prompt"]
+    assert "Trigger events: QUAD KO" in captured_prompt["prompt"]
+
+
+def test_next_publish_slot_daily_slots_ist(db_session, monkeypatch):
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(settings, "AUTO_STAGE_TIMEZONE", "Asia/Kolkata")
+    monkeypatch.setattr(
+        settings,
+        "AUTO_STAGE_DAILY_SLOTS",
+        ["08:00", "12:30", "16:00", "18:30", "20:30", "23:00"],
+    )
+
+    ist = ZoneInfo("Asia/Kolkata")
+    # Reference: 2026-10-25 07:00:00 IST (01:30:00 UTC)
+    ref_ist = datetime(2026, 10, 25, 7, 0, 0, tzinfo=ist)
+    ref_utc = ref_ist.astimezone(UTC)
+
+    # 1. First slot should be today at 08:00 IST
+    slot1 = AutoStageService.next_publish_slot(db_session, now=ref_utc)
+    slot1_ist = slot1.astimezone(ist)
+    assert slot1_ist.hour == 8
+    assert slot1_ist.minute == 0
+    assert slot1_ist.day == 25
+
+    # 2. Next slot after slot1 should be 12:30 IST
+    slot2 = AutoStageService.next_publish_slot(db_session, now=ref_utc, after=slot1)
+    slot2_ist = slot2.astimezone(ist)
+    assert slot2_ist.hour == 12
+    assert slot2_ist.minute == 30
+    assert slot2_ist.day == 25
+
+    # 3. Next slots: 16:00, 18:30, 20:30, 23:00
+    slot3 = AutoStageService.next_publish_slot(db_session, now=ref_utc, after=slot2)
+    assert slot3.astimezone(ist).hour == 16
+
+    slot4 = AutoStageService.next_publish_slot(db_session, now=ref_utc, after=slot3)
+    assert slot4.astimezone(ist).hour == 18
+    assert slot4.astimezone(ist).minute == 30
+
+    slot5 = AutoStageService.next_publish_slot(db_session, now=ref_utc, after=slot4)
+    assert slot5.astimezone(ist).hour == 20
+    assert slot5.astimezone(ist).minute == 30
+
+    slot6 = AutoStageService.next_publish_slot(db_session, now=ref_utc, after=slot5)
+    assert slot6.astimezone(ist).hour == 23
+    assert slot6.astimezone(ist).minute == 0
+    assert slot6.astimezone(ist).day == 25
+
+    # 4. Rolling over to next day after 23:00 should pick tomorrow at 08:00 IST
+    slot7 = AutoStageService.next_publish_slot(db_session, now=ref_utc, after=slot6)
+    slot7_ist = slot7.astimezone(ist)
+    assert slot7_ist.hour == 8
+    assert slot7_ist.minute == 0
+    assert slot7_ist.day == 26
+
+
+def test_next_publish_slot_skips_booked_slots(db_session, monkeypatch):
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(settings, "AUTO_STAGE_TIMEZONE", "Asia/Kolkata")
+    monkeypatch.setattr(
+        settings,
+        "AUTO_STAGE_DAILY_SLOTS",
+        ["08:00", "12:30", "16:00"],
+    )
+
+    ist = ZoneInfo("Asia/Kolkata")
+    ref_utc = datetime(2026, 10, 25, 7, 0, 0, tzinfo=ist).astimezone(UTC)
+    booked_0800 = datetime(2026, 10, 25, 8, 0, 0, tzinfo=ist).astimezone(UTC)
+
+    # Book 08:00 slot in database
+    job = RenderJob(
+        id="job_booked_slot",
+        clip_id="clip_booked_slot",
+        video_id="vid_test",
+        status="completed",
+        start_seconds=10.0,
+        duration_seconds=15.0,
+        scheduled_publish_at=booked_0800,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # Next slot should skip 08:00 and select 12:30
+    slot = AutoStageService.next_publish_slot(db_session, now=ref_utc)
+    slot_ist = slot.astimezone(ist)
+    assert slot_ist.hour == 12
+    assert slot_ist.minute == 30
+    assert slot_ist.day == 25
+
+
+def test_llm_metadata_prompt_requests_emojis():
+    from app.services.llm_metadata import _METADATA_PROMPT
+
+    assert (
+        "gaming action emojis" in _METADATA_PROMPT
+        or "gaming emojis" in _METADATA_PROMPT
+    )
+    assert "No emojis" not in _METADATA_PROMPT

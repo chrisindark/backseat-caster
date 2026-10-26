@@ -1,8 +1,9 @@
 """Pydantic schemas for video operations."""
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class VideoBase(BaseModel):
@@ -19,6 +20,25 @@ class VideoBase(BaseModel):
     published_at: str | None = None
     webpage_url: str
 
+    @field_validator("duration", mode="before")
+    @classmethod
+    def set_duration(cls, v: Any) -> int:
+        return 0 if v is None else int(v)
+
+    @field_validator("view_count", mode="before")
+    @classmethod
+    def set_view_count(cls, v: Any) -> int:
+        return 0 if v is None else int(v)
+
+
+class UploadedHighlightSummary(BaseModel):
+    clip_id: str
+    youtube_video_id: str | None = None
+    youtube_upload_url: str | None = None
+    youtube_uploaded_at: datetime | None = None
+    title: str | None = None
+    format: str | None = None
+
 
 class VideoResponse(VideoBase):
     model_config = ConfigDict(from_attributes=True)
@@ -29,8 +49,55 @@ class VideoResponse(VideoBase):
     download_status: str = "not_downloaded"
     download_progress: float = 0.0
     error_message: str | None = None
+
+    # Highlight detection & mining lifecycle
+    highlight_status: str | None = "idle"
+    highlight_progress: float = 0.0
+    highlight_stage: str = ""
+    highlight_candidate_count: int = 0
+
+    # Rendering & YouTube upload tracking
+    rendered_clip_count: int = 0
+    uploaded_clip_count: int = 0
+    has_uploaded_highlights: bool = False
+    uploaded_highlights: list[UploadedHighlightSummary] = []
+
+    # Disk storage and cleanup indicators
+    can_cleanup_vod: bool = False
+    can_cleanup_renders: bool = False
+
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @field_validator("highlight_progress", mode="before")
+    @classmethod
+    def set_highlight_progress(cls, v: Any) -> float:
+        return 0.0 if v is None else float(v)
+
+    @field_validator("highlight_stage", mode="before")
+    @classmethod
+    def set_highlight_stage(cls, v: Any) -> str:
+        return "" if v is None else str(v)
+
+    @field_validator("highlight_status", mode="before")
+    @classmethod
+    def set_highlight_status(cls, v: Any) -> str:
+        return "idle" if v is None else str(v)
+
+    @field_validator("download_status", mode="before")
+    @classmethod
+    def set_download_status(cls, v: Any) -> str:
+        return "not_downloaded" if v is None else str(v)
+
+    @field_validator("download_progress", mode="before")
+    @classmethod
+    def set_download_progress(cls, v: Any) -> float:
+        return 0.0 if v is None else float(v)
+
+    @field_validator("highlight_candidate_count", mode="before")
+    @classmethod
+    def set_highlight_candidate_count(cls, v: Any) -> int:
+        return 0 if v is None else int(v)
 
 
 class VideoListRequest(BaseModel):
@@ -51,9 +118,33 @@ class VideoListRequest(BaseModel):
     status_filter: str | None = Field(
         None,
         alias="status",
-        description="Filter: all, downloaded, not_downloaded, downloading",
+        description="Filter: all, downloaded, not_downloaded, downloading, highlights_mined, uploaded, cleanup_ready",
     )
     search: str | None = Field(None, description="Search term in title or channel name")
+
+
+class VideoStorageCleanupRequest(BaseModel):
+    clean_vod: bool = Field(
+        True,
+        description="Whether to delete the raw downloaded source VOD file to reclaim disk space",
+    )
+    clean_uploaded_renders: bool = Field(
+        True,
+        description="Whether to delete local render directories for clips already uploaded to YouTube",
+    )
+    clean_all_renders: bool = Field(
+        False,
+        description="Whether to delete all local render directories for this video regardless of upload status",
+    )
+
+
+class VideoStorageCleanupResponse(BaseModel):
+    video_id: str
+    reclaimed_bytes: int = 0
+    reclaimed_formatted: str = "0 MB"
+    vod_deleted: bool = False
+    renders_deleted_count: int = 0
+    message: str
 
 
 class VideoListResponse(BaseModel):

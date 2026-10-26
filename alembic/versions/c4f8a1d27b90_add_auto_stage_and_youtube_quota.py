@@ -22,7 +22,9 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column(
         "render_jobs",
-        sa.Column("auto_staged", sa.Boolean(), nullable=True, server_default=sa.false()),
+        sa.Column(
+            "auto_staged", sa.Boolean(), nullable=True, server_default=sa.false()
+        ),
     )
     op.add_column(
         "render_jobs",

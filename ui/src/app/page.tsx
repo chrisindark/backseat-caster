@@ -52,6 +52,9 @@ function HomeContent() {
   const [downloadedTotal, setDownloadedTotal] = useState<number>(0);
   const [cataloguedTotal, setCataloguedTotal] = useState<number>(0);
   const [downloadingTotal, setDownloadingTotal] = useState<number>(0);
+  const [highlightsMinedTotal, setHighlightsMinedTotal] = useState<number>(0);
+  const [uploadedTotal, setUploadedTotal] = useState<number>(0);
+  const [cleanupReadyTotal, setCleanupReadyTotal] = useState<number>(0);
 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -65,14 +68,20 @@ function HomeContent() {
 
   const refreshCounts = useCallback(async () => {
     try {
-      const [dlData, allData, ingData] = await Promise.all([
+      const [dlData, allData, ingData, hlData, upData, clData] = await Promise.all([
         fetchVideos({ status: "downloaded", limit: 1 }),
         fetchVideos({ status: "all", limit: 1 }),
         fetchVideos({ status: "downloading", limit: 1 }),
+        fetchVideos({ status: "highlights_mined", limit: 1 }),
+        fetchVideos({ status: "uploaded", limit: 1 }),
+        fetchVideos({ status: "cleanup_ready", limit: 1 }),
       ]);
       setDownloadedTotal(dlData.total);
       setCataloguedTotal(allData.total);
       setDownloadingTotal(ingData.total);
+      setHighlightsMinedTotal(hlData.total);
+      setUploadedTotal(upData.total);
+      setCleanupReadyTotal(clData.total);
     } catch {
       // ignore
     }
@@ -111,6 +120,12 @@ function HomeContent() {
           setDownloadedTotal(data.total);
         } else if (currentFilter === "downloading" && !currentSearch) {
           setDownloadingTotal(data.total);
+        } else if (currentFilter === "highlights_mined" && !currentSearch) {
+          setHighlightsMinedTotal(data.total);
+        } else if (currentFilter === "uploaded" && !currentSearch) {
+          setUploadedTotal(data.total);
+        } else if (currentFilter === "cleanup_ready" && !currentSearch) {
+          setCleanupReadyTotal(data.total);
         }
 
         // Check if any video is actively downloading
@@ -390,6 +405,28 @@ function HomeContent() {
           </div>
         )}
 
+        {/* Load error banner */}
+        {loadError && (
+          <div className="mb-6 p-4 rounded-xl bg-red-950/40 border border-red-500/30 text-red-200 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-sm">
+              <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+              <div>
+                <span className="font-bold">Error loading videos:</span> {loadError}
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setLoadError(null);
+                loadVideos();
+                refreshCounts();
+              }}
+              className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold rounded-lg border border-red-500/40 cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* OBS & Local Video Drag-and-Drop Ingestion */}
         <OBSUploadDropzone onUploadSuccess={handleUploadSuccess} />
 
@@ -399,6 +436,9 @@ function HomeContent() {
           totalVideos={cataloguedTotal || total}
           downloadedCount={downloadedTotal}
           downloadingCount={Math.max(downloadingTotal, downloadingIds.size)}
+          highlightsMinedCount={highlightsMinedTotal}
+          uploadedCount={uploadedTotal}
+          cleanupReadyCount={cleanupReadyTotal}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
         />
@@ -413,6 +453,12 @@ function HomeContent() {
                   ? "Downloaded Local VODs"
                   : activeFilter === "downloading"
                   ? "Currently Downloading Videos"
+                  : activeFilter === "highlights_mined"
+                  ? "Videos with Mined Highlights"
+                  : activeFilter === "uploaded"
+                  ? "Videos with Published YouTube Shorts"
+                  : activeFilter === "cleanup_ready"
+                  ? "Videos Ready for Disk Cleanup"
                   : activeFilter === "not_downloaded"
                   ? "Videos Ready to Download"
                   : "Channel Gameplay Videos"}

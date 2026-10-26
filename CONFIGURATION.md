@@ -6,7 +6,7 @@ Configuration lives in [`app/config.py`](app/config.py) as a Pydantic `Settings`
 
 ## 1. Environment Files
 
-Settings are loaded from the first match in: `.env`, `app/.env`, `../.env` (cwd-relative). Unknown env keys are ignored (`extra="ignore"`). The backend has no committed `.env.example` (the frontend does, in `ui/.env.example`); copy the table below into a local root `.env` as needed.
+Settings are loaded from the first match in: `.env`, `app/.env`, `../.env` (cwd-relative). Unknown env keys are ignored (`extra="ignore"`). A commented template lives in [`app/.env.example`](app/.env.example); copy the values you need into a local root `.env`.
 
 ---
 
@@ -91,6 +91,8 @@ OAuth details: [docs/youtube-authentication.md](docs/youtube-authentication.md),
 | `AUTO_STAGE_CLIPPING_MODE` | `third_person` | Vertical render mode for staged clips (`third_person`, `direct_crop`, `cinematic`, `vertical_blur`) |
 | `AUTO_STAGE_FIRST_SLOT_HOURS` | `1` | Hours from now before the first native `publishAt` slot |
 | `AUTO_STAGE_INTERVAL_HOURS` | `24` | Spacing between consecutive scheduled releases (min 1) |
+| `AUTO_STAGE_TIMEZONE` | `Asia/Kolkata` | Timezone used to interpret `AUTO_STAGE_DAILY_SLOTS` |
+| `AUTO_STAGE_DAILY_SLOTS` | `["08:00", "12:30", "16:00", "18:30", "20:30", "23:00"]` | Daily local release times; when set, schedules roll across days instead of using the interval |
 | `GEMINI_API_KEY` | `None` | Gemini key for Shorts copy; falls back to `GOOGLE_API_KEY`, then to deterministic metadata |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Model used for metadata generation |
 | `LLM_METADATA_ENABLED` | `True` | Master switch for LLM copy (deterministic generator always available) |
@@ -99,6 +101,16 @@ OAuth details: [docs/youtube-authentication.md](docs/youtube-authentication.md),
 | `YOUTUBE_QUOTA_TIMEZONE` | `America/Los_Angeles` | Timezone whose midnight resets the quota day |
 
 Staging behaviour: clips are rendered as private vertical Shorts, metadata is generated with Gemini (or the deterministic generator), and staggered `publishAt` slots are assigned so YouTube releases them without the local machine staying online. See [ROADMAP.md](ROADMAP.md) §Phase 8.
+
+### 6.2 Maintenance Pipeline — Uploaded Render Cleanup & Batch Staging
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUTO_CLEANUP_UPLOADED_RENDERS` | `True` | When the scheduled sweep runs, delete render folders for clips already uploaded to YouTube (DB records are kept) |
+| `AUTO_CLEANUP_VOD` | `False` | Also delete source VODs once every completed render for that video is uploaded; skipped while any render is pending/rendering |
+| `AUTO_PIPELINE_INTERVAL_MINUTES` | `0` | Minutes between automatic maintenance sweeps via Celery beat (`0` disables scheduling) |
+
+The sweep stages each downloaded video's next `AUTO_STAGE_TOP_N` highlights (highest-scoring video first), so the backlog is consumed in batches across repeated runs. Trigger it on demand with `POST /api/v1/renders/auto-pipeline`, or cleanup-only with `POST /api/v1/renders/cleanup-uploaded`. Scheduling requires Celery beat (`uv run celery -A app.worker.celery_app beat`); the Compose `celery_beat` service runs it automatically.
 
 ---
 
@@ -117,12 +129,13 @@ Details: [docs/rendering.md](docs/rendering.md).
 
 ## 8. Docker Configuration
 
-[`docker-compose.yml`](docker-compose.yml) runs four services:
+[`docker-compose.yml`](docker-compose.yml) runs five services:
 
 | Service | Notes |
 |---|---|
 | `backend` | FastAPI on port 3001, volume-mounted `./data` |
 | `worker` | Celery worker sharing the same image and data volume |
+| `celery_beat` | Celery beat scheduler for the maintenance sweep; reads `AUTO_PIPELINE_INTERVAL_MINUTES` |
 | `redis` | Broker + cache (`localhost:6379`) |
 | `frontend` | Next.js on port 3000 |
 

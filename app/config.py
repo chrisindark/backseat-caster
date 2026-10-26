@@ -66,10 +66,24 @@ class Settings(BaseSettings):
     AUTO_STAGE_CLIPPING_MODE: str = "third_person"
     AUTO_STAGE_FIRST_SLOT_HOURS: int = 1
     AUTO_STAGE_INTERVAL_HOURS: int = 24
+    AUTO_STAGE_TIMEZONE: str = "Asia/Kolkata"
+    AUTO_STAGE_DAILY_SLOTS: list[str] | str = [
+        "08:00",
+        "12:30",
+        "16:00",
+        "18:30",
+        "20:30",
+        "23:00",
+    ]
+
+    # Maintenance pipeline: purge uploaded render files and sweep-stage top highlights
+    AUTO_CLEANUP_UPLOADED_RENDERS: bool = True
+    AUTO_CLEANUP_VOD: bool = False
+    AUTO_PIPELINE_INTERVAL_MINUTES: int = 0
 
     # Phase 8: LLM metadata generation (Gemini)
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     LLM_METADATA_ENABLED: bool = True
 
     @property
@@ -89,6 +103,25 @@ class Settings(BaseSettings):
                     return parsed
             except Exception:
                 return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    @field_validator("AUTO_PIPELINE_INTERVAL_MINUTES")
+    @classmethod
+    def validate_pipeline_interval(cls, v: int) -> int:
+        return max(0, int(v))
+
+    @field_validator("AUTO_STAGE_DAILY_SLOTS", mode="before")
+    @classmethod
+    def assemble_daily_slots(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [str(s).strip() for s in parsed if str(s).strip()]
+            except Exception:
+                return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            return [str(s).strip() for s in v if str(s).strip()]
         return v
 
     @property

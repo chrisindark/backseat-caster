@@ -3,19 +3,27 @@
 import {
   fetchStagedClips,
   publishStagedClipNow,
+  regenerateClipMetadata,
   scheduleStagedClip,
 } from "@/lib/api";
 import { useScrollLock } from "@/lib/useScrollLock";
-import { RenderJobResponse, StagedClipsResponse, YouTubeQuota } from "@/types/video";
+import {
+  PreviousMetadata,
+  RenderJobResponse,
+  StagedClipsResponse,
+  YouTubeQuota,
+} from "@/types/video";
 import {
   AlertCircle,
   CalendarClock,
   CheckCircle2,
   Flame,
   Gauge,
+  History,
   Loader2,
   Send,
   Sparkles,
+  Wand2,
   X,
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -107,11 +115,28 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
   const [draftSchedules, setDraftSchedules] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Per-clip generator choice for metadata regeneration, and the copy each
+  // regeneration replaced so AI / non-AI outputs can be compared.
+  const [useAi, setUseAi] = useState<Record<string, boolean>>({});
+  const [previousCopies, setPreviousCopies] = useState<
+    Record<string, PreviousMetadata>
+  >({});
+  const [comparing, setComparing] = useState<Record<string, boolean>>({});
 
   useScrollLock(isOpen);
 
   const applyStaged = useCallback((res: StagedClipsResponse) => {
     setStaged(res);
+    const llmAvailable = Boolean(res.llm_available);
+    setUseAi((prev) => {
+      const next: Record<string, boolean> = { ...prev };
+      for (const item of res.items || []) {
+        if (next[item.clip_id] === undefined) {
+          next[item.clip_id] = llmAvailable;
+        }
+      }
+      return next;
+    });
     setDraftSchedules((prev) => {
       const next: Record<string, string> = {};
       for (const item of res.items || []) {
@@ -175,7 +200,46 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
     }
   };
 
+  const handleRegenerate = async (clipId: string) => {
+    const wantsAi = useAi[clipId] ?? Boolean(staged?.llm_available);
+    setBusyClipId(clipId);
+    setError(null);
+    try {
+      const res = await regenerateClipMetadata(
+        clipId,
+        staged?.llm_available ? wantsAi : false
+      );
+      if (res.previous && (res.previous.title || res.previous.description)) {
+        setPreviousCopies((prev) => ({ ...prev, [clipId]: res.previous! }));
+        setComparing((prev) => ({ ...prev, [clipId]: true }));
+      }
+      await loadStaged();
+      setNotice(
+        res.used_llm
+          ? "Gemini copy generated — compare below."
+          : "Deterministic copy generated — compare below."
+      );
+      onStagedChange?.();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to regenerate metadata"
+      );
+    } finally {
+      setBusyClipId(null);
+    }
+  };
+
   const handlePublishNow = async (clipId: string) => {
+    const quotaSummary = staged?.quota;
+    if (quotaSummary && !quotaSummary.can_upload) {
+      const warning =
+        `Daily YouTube API quota is exhausted today ` +
+        `(${quotaSummary.units_used.toLocaleString()} / ${quotaSummary.daily_limit_units.toLocaleString()} units, ` +
+        `~${quotaSummary.max_uploads_per_day} uploads used). You can still attempt the upload — ` +
+        "it will likely fail with a quotaExceeded error on YouTube's side until the quota resets at Pacific midnight.\n\n" +
+        "Publish now anyway?";
+      if (!confirm(warning)) return;
+    }
     setBusyClipId(clipId);
     setError(null);
     try {
@@ -314,6 +378,8 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                 const meta = parseMetadata(job);
                 const source = String(meta.metadata_source || "fallback");
                 const busy = busyClipId === job.clip_id;
+                const prevCopy = previousCopies[job.clip_id];
+                const isComparing = Boolean(comparing[job.clip_id] && prevCopy);
                 return (
                   <article
                     key={job.clip_id}
@@ -328,6 +394,11 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                           {job.clip_id} · {Math.round(Number(job.start_seconds) || 0)}s ·{" "}
                           {Math.round(Number(job.duration_seconds) || 0)}s
                         </p>
+                        {typeof meta.description === "string" && meta.description && (
+                          <p className="text-[11px] text-slate-400 mt-1.5 whitespace-pre-line line-clamp-2">
+                            {meta.description}
+                          </p>
+                        )}
                       </div>
                       <span
                         className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
@@ -349,6 +420,104 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                         {job.status}
                       </span>
                     </div>
+
+                    {/* Regenerate metadata: AI vs deterministic copy */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/5 bg-slate-950/50 px-3 py-2">
+                      <label className="inline-flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={useAi[job.clip_id] ?? Boolean(staged?.llm_available)}
+                          disabled={!staged?.llm_available || busy}
+                          onChange={(event) =>
+                            setUseAi((prev) => ({
+                              ...prev,
+                              [job.clip_id]: event.target.checked,
+                            }))
+                          }
+                          className="h-3.5 w-3.5 rounded accent-violet-500 disabled:opacity-40"
+                          aria-label={`Use AI copy for ${job.clip_id}`}
+                        />
+                        <span>AI copy (Gemini)</span>
+                        {!staged?.llm_available && (
+                          <span className="text-slate-500">
+                            — no GEMINI_API_KEY configured
+                          </span>
+                        )}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => handleRegenerate(job.clip_id)}
+                          title="Regenerate title, description and tags without re-rendering"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-[11px] font-bold hover:bg-violet-500 disabled:opacity-50"
+                        >
+                          {busy ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Wand2 className="w-3.5 h-3.5" />
+                          )}
+                          Regenerate metadata
+                        </button>
+                        {prevCopy && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setComparing((prev) => ({
+                                ...prev,
+                                [job.clip_id]: !prev[job.clip_id],
+                              }))
+                            }
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-semibold hover:bg-slate-700"
+                          >
+                            <History className="w-3.5 h-3.5" />
+                            {isComparing ? "Hide previous" : "Compare"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isComparing && prevCopy && (
+                      <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-3 py-2.5 space-y-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/80">
+                          Previous copy ({prevCopy.metadata_source === "llm" ? "Gemini" : "deterministic"})
+                          {prevCopy.regenerated_at
+                            ? ` · ${formatSchedule(prevCopy.regenerated_at)}`
+                            : ""}
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div>
+                            <p className="text-[9px] uppercase tracking-wider text-slate-500">
+                              Was
+                            </p>
+                            <p className="text-[11px] text-slate-400 line-through decoration-slate-600">
+                              {prevCopy.title || "(no title)"}
+                            </p>
+                            <p className="text-[10px] text-slate-500 mt-1 whitespace-pre-line line-clamp-3">
+                              {prevCopy.description || ""}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase tracking-wider text-emerald-400/80">
+                              Now
+                            </p>
+                            <p className="text-[11px] text-slate-200">
+                              {String(meta.title || "")}
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-1 whitespace-pre-line line-clamp-3">
+                              {typeof meta.description === "string"
+                                ? meta.description
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+                        {(prevCopy.tags?.length || 0) > 0 && (
+                          <p className="text-[10px] text-slate-500 truncate">
+                            Was tagged: {prevCopy.tags!.join(", ")}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                       <input
@@ -379,7 +548,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                         </button>
                         <button
                           type="button"
-                          disabled={busy || job.status !== "completed" || quota?.can_upload === false}
+                          disabled={busy || job.status !== "completed"}
                           onClick={() => handlePublishNow(job.clip_id)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold hover:bg-rose-500 disabled:opacity-40"
                         >

@@ -161,6 +161,42 @@ class RenderService:
         if not clean_modes:
             clean_modes = [request.crop_preset or "third_person"]
 
+        # Resolve or auto-link highlight candidate
+        cand_id = getattr(request, "highlight_candidate_id", None)
+        if not cand_id and request.video_id and request.start_seconds is not None:
+            try:
+                from app.models.highlight_candidate import HighlightCandidate
+
+                req_start = float(request.start_seconds)
+                req_dur = float(request.duration_seconds or 15.0)
+                req_end = req_start + req_dur
+                candidates = (
+                    db.query(HighlightCandidate)
+                    .filter(HighlightCandidate.video_id == request.video_id)
+                    .all()
+                )
+                best_cand = None
+                min_dist = float("inf")
+                for c in candidates:
+                    is_overlap = c.start_seconds < req_end and c.end_seconds > req_start
+                    dist = abs(c.start_seconds - req_start)
+                    if is_overlap or dist <= 15.0:
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_cand = c
+                if best_cand:
+                    cand_id = best_cand.id
+            except Exception as e:
+                logger.debug("Failed auto-linking candidate to render job: %s", e)
+
+        initial_upload_meta: dict[str, Any] = {}
+        if getattr(request, "hero_name", None):
+            initial_upload_meta["hero_name"] = str(request.hero_name).strip()
+        if getattr(request, "clip_context", None):
+            initial_upload_meta["clip_context"] = str(request.clip_context).strip()
+        if cand_id:
+            initial_upload_meta["highlight_candidate_id"] = cand_id
+
         job_id = uuid.uuid4()
         job = RenderJob(
             id=str(job_id),
@@ -187,6 +223,10 @@ class RenderService:
             overwrite=request.overwrite,
             normalize_audio=request.normalize_audio,
             target_lufs=request.target_lufs,
+            highlight_candidate_id=cand_id,
+            upload_metadata=json.dumps(initial_upload_meta)
+            if initial_upload_meta
+            else None,
         )
         db.add(job)
         db.commit()
@@ -657,6 +697,24 @@ class RenderService:
                                 or "vertical_blur",
                             }
 
+                    if (
+                        "youtube_upload" not in formatted
+                        and job
+                        and (
+                            job.youtube_upload_url
+                            or job.youtube_upload_status == "completed"
+                        )
+                    ):
+                        formatted["youtube_upload"] = {
+                            "video_id": job.youtube_video_id,
+                            "url": job.youtube_upload_url,
+                            "format": job.selected_format,
+                            "status": job.youtube_upload_status,
+                            "uploaded_at": job.youtube_uploaded_at.isoformat()
+                            if job.youtube_uploaded_at
+                            else None,
+                        }
+
                     clips.append(formatted)
                 except Exception as e:
                     logger.error("Failed to read manifest file: %s", e)
@@ -817,9 +875,7 @@ class RenderService:
         elif existing_meta.get("description"):
             final_description = str(existing_meta["description"]).strip()
         else:
-            final_description = build_description(
-                video, job, clip_id, is_short=False
-            )
+            final_description = build_description(video, job, clip_id, is_short=False)
 
         # 3. Resolve Tags (dynamic default when not staged/user-supplied)
         if request.tags is not None and len(request.tags) > 0:
@@ -842,6 +898,18 @@ class RenderService:
             or "vertical_blur"
         )
 
+        # 6. Resolve Hero & Clip Context (preserve existing or update if provided)
+        final_hero = (
+            request.hero_name.strip()
+            if getattr(request, "hero_name", None)
+            else existing_meta.get("hero_name")
+        )
+        final_context = (
+            request.clip_context.strip()
+            if getattr(request, "clip_context", None)
+            else existing_meta.get("clip_context")
+        )
+
         upload_dict = {
             "is_selected": request.is_selected,
             "preferred_format": final_format,
@@ -851,6 +919,24 @@ class RenderService:
             "privacy": final_privacy,
             "updated_at": datetime.now(UTC).isoformat(),
         }
+        if final_hero:
+            upload_dict["hero_name"] = final_hero
+        if final_context:
+            upload_dict["clip_context"] = final_context
+        if existing_meta.get("metadata_source"):
+            upload_dict["metadata_source"] = existing_meta["metadata_source"]
+        if existing_meta.get("highlight_candidate_id"):
+            upload_dict["highlight_candidate_id"] = existing_meta[
+                "highlight_candidate_id"
+            ]
+        elif job and job.highlight_candidate_id:
+            upload_dict["highlight_candidate_id"] = job.highlight_candidate_id
+        if existing_meta.get("highlight_score") is not None:
+            upload_dict["highlight_score"] = existing_meta["highlight_score"]
+        if job and job.scheduled_publish_at is not None:
+            upload_dict["scheduled_publish_at"] = job.scheduled_publish_at.isoformat()
+        elif existing_meta.get("scheduled_publish_at"):
+            upload_dict["scheduled_publish_at"] = existing_meta["scheduled_publish_at"]
 
         if manifest_file.exists():
             try:

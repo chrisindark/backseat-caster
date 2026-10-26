@@ -32,6 +32,8 @@ from app.schemas.video import (
     VideoListResponse,
     VideoResponse,
     VideoStatusResponse,
+    VideoStorageCleanupRequest,
+    VideoStorageCleanupResponse,
     VideoUpdateRequest,
     YouTubeChannelVideosResponse,
 )
@@ -319,6 +321,38 @@ def delete_downloaded_video(video_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete video download: {e!s}",
+        )
+
+
+@router.post(
+    "/{video_id}/cleanup",
+    response_model=BaseResponse[VideoStorageCleanupResponse],
+)
+def cleanup_video_storage(
+    video_id: str,
+    request: VideoStorageCleanupRequest = VideoStorageCleanupRequest(),
+    db: Session = Depends(get_db),
+):
+    """
+    Clean up local storage for a processed video (source VOD and/or uploaded render folders).
+    Reclaims disk space safely while preserving catalog metadata and YouTube upload records.
+    """
+    try:
+        result = VideoService.cleanup_video_storage(
+            db=db,
+            video_id=video_id,
+            clean_vod=request.clean_vod,
+            clean_uploaded_renders=request.clean_uploaded_renders,
+            clean_all_renders=request.clean_all_renders,
+        )
+        return BaseResponse.success_response(response=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to cleanup video storage %s: %s", video_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cleanup video storage: {e!s}",
         )
 
 

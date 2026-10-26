@@ -70,8 +70,11 @@ Pre-commit hooks are configured in `.pre-commit-config.yaml`. Test suite layout:
 | `tests/test_api.py` | Video catalog / download / upload endpoints |
 | `tests/test_renderer.py` | FFmpeg render engine (synthetic assets) |
 | `tests/test_youtube_upload.py` | OAuth + resumable upload service |
+| `tests/test_phase8.py` | Auto-stage, LLM metadata, quota accounting, `publishAt` scheduling |
+| `tests/test_auto_pipeline.py` | Uploaded-render cleanup + batched auto-stage sweep |
 | `tests/test_highlight_api.py` | Highlight mining endpoints |
 | `tests/test_audio_scanner.py`, `test_roi_extractor.py`, `test_visual_matcher.py`, `test_cluster_engine.py`, `test_detectors.py` | Mining pipeline stages |
+| `tests/test_killfeed.py`, `test_ultimate_meter.py`, `test_hero_identifier.py`, `test_phase3_integration.py` | Deep visual extraction (killfeed, ultimate OCR, hero/ability templates) |
 | `tests/test_logging_and_correlation.py` | Middleware & logging |
 
 Full testing patterns: [docs/testing.md](docs/testing.md).

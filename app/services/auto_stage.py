@@ -12,6 +12,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -45,25 +46,132 @@ def as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
+def _parse_time_slot(slot_str: str) -> tuple[int, int] | None:
+    """Parse 'HH:MM' or 'H:MM' string into (hour, minute)."""
+    parts = slot_str.strip().split(":")
+    if len(parts) == 2:
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h < 24 and 0 <= m < 60:
+                return h, m
+        except ValueError:
+            pass
+    return None
+
+
+def _get_target_timezone() -> ZoneInfo:
+    """Resolve configured timezone or fall back to UTC."""
+    tz_name = (getattr(settings, "AUTO_STAGE_TIMEZONE", "") or "").strip()
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except Exception as e:
+            logger.warning(
+                "Invalid AUTO_STAGE_TIMEZONE '%s': %s, falling back to UTC",
+                tz_name,
+                e,
+            )
+    return ZoneInfo("UTC")
+
+
 class AutoStageService:
     """Render, enrich and schedule the best highlights automatically."""
 
-    @staticmethod
-    def next_publish_slot(db: Session, now: datetime | None = None) -> datetime:
-        """Return the next staggered publish slot after any already scheduled clip."""
-        current = now or datetime.now(UTC)
-        first = current + timedelta(hours=settings.AUTO_STAGE_FIRST_SLOT_HOURS)
-        interval = timedelta(hours=max(1, settings.AUTO_STAGE_INTERVAL_HOURS))
+    @classmethod
+    def next_publish_slot(
+        cls,
+        db: Session,
+        now: datetime | None = None,
+        after: datetime | None = None,
+        booked_slots: set[datetime] | None = None,
+    ) -> datetime:
+        """Return the next publish slot for a staged clip.
 
-        latest = (
-            db.query(func.max(RenderJob.scheduled_publish_at))
-            .filter(RenderJob.scheduled_publish_at.isnot(None))
-            .scalar()
-        )
-        latest_utc = as_utc(latest)
-        if latest_utc and latest_utc >= first:
-            return latest_utc + interval
-        return first
+        If AUTO_STAGE_DAILY_SLOTS is configured, picks the next chronological daily time slot
+        in AUTO_STAGE_TIMEZONE (e.g. Asia/Kolkata), rolling over across days and skipping booked slots.
+        Otherwise falls back to the legacy +AUTO_STAGE_INTERVAL_HOURS offset.
+        """
+        current_utc = as_utc(now) or datetime.now(UTC)
+        daily_slots_raw = getattr(settings, "AUTO_STAGE_DAILY_SLOTS", None)
+        parsed_slots: list[tuple[int, int]] = []
+        if daily_slots_raw:
+            slots_list = (
+                daily_slots_raw
+                if isinstance(daily_slots_raw, list)
+                else [s.strip() for s in str(daily_slots_raw).split(",")]
+            )
+            for s in slots_list:
+                parsed = _parse_time_slot(s)
+                if parsed:
+                    parsed_slots.append(parsed)
+            parsed_slots.sort()
+
+        # If no daily slots defined, use legacy relative interval
+        if not parsed_slots:
+            first = current_utc + timedelta(hours=settings.AUTO_STAGE_FIRST_SLOT_HOURS)
+            interval = timedelta(hours=max(1, settings.AUTO_STAGE_INTERVAL_HOURS))
+            if after is not None:
+                return as_utc(after) + interval
+            latest = (
+                db.query(func.max(RenderJob.scheduled_publish_at))
+                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .scalar()
+            )
+            latest_utc = as_utc(latest)
+            if latest_utc and latest_utc >= first:
+                return latest_utc + interval
+            return first
+
+        # Daily slots mode (e.g. Asia/Kolkata)
+        tz = _get_target_timezone()
+        booked: set[datetime] = set(booked_slots or ())
+        if not booked:
+            rows = (
+                db.query(RenderJob.scheduled_publish_at)
+                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .all()
+            )
+            for r in rows:
+                dt_utc = as_utc(r[0])
+                if dt_utc:
+                    booked.add(dt_utc)
+
+        # Buffer: at least 15 minutes from current time
+        min_buffer = timedelta(minutes=15)
+        earliest_allowed = current_utc + min_buffer
+        if after is not None:
+            earliest_allowed = max(
+                earliest_allowed, as_utc(after) + timedelta(minutes=1)
+            )
+
+        local_ref = earliest_allowed.astimezone(tz)
+        candidate_date = local_ref.date()
+
+        for _ in range(365):
+            for h, m in parsed_slots:
+                local_slot = datetime(
+                    candidate_date.year,
+                    candidate_date.month,
+                    candidate_date.day,
+                    h,
+                    m,
+                    0,
+                    tzinfo=tz,
+                )
+                slot_utc = local_slot.astimezone(UTC)
+                if slot_utc < earliest_allowed:
+                    continue
+
+                # Collision check within 10 minutes tolerance
+                is_collision = any(
+                    abs((slot_utc - b).total_seconds()) < 600 for b in booked
+                )
+                if not is_collision:
+                    return slot_utc
+
+            candidate_date += timedelta(days=1)
+
+        return earliest_allowed + timedelta(hours=1)
 
     @classmethod
     def stage_top_candidates(
@@ -98,11 +206,15 @@ class AutoStageService:
                 "message": "Auto-stage disabled (top_n=0).",
             }
 
+        already_staged_subquery = db.query(RenderJob.highlight_candidate_id).filter(
+            RenderJob.highlight_candidate_id.isnot(None)
+        )
         candidates = (
             db.query(HighlightCandidate)
             .filter(
                 HighlightCandidate.video_id == video_id,
                 HighlightCandidate.score >= threshold,
+                ~HighlightCandidate.id.in_(already_staged_subquery),
             )
             .order_by(HighlightCandidate.score.desc(), HighlightCandidate.start_seconds)
             .limit(count)
@@ -121,7 +233,21 @@ class AutoStageService:
         }
 
         staged: list[dict[str, Any]] = []
-        slot = cls.next_publish_slot(db) if schedule else None
+        booked_slots: set[datetime] = set()
+        if schedule:
+            existing_scheduled = (
+                db.query(RenderJob.scheduled_publish_at)
+                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .all()
+            )
+            for row in existing_scheduled:
+                u = as_utc(row[0])
+                if u:
+                    booked_slots.add(u)
+
+        slot = (
+            cls.next_publish_slot(db, booked_slots=booked_slots) if schedule else None
+        )
 
         for candidate in candidates:
             if candidate.id in already_staged:
@@ -152,7 +278,8 @@ class AutoStageService:
 
             staged.append(summary)
             if slot is not None:
-                slot = slot + timedelta(hours=max(1, settings.AUTO_STAGE_INTERVAL_HOURS))
+                booked_slots.add(slot)
+                slot = cls.next_publish_slot(db, after=slot, booked_slots=booked_slots)
 
         message = (
             f"Auto-staged {len(staged)} clip(s) from the top candidates."
@@ -168,6 +295,96 @@ class AutoStageService:
         }
 
     @classmethod
+    def stage_all_top_candidates(
+        cls,
+        db: Session,
+        *,
+        top_n: int | None = None,
+        min_score: float | None = None,
+        clipping_mode: str | None = None,
+        schedule: bool = True,
+        background_tasks: Any = None,
+    ) -> dict[str, Any]:
+        """Stage top candidates across every downloaded video.
+
+        Candidates are grouped per video and staged in batches of ``top_n``
+        (``AUTO_STAGE_TOP_N`` by default), highest-scoring video first. Already
+        staged candidates are excluded, so repeated sweeps keep consuming the
+        next-best highlights until a video runs out.
+        """
+        count = max(0, int(top_n if top_n is not None else settings.AUTO_STAGE_TOP_N))
+        threshold = float(
+            min_score if min_score is not None else settings.AUTO_STAGE_MIN_SCORE
+        )
+
+        if count == 0:
+            return {
+                "videos_processed": 0,
+                "staged_count": 0,
+                "clips": [],
+                "message": "Auto-stage disabled (top_n=0).",
+            }
+
+        staged_subquery = db.query(RenderJob.highlight_candidate_id).filter(
+            RenderJob.highlight_candidate_id.isnot(None)
+        )
+        video_rows = (
+            db.query(
+                HighlightCandidate.video_id,
+                func.max(HighlightCandidate.score).label("top_score"),
+            )
+            .join(Video, Video.id == HighlightCandidate.video_id)
+            .filter(
+                HighlightCandidate.score >= threshold,
+                ~HighlightCandidate.id.in_(staged_subquery),
+                Video.is_downloaded.is_(True),
+            )
+            .group_by(HighlightCandidate.video_id)
+            .order_by(func.max(HighlightCandidate.score).desc())
+            .all()
+        )
+
+        total_staged = 0
+        clips: list[dict[str, Any]] = []
+        videos_with_staged = 0
+
+        for video_id, _ in video_rows:
+            try:
+                result = cls.stage_top_candidates(
+                    db,
+                    video_id,
+                    top_n=count,
+                    min_score=threshold,
+                    clipping_mode=clipping_mode,
+                    schedule=schedule,
+                    background_tasks=background_tasks,
+                )
+            except Exception as exc:
+                logger.warning("Bulk auto-stage failed for video %s: %s", video_id, exc)
+                db.rollback()
+                continue
+
+            staged_count = int(result.get("staged_count", 0) or 0)
+            if staged_count:
+                videos_with_staged += 1
+                total_staged += staged_count
+                clips.extend(result.get("clips", []))
+
+        message = (
+            f"Auto-staged {total_staged} clip(s) across "
+            f"{videos_with_staged} video(s) in batches of {count}."
+            if total_staged
+            else "No candidates met the auto-stage criteria."
+        )
+        logger.info("Bulk auto-stage: %s", message)
+        return {
+            "videos_processed": len(video_rows),
+            "staged_count": total_staged,
+            "clips": clips,
+            "message": message,
+        }
+
+    @classmethod
     def _stage_candidate(
         cls,
         db: Session,
@@ -179,9 +396,7 @@ class AutoStageService:
         background_tasks: Any = None,
     ) -> dict[str, Any]:
         clip_id = f"auto_{candidate.id}"
-        existing_job = (
-            db.query(RenderJob).filter(RenderJob.clip_id == clip_id).first()
-        )
+        existing_job = db.query(RenderJob).filter(RenderJob.clip_id == clip_id).first()
         if existing_job:
             raise RuntimeError("clip already exists")
 
@@ -192,7 +407,8 @@ class AutoStageService:
             duration_seconds=duration,
             clip_id=clip_id,
             crop_preset=(
-                mode if mode in ("third_person", "direct_crop", "cinematic", "custom")
+                mode
+                if mode in ("third_person", "direct_crop", "cinematic", "custom")
                 else "third_person"
             ),
             modes=[mode],

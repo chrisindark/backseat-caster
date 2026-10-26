@@ -57,6 +57,8 @@ uv run uvicorn app.main:app --reload --port 3001
 ```bash
 redis-server &
 uv run celery -A app.worker.celery_app worker --loglevel=info
+# optional: periodic cleanup + auto-stage sweep
+uv run celery -A app.worker.celery_app beat --loglevel=info
 ```
 
 Without Redis the app transparently uses FastAPI background tasks — nothing to configure. See [background-tasks.md](background-tasks.md).
@@ -77,6 +79,7 @@ docker compose up --build
 |---|---|
 | Next.js UI | http://localhost:3000 |
 | FastAPI | http://localhost:3001 (docs at `/docs`) |
+| Celery beat | — (set `AUTO_PIPELINE_INTERVAL_MINUTES` to enable the maintenance sweep) |
 | Redis | localhost:6379 |
 
 Data persists under `./data`.

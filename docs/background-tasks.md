@@ -6,7 +6,7 @@ Heavy work never runs inside a request handler. Decision record: [ADR 0003](adr/
 
 ## 1. The dispatch rule
 
-Every service that offloads work (downloads, renders, highlight detection, uploads, bulk deletes) follows the same pattern:
+Every service that offloads work (downloads, renders, highlight detection, uploads, bulk deletes, cleanup sweeps) follows the same pattern:
 
 ```python
 from app.worker.helpers import is_celery_broker_online
@@ -35,6 +35,7 @@ Both paths call the same underlying executor functions (`execute_download_job`, 
 | `render_clip_celery_task`, `bulk_delete_renders_celery_task` | `app.services.renders` |
 | `detect_highlights_celery_task` | `app.services.highlight.service` |
 | `upload_clip_celery_task`, `batch_upload_clips_celery_task` | `app.services.youtube_uploader` |
+| `auto_pipeline_celery_task` | `app.services.auto_pipeline` |
 
 ## 3. Database access in workers
 
@@ -67,7 +68,11 @@ Always close sessions in `finally` — worker processes are long-lived.
 | Render task crash | Job model marked `failed` with the error surfaced in the status endpoint / UI |
 | Retry | `POST /renders/jobs/{job_id}/retry` re-dispatches through the same rule |
 
-## 6. Guides for new background work
+## 6. Periodic maintenance
+
+`auto_pipeline_task` is the only periodic job. When `AUTO_PIPELINE_INTERVAL_MINUTES > 0`, `setup_periodic_tasks` registers a beat entry that purges render folders for uploaded clips and stages the next `AUTO_STAGE_TOP_N` highlights per downloaded video. Run it manually via `POST /api/v1/renders/auto-pipeline`; management details live in [publishing.md](publishing.md#5-observability--recovery).
+
+## 7. Guides for new background work
 
 1. Write the service function first (`execute_x(...)`), no Celery imports.
 2. Add a thin Celery task wrapper in the service module (see existing `_celery_task` functions).

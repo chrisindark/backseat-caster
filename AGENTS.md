@@ -54,18 +54,27 @@ backseat-caster/
 │   │   ├── video.py             # Video metadata, download state, file paths
 │   │   └── render_job.py        # Render job lifecycle, crop settings, upload staging
 │   ├── schemas/                 # Pydantic request/response schemas
-│   │   ├── video.py             # Video catalog and download schemas
-│   │   ├── render.py            # Clip rendering parameters, manifests, job status
-│   │   └── youtube.py           # OAuth auth status, upload requests, batch responses
+│   │   ├── video.py             # Video catalog, downloads, storage cleanup schemas
+│   │   ├── render.py            # Rendering params, manifests, maintenance pipeline schemas
+│   │   ├── highlight.py         # Highlight mining runs and candidate schemas
+│   │   └── youtube.py           # OAuth status, uploads, staging/scheduling, batch responses
 │   ├── services/                # Business logic layer (keep routers thin)
-│   │   ├── videos.py            # VideoService: DB queries, download triggers, local file info
-│   │   ├── renders.py           # RenderService: render job creation, manifest formatting, deletions
+│   │   ├── videos.py            # VideoService: DB queries, downloads, per-video storage cleanup
+│   │   ├── renders.py           # RenderService: render jobs, manifests, deletions
+│   │   ├── auto_stage.py        # AutoStageService: top-N rendering, metadata staging, publish slots
+│   │   ├── auto_pipeline.py     # AutoPipelineService: uploaded-render cleanup + batched stage sweep
+│   │   ├── llm_metadata.py      # LLMMetadataService: Gemini copy + deterministic fallback
+│   │   ├── upload_metadata.py   # Deterministic YouTube title/description/tag builder
+│   │   ├── youtube_quota.py     # YouTubeQuotaService: advisory daily unit accounting
 │   │   ├── youtube.py           # YtdlpService: YouTube channel scraping and yt-dlp handling
-│   │   └── youtube_uploader.py  # YouTubeUploaderService: OAuth consent, token storage, resumable upload
+│   │   ├── youtube_uploader.py  # YouTubeUploaderService: OAuth consent, token storage, resumable upload
+│   │   └── highlight/           # Highlight mining pipeline (audio, ROI, OCR, detectors, clustering)
 │   ├── routers/                 # FastAPI controllers (registered under /api/v1)
 │   │   ├── videos.py            # /api/v1/videos
-│   │   ├── renders.py           # /api/v1/renders
-│   │   └── youtube.py           # /api/v1/youtube
+│   │   ├── renders.py           # /api/v1/renders (incl. cleanup + auto-pipeline)
+│   │   ├── highlights.py        # /api/v1/videos/{id}/highlights
+│   │   ├── youtube.py           # /api/v1/youtube
+│   │   └── health.py            # /api/v1/health
 │   ├── rendering/               # FFmpeg rendering engine
 │   │   ├── engine.py            # RenderEngine: orchestration, progress tracking, manifest output
 │   │   ├── config.py            # RenderConfig, quality presets, padding presets, clipping modes
@@ -77,10 +86,10 @@ backseat-caster/
 │   │   └── cli.py               # Standalone CLI entry point for rendering clips
 │   └── worker/                  # Background execution & Celery
 │       ├── celery_app.py        # Celery app instance
-│       ├── tasks.py             # Celery task definitions (downloads, renders, uploads)
+│       ├── tasks.py             # Celery re-exports (downloads, renders, uploads, maintenance)
 │       └── helpers.py           # Celery broker health check (is_celery_broker_online)
 ├── ui/                          # Next.js frontend application
-│   ├── src/app/                 # App Router pages (videos, studio, renders, youtube, channel)
+│   ├── src/app/                 # App Router pages (videos, studio, renders, staging, youtube, channel)
 │   ├── src/components/          # Modals, Video cards, Render rows, Pagination
 │   ├── src/lib/api.ts           # Centralized API client unwrapping BaseResponse
 │   └── src/types/video.ts       # TypeScript models matching backend schemas
@@ -89,7 +98,7 @@ backseat-caster/
 ├── tests/                       # Pytest test suite (test_api.py, test_renderer.py, test_youtube_upload.py)
 ├── pyproject.toml               # Python project configuration & dependencies
 ├── Dockerfile                   # Backend Docker build
-└── docker-compose.yml           # Full-stack Docker orchestration (backend, worker, redis, frontend)
+└── docker-compose.yml           # Full-stack Docker orchestration (backend, worker, beat, redis, frontend)
 ```
 
 ---

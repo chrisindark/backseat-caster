@@ -157,5 +157,7 @@ def generate_upload_metadata(
         "privacy": privacy,
         "updated_at": datetime.now(UTC).isoformat(),
     }
+
+
 # Backwards-compatible alias for callers expecting the older helper name.
 generate_default_metadata = generate_upload_metadata

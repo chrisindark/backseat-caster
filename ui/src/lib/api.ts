@@ -6,6 +6,8 @@ import {
   HighlightCandidateListResponse,
   HighlightRunListResponse,
   HighlightStatusResponse,
+  RegenerateMetadataRequest,
+  RegenerateMetadataResponse,
   RenderClipResponse,
   RenderJobListResponse,
   RenderJobResponse,
@@ -16,6 +18,8 @@ import {
   StagedClipsResponse,
   VideoItem,
   VideoListResponse,
+  VideoStorageCleanupOptions,
+  VideoStorageCleanupResult,
   YouTubeAuthStatus,
   YouTubeBatchUploadResponse,
   YouTubeChannelResponse,
@@ -176,6 +180,18 @@ export async function deleteVideoDownload(videoId: string): Promise<{ status: st
     method: "DELETE",
   });
   return parseResponse<{ status: string; message?: string }>(res, "delete video download");
+}
+
+export async function cleanupVideoStorage(
+  videoId: string,
+  options: VideoStorageCleanupOptions = { clean_vod: true, clean_uploaded_renders: true, clean_all_renders: false }
+): Promise<VideoStorageCleanupResult> {
+  const res = await fetch(`${API_BASE}/videos/${videoId}/cleanup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  return parseResponse<VideoStorageCleanupResult>(res, `cleanup storage for video ${videoId}`);
 }
 
 export async function createVideo(data: Partial<VideoItem> & { title: string }): Promise<VideoItem> {
@@ -377,6 +393,31 @@ export async function updateUploadSelection(
     upload_selection: UploadSelectionPayload;
     message: string;
   }>(res, `update upload selection for ${clipId}`);
+}
+
+export async function regenerateClipMetadata(
+  clipId: string,
+  options?: boolean | null | RegenerateMetadataRequest
+): Promise<RegenerateMetadataResponse> {
+  const bodyPayload =
+    typeof options === "boolean" || options === null
+      ? options === undefined
+        ? {}
+        : { use_llm: options }
+      : options || {};
+
+  const res = await fetch(
+    `${API_BASE}/renders/${clipId}/regenerate-metadata`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bodyPayload),
+    }
+  );
+  return parseResponse<RegenerateMetadataResponse>(
+    res,
+    `regenerate metadata for ${clipId}`
+  );
 }
 
 export async function retryRenderJob(jobId: string): Promise<RenderJobResponse> {

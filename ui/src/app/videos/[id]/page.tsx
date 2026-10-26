@@ -4,7 +4,7 @@ import { HighlightCandidatesDrawer } from "@/components/HighlightCandidatesDrawe
 import { Navbar } from "@/components/Navbar";
 import {
   checkBackendHealth,
-  deleteVideoDownload,
+  cleanupVideoStorage,
   downloadVideo,
   fetchHighlightCandidates,
   fetchRenders,
@@ -12,6 +12,7 @@ import {
   getDownloadedVideoStreamUrl,
   getVideoStatus,
 } from "@/lib/api";
+import { YoutubeIcon } from "@/components/icons";
 import { HighlightCandidateItem, RenderManifest, VideoItem } from "@/types/video";
 import {
   AlertCircle,
@@ -209,15 +210,32 @@ function VideoDetailContent() {
     }
   };
 
-  const handleDelete = async () => {
+  const [isCleaning, setIsCleaning] = useState<boolean>(false);
+  const [cleanupSuccessMessage, setCleanupSuccessMessage] = useState<string | null>(null);
+
+  const handleCleanupStorage = async (cleanVod: boolean, cleanUploadedRenders: boolean) => {
     if (!videoId) return;
-    if (!confirm("Are you sure you want to delete this downloaded video file?")) return;
+    const promptMsg = cleanUploadedRenders
+      ? `This will remove the downloaded source VOD (${formatBytes(video?.file_size_bytes)}) and local render folders for uploaded clips from disk.\n\nAll highlight records and published YouTube Shorts URLs will be preserved in your library.\n\nProceed to reclaim disk space?`
+      : `This will remove the downloaded source VOD (${formatBytes(video?.file_size_bytes)}) from disk.\n\nAll highlight records, clips, and YouTube links will be preserved.\n\nProceed to reclaim disk space?`;
+
+    if (!confirm(promptMsg)) return;
+
+    setIsCleaning(true);
+    setCleanupSuccessMessage(null);
     try {
-      await deleteVideoDownload(videoId);
+      const res = await cleanupVideoStorage(videoId, {
+        clean_vod: cleanVod,
+        clean_uploaded_renders: cleanUploadedRenders,
+        clean_all_renders: false,
+      });
+      setCleanupSuccessMessage(`Reclaimed ${res.reclaimed_formatted}: ${res.message}`);
       await reloadVideo();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      alert(`Could not delete: ${msg}`);
+      alert(`Cleanup failed: ${msg}`);
+    } finally {
+      setIsCleaning(false);
     }
   };
 
@@ -560,13 +578,6 @@ function VideoDetailContent() {
                       <Scissors className="w-4 h-4" />
                       <span>Open in Clip Studio</span>
                     </Link>
-                    <button
-                      onClick={handleDelete}
-                      className="w-full flex items-center justify-center gap-1.5 py-2 bg-slate-900 hover:bg-rose-950/30 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-lg border border-white/5 cursor-pointer transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete Local File</span>
-                    </button>
                   </div>
                 ) : (
                   <div className="pt-2">
@@ -579,6 +590,160 @@ function VideoDetailContent() {
                       <span>{isProcessing ? "Download in progress..." : "Download Gameplay VOD"}</span>
                     </button>
                   </div>
+                )}
+              </div>
+
+              {/* Highlight & Upload Tracking Lifecycle Card */}
+              <div className="p-5 bg-[#12141c] border border-white/10 rounded-2xl flex flex-col gap-4 shadow-xl">
+                <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Highlight & Upload Lifecycle</span>
+                  </h3>
+                  {video.has_uploaded_highlights && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-red-600/20 text-red-300 border border-red-500/40 flex items-center gap-1">
+                      <YoutubeIcon className="w-3 h-3 text-red-500" />
+                      <span>{video.uploaded_clip_count} Published</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-white/5 flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-400">Highlights Mined</span>
+                    <span className="text-sm font-bold text-white flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                      <span>{video.highlight_candidate_count || highlightCount} candidates</span>
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-white/5 flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-400">Rendered Clips</span>
+                    <span className="text-sm font-bold text-white flex items-center gap-1">
+                      <Film className="w-3.5 h-3.5 text-rose-400" />
+                      <span>{video.rendered_clip_count || renders.length} rendered</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Uploaded YouTube Shorts list if present */}
+                {video.uploaded_highlights && video.uploaded_highlights.length > 0 && (
+                  <div className="space-y-2 pt-1">
+                    <span className="text-[11px] font-semibold text-slate-400 block">
+                      Published YouTube Shorts ({video.uploaded_highlights.length}):
+                    </span>
+                    <div className="space-y-2">
+                      {video.uploaded_highlights.map((hl) => (
+                        <div
+                          key={hl.clip_id}
+                          className="p-3 bg-black/40 rounded-xl border border-white/5 hover:border-red-500/30 transition-colors flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-white truncate text-xs">
+                              {hl.title || hl.clip_id}
+                            </div>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
+                              <span className="capitalize">{hl.format?.replace("_", " ") || "Short"}</span>
+                              {hl.youtube_uploaded_at && (
+                                <span>• {new Date(hl.youtube_uploaded_at).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {hl.youtube_upload_url && (
+                            <a
+                              href={hl.youtube_upload_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/40 text-xs font-semibold shrink-0 transition-colors"
+                            >
+                              <YoutubeIcon className="w-3 h-3 text-red-500" />
+                              <span>Watch</span>
+                              <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Disk Storage & Space Reclaim Manager */}
+              <div className="p-5 bg-[#12141c] border border-white/10 rounded-2xl flex flex-col gap-4 shadow-xl">
+                <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Disk Storage & Cleanup Manager</span>
+                  </h3>
+                  <span className="text-xs font-mono font-bold text-emerald-400">
+                    {isDownloaded ? formatBytes(video.file_size_bytes) : "0 MB on disk"}
+                  </span>
+                </div>
+
+                {cleanupSuccessMessage && (
+                  <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <span>{cleanupSuccessMessage}</span>
+                  </div>
+                )}
+
+                {isDownloaded && video.has_uploaded_highlights ? (
+                  <div className="space-y-3">
+                    <div className="p-3.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs space-y-1.5">
+                      <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>Highlights Published • Safe to Clean VOD</span>
+                      </div>
+                      <p className="text-slate-300 leading-relaxed text-[11px]">
+                        One or more highlights from this video have already been uploaded to YouTube Shorts. You can safely delete the raw {formatBytes(video.file_size_bytes)} VOD from disk. Your highlight cards and YouTube links remain safely accessible in BackseatCaster.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCleanupStorage(true, false)}
+                        disabled={isCleaning}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-950/50 cursor-pointer transition-transform active:scale-95 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>
+                          {isCleaning
+                            ? "Cleaning..."
+                            : `Reclaim Source VOD (${formatBytes(video.file_size_bytes)})`}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCleanupStorage(true, true)}
+                        disabled={isCleaning}
+                        className="w-full flex items-center justify-center gap-2 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-white/5 cursor-pointer transition-colors disabled:opacity-50"
+                      >
+                        <span>Purge All Local Media (VOD + Uploaded Renders)</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : isDownloaded ? (
+                  <div className="space-y-3 text-xs">
+                    <p className="text-slate-400 text-[11px]">
+                      Source gameplay VOD is downloaded locally ({formatBytes(video.file_size_bytes)}). Once you have clipped highlights and uploaded them to YouTube, you can return here to reclaim disk space.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanupStorage(true, false)}
+                      disabled={isCleaning}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 bg-slate-900 hover:bg-rose-950/30 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-lg border border-white/5 cursor-pointer transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isCleaning ? "Deleting..." : "Delete Local VOD File"}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400">
+                    Source video is not downloaded locally. No local disk space is currently consumed.
+                  </p>
                 )}
               </div>
 

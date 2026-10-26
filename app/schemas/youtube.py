@@ -47,7 +47,8 @@ class YouTubeUploadRequest(BaseModel):
     )
     tags: list[str] | None = Field(None, description="Video tags")
     privacy: str | None = Field(
-        None, description="Privacy status: 'private', 'unlisted', or 'public' (unset defers to staged metadata / public)"
+        None,
+        description="Privacy status: 'private', 'unlisted', or 'public' (unset defers to staged metadata / public)",
     )
     format: str | None = Field(
         None,
@@ -163,3 +164,6 @@ class StagedClipsResponse(BaseModel):
     items: list[dict] = Field(default_factory=list)
     total: int = 0
     quota: YouTubeQuotaResponse | None = None
+    llm_available: bool = Field(
+        False, description="Whether a Gemini key is configured for AI copy"
+    )

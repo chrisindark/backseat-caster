@@ -33,6 +33,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Smartphone,
   Sparkles,
   Star,
   Trash2,
@@ -43,7 +44,7 @@ import { useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ViewMode = "gallery" | "jobs";
-type StatusFilter = "all" | "completed" | "active" | "failed" | "selected";
+type StatusFilter = "all" | "shorts" | "completed" | "active" | "failed" | "selected" | "published";
 
 function RendersContent() {
   const searchParams = useSearchParams();
@@ -64,7 +65,7 @@ function RendersContent() {
   );
   const [selectedVideoId, setSelectedVideoIdState] = useState<string>(initialVideoId);
   const [statusFilter, setStatusFilterState] = useState<StatusFilter>(
-    ["all", "completed", "active", "failed", "selected"].includes(initialStatus)
+    ["all", "shorts", "completed", "active", "failed", "selected", "published"].includes(initialStatus)
       ? initialStatus
       : "all"
   );
@@ -481,6 +482,30 @@ function RendersContent() {
     return renders.filter((r) => r.upload_selection?.is_selected);
   }, [renders]);
 
+  // Shorts count (vertical and <= 60.5 seconds)
+  const shortsCount = useMemo(() => {
+    return renders.filter((r) => {
+      const dur = r.clip?.duration_seconds ?? r.request?.duration_seconds ?? 0;
+      if (dur > 60.5) return false;
+      return Boolean(
+        r.vertical_blur_path ||
+        r.vertical_crop_path ||
+        r.outputs?.vertical_blur ||
+        r.outputs?.vertical_crop ||
+        r.outputs?.third_person ||
+        r.outputs?.direct_crop ||
+        r.outputs?.cinematic ||
+        (r.modes && r.modes.some((m) => m !== "landscape")) ||
+        (r.request?.crop_preset && r.request.crop_preset !== "landscape")
+      );
+    }).length;
+  }, [renders]);
+
+  // Published to YouTube count
+  const publishedCount = useMemo(() => {
+    return renders.filter((r) => Boolean(r.youtube_upload)).length;
+  }, [renders]);
+
   // Filtered renders
   const filteredRenders = useMemo(() => {
     return renders.filter((r) => {
@@ -496,6 +521,25 @@ function RendersContent() {
       // Status filter
       if (statusFilter === "selected" && !r.upload_selection?.is_selected) {
         return false;
+      }
+      if (statusFilter === "published" && !r.youtube_upload) {
+        return false;
+      }
+      if (statusFilter === "shorts") {
+        const dur = r.clip?.duration_seconds ?? r.request?.duration_seconds ?? 0;
+        if (dur > 60.5) return false;
+        const isVertical = Boolean(
+          r.vertical_blur_path ||
+          r.vertical_crop_path ||
+          r.outputs?.vertical_blur ||
+          r.outputs?.vertical_crop ||
+          r.outputs?.third_person ||
+          r.outputs?.direct_crop ||
+          r.outputs?.cinematic ||
+          (r.modes && r.modes.some((m) => m !== "landscape")) ||
+          (r.request?.crop_preset && r.request.crop_preset !== "landscape")
+        );
+        if (!isVertical) return false;
       }
 
       // Search query
@@ -524,6 +568,11 @@ function RendersContent() {
       if (statusFilter === "active" && j.status !== "rendering" && j.status !== "pending") return false;
       if (statusFilter === "failed" && j.status !== "failed") return false;
       if (statusFilter === "selected" && !j.is_selected_for_upload) return false;
+      if (statusFilter === "published" && j.youtube_upload_status !== "completed" && !j.youtube_upload_url) return false;
+      if (statusFilter === "shorts") {
+        if (j.duration_seconds > 60.5) return false;
+        if (j.crop_preset === "landscape" && !j.vertical_blur_path && !j.vertical_crop_path) return false;
+      }
 
       // Search query
       if (searchQuery.trim()) {
@@ -629,8 +678,8 @@ function RendersContent() {
                 </div>
               </div>
 
-              <div
-                onClick={openUploadQueueModal}
+              <Link
+                href="/staging"
                 className="col-span-2 sm:col-span-1 p-3.5 rounded-2xl bg-gradient-to-br from-rose-950/40 to-slate-900/90 border border-rose-500/30 shadow-lg hover:border-rose-500/60 transition-all cursor-pointer group"
               >
                 <div className="flex items-center justify-between">
@@ -647,7 +696,7 @@ function RendersContent() {
                     Review Queue →
                   </span>
                 </div>
-              </div>
+              </Link>
             </div>
           </div>
         </section>
@@ -720,14 +769,13 @@ function RendersContent() {
               </button>
 
               {/* Open Upload Queue Button */}
-              <button
-                type="button"
-                onClick={openUploadQueueModal}
+              <Link
+                href="/staging"
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-md shadow-rose-900/30 transition-all cursor-pointer whitespace-nowrap"
               >
                 <YoutubeIcon className="w-3.5 h-3.5" />
                 <span>Upload Staging ({selectedForUploadList.length})</span>
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -744,8 +792,22 @@ function RendersContent() {
                     : "text-slate-400 hover:text-white hover:bg-slate-900"
                 }`}
               >
-                All
+                All ({viewMode === "gallery" ? renders.length : jobs.length})
               </button>
+
+              <button
+                type="button"
+                onClick={() => setStatusFilter("shorts")}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                  statusFilter === "shorts"
+                    ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                    : "text-slate-400 hover:text-white hover:bg-slate-900"
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5 text-purple-400" />
+                <span>Shorts (≤60s) ({shortsCount})</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setStatusFilter("selected")}
@@ -757,6 +819,19 @@ function RendersContent() {
               >
                 <Star className="w-3 h-3 fill-rose-400 text-rose-400" />
                 <span>Chosen for Upload ({selectedForUploadList.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStatusFilter("published")}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                  statusFilter === "published"
+                    ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                    : "text-slate-400 hover:text-white hover:bg-slate-900"
+                }`}
+              >
+                <YoutubeIcon className="w-3.5 h-3.5 text-red-500" />
+                <span>Published ({publishedCount})</span>
               </button>
 
               {/* Quick Select All Toggle Button */}

@@ -10,14 +10,24 @@ from sqlalchemy.orm import Session
 from app.core.responses import BaseResponse
 from app.database import get_db
 from app.schemas.render import (
+    AutoCleanupRequest,
+    AutoPipelineRequest,
+    AutoPipelineResponse,
     BulkDeleteRendersRequest,
     BulkDeleteRendersResponse,
+    RegenerateMetadataRequest,
+    RegenerateMetadataResponse,
     RenderClipRequest,
     RenderClipResponse,
     RenderJobResponse,
     RenderJobUpdateRequest,
     UploadSelectionRequest,
 )
+from app.services.auto_pipeline import (
+    auto_pipeline_celery_task,
+    execute_auto_pipeline_job,
+)
+from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import (
     RenderService,
     bulk_delete_renders_celery_task,
@@ -289,6 +299,116 @@ def bulk_delete_renders(
         )
 
 
+@router.post("/cleanup-uploaded", response_model=BaseResponse[AutoPipelineResponse])
+def cleanup_uploaded_renders(
+    request: AutoCleanupRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Delete local render folders for clips already uploaded to YouTube.
+
+    The ``RenderJob`` records are kept so upload history stays available; only
+    the files disappear from the renders listing and disk.
+    """
+    try:
+        if request.sync:
+            result = execute_auto_pipeline_job(
+                db_session=db,
+                stage=False,
+                cleanup=True,
+                clean_vod=request.clean_vod,
+            )
+            return BaseResponse.success_response(
+                response=AutoPipelineResponse(**result)
+            )
+
+        if is_celery_broker_online():
+            task = auto_pipeline_celery_task.delay(
+                stage=False,
+                cleanup=True,
+                clean_vod=request.clean_vod,
+            )
+            return BaseResponse.success_response(
+                response=AutoPipelineResponse(
+                    task_id=task.id,
+                    message="Dispatched uploaded-render cleanup via Celery.",
+                )
+            )
+
+        background_tasks.add_task(
+            execute_auto_pipeline_job,
+            stage=False,
+            cleanup=True,
+            clean_vod=request.clean_vod,
+        )
+        return BaseResponse.success_response(
+            response=AutoPipelineResponse(
+                message="Queued uploaded-render cleanup in background worker."
+            )
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to clean up uploaded renders: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clean up uploaded renders: {e!s}"
+        )
+
+
+@router.post("/auto-pipeline", response_model=BaseResponse[AutoPipelineResponse])
+def run_auto_pipeline(
+    request: AutoPipelineRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Clean uploaded renders and stage the next top highlights in batches."""
+    try:
+        if not request.stage and not request.cleanup:
+            raise HTTPException(
+                status_code=400,
+                detail="Enable at least one of 'stage' or 'cleanup'.",
+            )
+
+        kwargs = {
+            "stage": request.stage,
+            "cleanup": request.cleanup,
+            "clean_vod": request.clean_vod,
+            "top_n": request.top_n,
+            "min_score": request.min_score,
+            "clipping_mode": request.clipping_mode,
+            "schedule": request.schedule,
+        }
+
+        if request.sync:
+            result = execute_auto_pipeline_job(db_session=db, **kwargs)
+            return BaseResponse.success_response(
+                response=AutoPipelineResponse(**result)
+            )
+
+        if is_celery_broker_online():
+            task = auto_pipeline_celery_task.delay(**kwargs)
+            return BaseResponse.success_response(
+                response=AutoPipelineResponse(
+                    task_id=task.id,
+                    message="Dispatched auto-pipeline via Celery.",
+                )
+            )
+
+        background_tasks.add_task(execute_auto_pipeline_job, **kwargs)
+        return BaseResponse.success_response(
+            response=AutoPipelineResponse(
+                message="Queued auto-pipeline in background worker."
+            )
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to run auto-pipeline: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to run auto-pipeline: {e!s}"
+        )
+
+
 @router.delete("/{clip_id}", response_model=BaseResponse[dict[str, Any]])
 def delete_render(clip_id: str, db: Session = Depends(get_db)):
     """Delete a rendered clip directory from disk and remove associated database job records."""
@@ -332,6 +452,53 @@ def update_upload_selection(
         logger.exception("Failed to update upload selection for %s: %s", clip_id, e)
         raise HTTPException(
             status_code=500, detail=f"Failed to update upload selection: {e!s}"
+        )
+
+
+@router.post(
+    "/{clip_id}/regenerate-metadata",
+    response_model=BaseResponse[RegenerateMetadataResponse],
+)
+def regenerate_clip_metadata(
+    clip_id: str,
+    request: RegenerateMetadataRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Regenerate the staged upload copy (title, description, tags) for a rendered clip.
+
+    Lets the creator compare AI (Gemini) and deterministic copy for the same
+    clip without re-rendering. Privacy, publish schedule and queue selection are
+    preserved; the replaced copy is returned under `previous`.
+    """
+    use_llm = request.use_llm if request is not None else None
+    hero_name = request.hero_name if request is not None else None
+    clip_context = request.clip_context if request is not None else None
+    game = request.game if request is not None else None
+    highlight_candidate_id = (
+        request.highlight_candidate_id if request is not None else None
+    )
+    try:
+        result = LLMMetadataService.regenerate_clip_metadata(
+            db=db,
+            clip_id=clip_id,
+            use_llm=use_llm,
+            hero_name=hero_name,
+            clip_context=clip_context,
+            game=game,
+            highlight_candidate_id=highlight_candidate_id,
+        )
+        return BaseResponse.success_response(
+            response=RegenerateMetadataResponse(**result)
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to regenerate metadata for %s: %s", clip_id, e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to regenerate metadata: {e!s}"
         )
 
 

@@ -37,7 +37,9 @@ def is_celery_broker_online(force_refresh: bool = False) -> bool:
         )
         client.ping()
 
-        app = Celery(broker=settings.CELERY_BROKER_URL, backend=settings.CELERY_RESULT_BACKEND)
+        app = Celery(
+            broker=settings.CELERY_BROKER_URL, backend=settings.CELERY_RESULT_BACKEND
+        )
         inspector = app.control.inspect(timeout=0.2)
         try:
             workers = inspector.ping()

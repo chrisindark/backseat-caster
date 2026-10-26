@@ -2,8 +2,10 @@
 
 YouTube resets the 10,000 unit daily quota at midnight Pacific time. Uploads
 cost 1,600 units, so a fresh day supports six uploads. This service records
-consumption per quota day and guards auto-publish dispatch before it burns
-units that are not available.
+consumption per quota day. Quota usage is advisory only: uploads are never
+blocked locally, so an exhausted budget surfaces as YouTube's own quotaExceeded
+error instead of an application-side rejection. The UI uses ``can_upload`` in
+the summary to show a warning confirmation before dispatching.
 """
 
 from __future__ import annotations
@@ -21,12 +23,8 @@ from app.models.youtube_quota import YouTubeQuotaUsage
 logger = logging.getLogger(__name__)
 
 
-class QuotaExceededError(RuntimeError):
-    """Raised when a YouTube upload cannot be dispatched within daily quota."""
-
-
 class YouTubeQuotaService:
-    """Track and guard the YouTube Data API daily unit budget."""
+    """Track the YouTube Data API daily unit budget (advisory, non-blocking)."""
 
     @staticmethod
     def _timezone() -> ZoneInfo:
@@ -68,9 +66,7 @@ class YouTubeQuotaService:
         target_day = day or cls.quota_day()
         usage = db.query(YouTubeQuotaUsage).filter_by(day=target_day).first()
         if usage is None:
-            usage = YouTubeQuotaUsage(
-                day=target_day, units_used=0, uploads_count=0
-            )
+            usage = YouTubeQuotaUsage(day=target_day, units_used=0, uploads_count=0)
             db.add(usage)
             db.commit()
             db.refresh(usage)
@@ -100,26 +96,22 @@ class YouTubeQuotaService:
         }
 
     @classmethod
-    def ensure_capacity(cls, db: Session, uploads: int = 1) -> None:
-        """Raise :class:`QuotaExceededError` when the remaining budget is short."""
-        summary = cls.get_summary(db)
-        if summary["uploads_remaining"] < uploads:
-            raise QuotaExceededError(
-                "YouTube daily API quota exhausted: "
-                f"{summary['uploads_remaining']} of {uploads} requested upload(s) "
-                f"available today. Quota resets at {summary['resets_at']}."
-            )
-
-    @classmethod
     def reserve_upload(cls, db: Session, units: int | None = None) -> dict[str, Any]:
-        """Consume one upload's worth of quota and return the fresh summary."""
+        """Consume one upload's worth of quota and return the fresh summary.
+
+        Over-budget uploads are allowed and still recorded so the quota bar
+        stays accurate; YouTube itself enforces the real daily limit.
+        """
         cost = int(units or settings.YOUTUBE_UPLOAD_QUOTA_COST)
         summary = cls.get_summary(db)
         if summary["units_remaining"] < cost:
-            raise QuotaExceededError(
-                "YouTube daily API quota exhausted: "
-                f"{summary['units_remaining']} unit(s) remaining, "
-                f"{cost} required per upload. Quota resets at {summary['resets_at']}."
+            logger.warning(
+                "YouTube daily API quota already exhausted for %s: "
+                "dispatching upload anyway (only %d unit(s) remaining, %d "
+                "required per upload). Expected to fail on YouTube's side.",
+                summary["quota_day"],
+                summary["units_remaining"],
+                cost,
             )
         usage = cls.get_or_create_usage(db, summary["quota_day"])
         usage.units_used = int(usage.units_used or 0) + cost

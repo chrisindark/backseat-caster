@@ -1,0 +1,436 @@
+{
+  "heroes": [
+    {
+      "hero_display": "Adam Warlock",
+      "hero_file": "adam_warlock",
+      "ultimate_display": "Karmic Revival",
+      "ultimate_file": "karmic_revival",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Angela",
+      "hero_file": "angela",
+      "ultimate_display": "Heven's Retribution",
+      "ultimate_file": "hevens_retribution",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Black Cat",
+      "hero_file": "black_cat",
+      "ultimate_display": "Calling Card",
+      "ultimate_file": "calling_card",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Black Panther",
+      "hero_file": "black_panther",
+      "ultimate_display": "Bast's Descent",
+      "ultimate_file": "basts_descent",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Black Widow",
+      "hero_file": "black_widow",
+      "ultimate_display": "Assassin's Focus",
+      "ultimate_file": "assassins_focus",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Blade",
+      "hero_file": "blade",
+      "ultimate_display": "Thousand-Fold Slash",
+      "ultimate_file": "thousand_fold_slash",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Bruce Banner",
+      "hero_file": "bruce_banner",
+      "ultimate_display": "Hulk Smash!",
+      "ultimate_file": "hulk_smash",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Captain America",
+      "hero_file": "captain_america",
+      "ultimate_display": "Freedom Charge",
+      "ultimate_file": "freedom_charge",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Cloak & Dagger",
+      "hero_file": "cloak_dagger",
+      "ultimate_display": "Eternal Bond",
+      "ultimate_file": "eternal_bond",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Cyclops",
+      "hero_file": "cyclops",
+      "ultimate_display": "Ruby Rage",
+      "ultimate_file": "ruby_rage",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Daredevil",
+      "hero_file": "daredevil",
+      "ultimate_display": "Let the Devil Out",
+      "ultimate_file": "let_the_devil_out",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Deadpool",
+      "hero_file": "deadpool",
+      "ultimate_display": "Skill Issue",
+      "ultimate_file": "skill_issue",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Devil Dinosaur",
+      "hero_file": "devil_dinosaur",
+      "ultimate_display": "Devil-Beast Rampage",
+      "ultimate_file": "devil_beast_rampage",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Doctor Strange",
+      "hero_file": "doctor_strange",
+      "ultimate_display": "Eye of Agamotto",
+      "ultimate_file": "eye_of_agamotto",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Elsa Bloodstone",
+      "hero_file": "elsa_bloodstone",
+      "ultimate_display": "Apex Predator",
+      "ultimate_file": "apex_predator",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Emma Frost",
+      "hero_file": "emma_frost",
+      "ultimate_display": "Psionic Seduction",
+      "ultimate_file": "psionic_seduction",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Gambit",
+      "hero_file": "gambit",
+      "ultimate_display": "Ragin' Royal Flush",
+      "ultimate_file": "ragin_royal_flush",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Gorr the God Butcher",
+      "hero_file": "gorr_the_god_butcher",
+      "ultimate_display": "Twilight of the Gods",
+      "ultimate_file": "twilight_of_the_gods",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Groot",
+      "hero_file": "groot",
+      "ultimate_display": "Strangling Prison",
+      "ultimate_file": "strangling_prison",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Hawkeye",
+      "hero_file": "hawkeye",
+      "ultimate_display": "Hunter's Sight",
+      "ultimate_file": "hunters_sight",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Hela",
+      "hero_file": "hela",
+      "ultimate_display": "Goddess of Death",
+      "ultimate_file": "goddess_of_death",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Human Torch",
+      "hero_file": "human_torch",
+      "ultimate_display": "Supernova",
+      "ultimate_file": "supernova",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Invisible Woman",
+      "hero_file": "invisible_woman",
+      "ultimate_display": "Invisible Boundary",
+      "ultimate_file": "invisible_boundary",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Iron Fist",
+      "hero_file": "iron_fist",
+      "ultimate_display": "Living Chi",
+      "ultimate_file": "living_chi",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Iron Man",
+      "hero_file": "iron_man",
+      "ultimate_display": "Invincible Pulse Cannon",
+      "ultimate_file": "invincible_pulse_cannon",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Jeff the Land Shark",
+      "hero_file": "jeff_the_land_shark",
+      "ultimate_display": "It's Jeff!",
+      "ultimate_file": "its_jeff",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Jubilee",
+      "hero_file": "jubilee",
+      "ultimate_display": "Firework Finale",
+      "ultimate_file": "firework_finale",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Loki",
+      "hero_file": "loki",
+      "ultimate_display": "God of Mischief",
+      "ultimate_file": "god_of_mischief",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Luna Snow",
+      "hero_file": "luna_snow",
+      "ultimate_display": "Fate of Both Worlds",
+      "ultimate_file": "fate_of_both_worlds",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Magik",
+      "hero_file": "magik",
+      "ultimate_display": "Darkchild",
+      "ultimate_file": "darkchild",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Magneto",
+      "hero_file": "magneto",
+      "ultimate_display": "Meteor M",
+      "ultimate_file": "meteor_m",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Mantis",
+      "hero_file": "mantis",
+      "ultimate_display": "Soul Resurgence",
+      "ultimate_file": "soul_resurgence",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Mister Fantastic",
+      "hero_file": "mister_fantastic",
+      "ultimate_display": "Brainiac Bounce",
+      "ultimate_file": "brainiac_bounce",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Moon Knight",
+      "hero_file": "moon_knight",
+      "ultimate_display": "Hand of Khonshu",
+      "ultimate_file": "hand_of_khonshu",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Namor",
+      "hero_file": "namor",
+      "ultimate_display": "Horn of Proteus",
+      "ultimate_file": "horn_of_proteus",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Peni Parker",
+      "hero_file": "peni_parker",
+      "ultimate_display": "Spider-Sweeper",
+      "ultimate_file": "spider_sweeper",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Phoenix",
+      "hero_file": "phoenix",
+      "ultimate_display": "Endsong",
+      "ultimate_file": "endsong",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Psylocke",
+      "hero_file": "psylocke",
+      "ultimate_display": "Dance of the Butterfly",
+      "ultimate_file": "dance_of_the_butterfly",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Rocket Raccoon",
+      "hero_file": "rocket_raccoon",
+      "ultimate_display": "C.Y.A.",
+      "ultimate_file": "c_y_a",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Rogue",
+      "hero_file": "rogue",
+      "ultimate_display": "Heartbreaker",
+      "ultimate_file": "heartbreaker",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Scarlet Witch",
+      "hero_file": "scarlet_witch",
+      "ultimate_display": "Reality Erasure",
+      "ultimate_file": "reality_erasure",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Spider-Man",
+      "hero_file": "spider_man",
+      "ultimate_display": "Spectacular Spin",
+      "ultimate_file": "spectacular_spin",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Squirrel Girl",
+      "hero_file": "squirrel_girl",
+      "ultimate_display": "Unbeatable Squirrel Tsunami",
+      "ultimate_file": "unbeatable_squirrel_tsunami",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Star-Lord",
+      "hero_file": "star_lord",
+      "ultimate_display": "Galactic Legend",
+      "ultimate_file": "galactic_legend",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Storm",
+      "hero_file": "storm",
+      "ultimate_display": "Omega Hurricane",
+      "ultimate_file": "omega_hurricane",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "The Hood",
+      "hero_file": "the_hood",
+      "ultimate_display": "Demon of the End",
+      "ultimate_file": "demon_of_the_end",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "The Punisher",
+      "hero_file": "the_punisher",
+      "ultimate_display": "Final Judgement",
+      "ultimate_file": "final_judgement",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "The Thing",
+      "hero_file": "the_thing",
+      "ultimate_display": "Clobberin' Time",
+      "ultimate_file": "clobberin_time",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Thor",
+      "hero_file": "thor",
+      "ultimate_display": "God of Thunder",
+      "ultimate_file": "god_of_thunder",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Ultron",
+      "hero_file": "ultron",
+      "ultimate_display": "Rage of Ultron",
+      "ultimate_file": "rage_of_ultron",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Venom",
+      "hero_file": "venom",
+      "ultimate_display": "Feast of the Abyss",
+      "ultimate_file": "feast_of_the_abyss",
+      "role": "vanguard",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "White Fox",
+      "hero_file": "white_fox",
+      "ultimate_display": "Kumiho Unleashed",
+      "ultimate_file": "kumiho_unleashed",
+      "role": "strategist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Winter Soldier",
+      "hero_file": "winter_soldier",
+      "ultimate_display": "Kraken Impact",
+      "ultimate_file": "kraken_impact",
+      "role": "duelist",
+      "confidence": "high"
+    },
+    {
+      "hero_display": "Wolverine",
+      "hero_file": "wolverine",
+      "ultimate_display": "Last Stand",
+      "ultimate_file": "last_stand",
+      "role": "duelist",
+      "confidence": "high"
+    }
+  ]
+}

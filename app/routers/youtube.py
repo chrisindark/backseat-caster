@@ -29,8 +29,9 @@ from app.schemas.youtube import (
     YouTubeUploadResult,
 )
 from app.services.auto_stage import AutoStageService, as_utc
+from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
-from app.services.youtube_quota import QuotaExceededError, YouTubeQuotaService
+from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import (
     YouTubeUploaderService,
     batch_upload_clips_celery_task,
@@ -328,21 +329,8 @@ def upload_selected_queue(
             )
         )
 
-    # Quota guard: never dispatch more uploads than today's budget allows.
-    pending_jobs = [
-        j
-        for j in selected_jobs
-        if not (
-            j.youtube_video_id
-            and (j.youtube_upload_status or "").lower() == "completed"
-        )
-    ]
-    try:
-        YouTubeQuotaService.ensure_capacity(db, max(1, len(pending_jobs)))
-    except QuotaExceededError as quota_err:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(quota_err)
-        )
+    # Quota usage is advisory: uploads are never blocked locally so an
+    # exhausted budget surfaces as YouTube's own quotaExceeded error instead.
 
     if sync:
         results = YouTubeUploaderService.upload_selected_clips(db=db)
@@ -442,13 +430,6 @@ def upload_clip(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="YouTube account not authenticated. Please authenticate first via /api/v1/youtube/auth/url",
-        )
-
-    try:
-        YouTubeQuotaService.ensure_capacity(db, 1)
-    except QuotaExceededError as quota_err:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(quota_err)
         )
 
     if job:
@@ -627,7 +608,8 @@ def list_staged_clips(db: Session = Depends(get_db)):
     jobs = (
         db.query(RenderJob)
         .filter(
-            RenderJob.auto_staged.is_(True),
+            (RenderJob.auto_staged.is_(True))
+            | (RenderJob.is_selected_for_upload.is_(True)),
             (RenderJob.youtube_upload_status.is_(None))
             | (RenderJob.youtube_upload_status != "completed"),
         )
@@ -637,10 +619,7 @@ def list_staged_clips(db: Session = Depends(get_db)):
 
     video_ids = {j.video_id for j in jobs if j.video_id}
     videos = (
-        {
-            v.id: v
-            for v in db.query(Video).filter(Video.id.in_(video_ids)).all()
-        }
+        {v.id: v for v in db.query(Video).filter(Video.id.in_(video_ids)).all()}
         if video_ids
         else {}
     )
@@ -654,7 +633,10 @@ def list_staged_clips(db: Session = Depends(get_db)):
     quota = YouTubeQuotaResponse(**YouTubeQuotaService.get_summary(db))
     return BaseResponse.success_response(
         response=StagedClipsResponse(
-            items=items, total=len(items), quota=quota
+            items=items,
+            total=len(items),
+            quota=quota,
+            llm_available=LLMMetadataService.is_configured(),
         )
     )
 

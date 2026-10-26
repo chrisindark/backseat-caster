@@ -16,7 +16,11 @@ uv run pytest tests/test_api.py -v  # one file, verbose
 | `test_api.py` | Video catalog CRUD, channel sync, download dispatch, OBS upload, thumbnails/status |
 | `test_renderer.py` | Render engine end-to-end on synthetic assets (all crop presets + quality tiers), manifest output |
 | `test_youtube_upload.py` | OAuth status/flows and resumable upload service against stubbed Google clients |
+| `test_phase8.py` | Auto-stage, LLM metadata, quota accounting, native `publishAt` scheduling |
+| `test_auto_pipeline.py` | Uploaded-render cleanup, VOD-safety guard, batched stage sweep, maintenance endpoints |
 | `test_highlight_api.py` | Highlight endpoints + detect dispatch |
+| `test_killfeed.py`, `test_ultimate_meter.py`, `test_hero_identifier.py` | Deep visual extraction stages |
+| `test_phase3_integration.py` | End-to-end Phase 3 visual orchestration |
 | `test_audio_scanner.py` | Stage 1: ebur128/RMS bucketing, threshold logic |
 | `test_roi_extractor.py` | Stage 2: HUD ROI sampling/cropping |
 | `test_visual_matcher.py` | Stage 3: color gating + OCR matching incl. sanitizer |

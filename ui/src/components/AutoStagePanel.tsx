@@ -201,7 +201,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
   };
 
   const handleRegenerate = async (clipId: string) => {
-    const wantsAi = useAi[clipId] ?? Boolean(staged?.llm_available);
+    const wantsAi = useAi[clipId] ?? false;
     setBusyClipId(clipId);
     setError(null);
     try {
@@ -216,7 +216,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
       await loadStaged();
       setNotice(
         res.used_llm
-          ? "Gemini copy generated — compare below."
+          ? "AI copy generated — compare below."
           : "Deterministic copy generated — compare below."
       );
       onStagedChange?.();
@@ -407,7 +407,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                             : "bg-slate-800 text-slate-300 border-white/10"
                         }`}
                       >
-                        {source === "llm" ? "Gemini copy" : "Deterministic copy"}
+                        {source === "llm" ? "AI copy" : "Deterministic copy"}
                       </span>
                     </div>
 
@@ -426,7 +426,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                       <label className="inline-flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
                         <input
                           type="checkbox"
-                          checked={useAi[job.clip_id] ?? Boolean(staged?.llm_available)}
+                          checked={useAi[job.clip_id] ?? false}
                           disabled={!staged?.llm_available || busy}
                           onChange={(event) =>
                             setUseAi((prev) => ({
@@ -437,10 +437,10 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                           className="h-3.5 w-3.5 rounded accent-violet-500 disabled:opacity-40"
                           aria-label={`Use AI copy for ${job.clip_id}`}
                         />
-                        <span>AI copy (Gemini)</span>
+                        <span>AI copy</span>
                         {!staged?.llm_available && (
                           <span className="text-slate-500">
-                            — no GEMINI_API_KEY configured
+                            — no LLM configured
                           </span>
                         )}
                       </label>
@@ -480,7 +480,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                     {isComparing && prevCopy && (
                       <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-3 py-2.5 space-y-2">
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/80">
-                          Previous copy ({prevCopy.metadata_source === "llm" ? "Gemini" : "deterministic"})
+                          Previous copy ({prevCopy.metadata_source === "llm" ? "AI" : "deterministic"})
                           {prevCopy.regenerated_at
                             ? ` · ${formatSchedule(prevCopy.regenerated_at)}`
                             : ""}

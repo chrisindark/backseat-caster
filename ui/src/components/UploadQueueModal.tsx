@@ -129,7 +129,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Metadata regeneration: AI vs deterministic copy for the same clip.
-  const [useAiCopy, setUseAiCopy] = useState<boolean>(true);
+  const [useAiCopy, setUseAiCopy] = useState<boolean>(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [previousCopies, setPreviousCopies] = useState<
     Record<
@@ -177,7 +177,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
       });
       setSuccessMessage(
         res.used_llm
-          ? `Gemini copy generated for ${clipId}.`
+          ? `AI copy generated for ${clipId}.`
           : `${res.message} (${clipId})`
       );
       setTimeout(() => setSuccessMessage(null), 4000);
@@ -470,7 +470,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                   onChange={(e) => setUseAiCopy(e.target.checked)}
                   className="h-3.5 w-3.5 rounded accent-violet-500"
                 />
-                <span>Use AI copy (Gemini) when regenerating</span>
+                <span>Use AI copy when regenerating</span>
               </label>
             </div>
           </div>
@@ -698,7 +698,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           <p className="text-[10px] text-slate-500">
                             Previous ({
                               previousCopies[render.clip_id].metadata_source === "llm"
-                                ? "Gemini"
+                                ? "AI"
                                 : "deterministic"
                             }):{" "}
                             <span className="line-through decoration-slate-600">
@@ -799,7 +799,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/20 text-violet-300 hover:bg-violet-600/30 border border-violet-500/30 font-medium transition-colors disabled:opacity-50"
                           title={
                             useAiCopy
-                              ? "Regenerate copy with Gemini (falls back if no API key)"
+                              ? "Regenerate copy with AI (falls back if no LLM configured)"
                               : "Regenerate copy deterministically"
                           }
                         >
@@ -811,7 +811,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           <span>
                             {regeneratingId === render.clip_id
                               ? "Generating..."
-                              : `Regenerate (${useAiCopy ? "AI" : "non-AI"})`}
+                              : `Regenerate (${useAiCopy ? "AI" : "Deterministic"})`}
                           </span>
                         </button>
                         {previousCopies[render.clip_id]?.description && (

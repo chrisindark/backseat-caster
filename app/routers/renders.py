@@ -498,7 +498,7 @@ def regenerate_clip_metadata(
     """
     Regenerate the staged upload copy (title, description, tags) for a rendered clip.
 
-    Lets the creator compare AI (Gemini) and deterministic copy for the same
+    Lets the creator compare AI and deterministic copy for the same
     clip without re-rendering. Privacy, publish schedule and queue selection are
     preserved; the replaced copy is returned under `previous`.
     """

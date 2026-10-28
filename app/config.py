@@ -84,17 +84,67 @@ class Settings(BaseSettings):
     AUTO_CLEANUP_VOD: bool = False
     AUTO_PIPELINE_INTERVAL_MINUTES: int = 0
 
-    # Phase 8: LLM metadata generation (Gemini)
+    # Phase 8: LLM metadata generation (Universal OpenAI-compatible: Ollama, OpenAI, Groq, Gemini, etc.)
+    LLM_METADATA_ENABLED: bool = False
+    LLM_BASE_URL: str | None = None
+    LLM_API_KEY: str | None = None
+    LLM_MODEL: str = "llama3.2"
+    # Legacy Gemini settings preserved for backwards compatibility
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-3.8-flash"
-    LLM_METADATA_ENABLED: bool = True
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
+    @property
+    def llm_api_key(self) -> str | None:
+        """Resolve the LLM key from dedicated settings, OpenAI, or Gemini/Google env vars."""
+        import os
+
+        return (
+            self.LLM_API_KEY
+            or os.environ.get("OPENAI_API_KEY")
+            or self.GEMINI_API_KEY
+            or os.environ.get("GOOGLE_API_KEY")
+            or None
+        )
 
     @property
     def gemini_api_key(self) -> str | None:
-        """Resolve the Gemini key from dedicated settings or the shared Google env var."""
+        """Backwards compatibility alias for gemini_api_key."""
+        return self.llm_api_key
+
+    @property
+    def resolved_llm_base_url(self) -> str:
+        """Resolve base URL for OpenAI-compatible chat completions."""
         import os
 
-        return self.GEMINI_API_KEY or os.environ.get("GOOGLE_API_KEY") or None
+        if self.LLM_BASE_URL:
+            return self.LLM_BASE_URL.rstrip("/")
+        # If Google/Gemini key is configured without a custom base URL
+        if (
+            (self.GEMINI_API_KEY or os.environ.get("GOOGLE_API_KEY"))
+            and not self.LLM_API_KEY
+            and not os.environ.get("OPENAI_API_KEY")
+        ):
+            return "https://generativelanguage.googleapis.com/v1beta/openai"
+        # If OpenAI key is configured without a custom base URL
+        if os.environ.get("OPENAI_API_KEY") and not self.LLM_API_KEY:
+            return "https://api.openai.com/v1"
+        # Local-first Ollama default
+        return "http://localhost:11434/v1"
+
+    @property
+    def resolved_llm_model(self) -> str:
+        """Resolve active LLM model name."""
+        import os
+
+        if self.LLM_MODEL and self.LLM_MODEL != "llama3.2":
+            return self.LLM_MODEL
+        if (
+            (self.GEMINI_API_KEY or os.environ.get("GOOGLE_API_KEY"))
+            and not self.LLM_API_KEY
+            and not os.environ.get("OPENAI_API_KEY")
+        ):
+            return self.GEMINI_MODEL or "gemini-2.5-flash"
+        return self.LLM_MODEL or "llama3.2"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

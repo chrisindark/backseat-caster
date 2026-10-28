@@ -63,7 +63,7 @@ backseat-caster/
 │   │   ├── renders.py           # RenderService: render jobs, manifests, deletions
 │   │   ├── auto_stage.py        # AutoStageService: top-N rendering, metadata staging, publish slots
 │   │   ├── auto_pipeline.py     # AutoPipelineService: uploaded-render cleanup + batched stage sweep
-│   │   ├── llm_metadata.py      # LLMMetadataService: Gemini copy + deterministic fallback
+│   │   ├── llm_metadata.py      # LLMMetadataService: OpenAI-compatible LLM copy + deterministic fallback
 │   │   ├── upload_metadata.py   # Deterministic YouTube title/description/tag builder
 │   │   ├── youtube_quota.py     # YouTubeQuotaService: advisory daily unit accounting
 │   │   ├── youtube.py           # YtdlpService: YouTube channel scraping and yt-dlp handling

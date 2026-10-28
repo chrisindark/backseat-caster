@@ -796,61 +796,65 @@ def test_staging_response_reports_llm_availability(client, db_session, monkeypat
 
 
 def test_llm_metadata_parses_markdown_fences_and_parsed_object(monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_API_KEY", "test-key")
 
-    class MockModel:
-        def model_dump(self):
+    class MockResponse:
+        def __init__(self, content: str, status_code: int = 200):
+            self.content_str = content
+            self.status_code = status_code
+            self.text = content
+
+        def json(self):
             return {
-                "title": "Parsed Title",
-                "description": "Parsed Desc",
-                "tags": ["hero", "game"],
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": self.content_str,
+                        }
+                    }
+                ]
             }
 
-    class MockResponseParsed:
-        parsed = MockModel()
-        text = "ignored text"
+        def raise_for_status(self):
+            pass
 
-    # 1. Test SDK parsed attribute takes priority
+    # 1. Test standard raw JSON response
+    mock_json = json.dumps(
+        {
+            "title": "Parsed Title",
+            "description": "Parsed Desc",
+            "tags": ["hero", "game"],
+        }
+    )
     monkeypatch.setattr(
-        "google.genai.Client",
-        lambda api_key: type(
-            "C",
-            (),
-            {
-                "models": type(
-                    "M",
-                    (),
-                    {"generate_content": lambda *args, **kwargs: MockResponseParsed()},
-                )()
-            },
-        )(),
+        "httpx.Client.post",
+        lambda *args, **kwargs: MockResponse(mock_json),
     )
     result = LLMMetadataService._call_gemini("test prompt")
     assert result is not None
     assert result["title"] == "Parsed Title"
+    assert result["description"] == "Parsed Desc"
 
     # 2. Test markdown-fenced text parsing
-    class MockResponseFenced:
-        parsed = None
-        text = '```json\n{"title": "Fenced Title", "description": "Fenced Desc", "tags": ["fenced"]}\n```'
-
+    fenced_text = '```json\n{"title": "Fenced Title", "description": "Fenced Desc", "tags": ["fenced"]}\n```'
     monkeypatch.setattr(
-        "google.genai.Client",
-        lambda api_key: type(
-            "C",
-            (),
-            {
-                "models": type(
-                    "M",
-                    (),
-                    {"generate_content": lambda *args, **kwargs: MockResponseFenced()},
-                )()
-            },
-        )(),
+        "httpx.Client.post",
+        lambda *args, **kwargs: MockResponse(fenced_text),
     )
     result = LLMMetadataService._call_gemini("test prompt")
     assert result is not None
     assert result["title"] == "Fenced Title"
+
+    # 3. Test outer {...} regex fallback
+    raw_text = 'Here is your metadata:\n{"title": "Regex Title", "description": "Regex Desc", "tags": ["tag1"]}\nEnjoy!'
+    monkeypatch.setattr(
+        "httpx.Client.post",
+        lambda *args, **kwargs: MockResponse(raw_text),
+    )
+    result = LLMMetadataService._call_gemini("test prompt")
+    assert result is not None
+    assert result["title"] == "Regex Title"
 
 
 def test_regenerate_metadata_with_explicit_hero_and_context(

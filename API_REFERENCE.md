@@ -66,7 +66,7 @@ Error responses use the same envelope shape with `success: false` and a populate
 | `POST` | `/api/v1/renders/cleanup-uploaded` | Delete local render folders for clips already uploaded to YouTube; `RenderJob` records and YouTube links are retained. Body: `sync`, `clean_vod` |
 | `POST` | `/api/v1/renders/auto-pipeline` | Maintenance sweep: clean uploaded render folders, then stage the next `AUTO_STAGE_TOP_N` highlights per downloaded video (repeat runs consume the next-best candidates). Body: `stage`, `cleanup`, `clean_vod`, `top_n`, `min_score`, `clipping_mode`, `schedule`, `sync` |
 | `POST` | `/api/v1/renders/{clip_id}/upload-selection` | Stage/select clip(s) for upload queue |
-| `POST` | `/api/v1/renders/{clip_id}/regenerate-metadata` | Rewrite staged title/description/tags without re-rendering; `{"use_llm": true\|false\|null}` picks AI (Gemini) vs deterministic copy, returns `previous` copy for comparison |
+| `POST` | `/api/v1/renders/{clip_id}/regenerate-metadata` | Rewrite staged title/description/tags without re-rendering; `{"use_llm": true\|false\|null}` picks AI vs deterministic copy, returns `previous` copy for comparison |
 | `GET` | `/api/v1/renders/{clip_id}/stream/{video_type}` | Stream one output format (`landscape`, `vertical_blur`, `vertical_crop`) *(file stream)* |
 
 Render job flow: `POST /renders` → job persisted `pending` → Celery/BackgroundTasks executes FFmpeg → outputs + `manifest.json` land in `./data/renders/<clip_id>/` → poll `/status`. See [docs/rendering.md](docs/rendering.md).

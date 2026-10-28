@@ -1,10 +1,9 @@
 """LLM-generated YouTube Shorts metadata (title, description, tags).
 
-Phase 8 conditions Gemini on the mined highlight context (hero, multi-kill
-chain, ultimate payoff, game phase) to produce mobile-optimised copy. Every
-call degrades gracefully to the deterministic
-:mod:`app.services.upload_metadata` generator when the API key is missing,
-the SDK is unavailable, the request fails, or the model returns unusable text.
+Supports any OpenAI-compatible API (local Ollama, LM Studio, Groq, OpenAI, Gemini).
+Every call degrades gracefully to the deterministic
+:mod:`app.services.upload_metadata` generator when disabled, unconfigured,
+the request fails, or the model returns unusable text.
 """
 
 from __future__ import annotations
@@ -226,17 +225,21 @@ def _normalise_description(raw: str | None, fallback: str, tags: list[str]) -> s
 
 
 class LLMMetadataService:
-    """Gemini-powered upload metadata generator with deterministic fallback."""
+    """Universal OpenAI-compatible upload metadata generator with deterministic fallback."""
 
-    @staticmethod
-    def is_available() -> bool:
-        """True when AI copy should be used by default (enabled + key present)."""
-        return bool(settings.LLM_METADATA_ENABLED and settings.gemini_api_key)
+    @classmethod
+    def is_available(cls) -> bool:
+        """True when AI copy should be used by default (enabled + provider configured)."""
+        return bool(settings.LLM_METADATA_ENABLED and cls.is_configured())
 
     @staticmethod
     def is_configured() -> bool:
-        """True when a Gemini key exists, regardless of the enable switch."""
-        return bool(settings.gemini_api_key)
+        """True when an LLM provider is configured (API key exists or custom base URL is set)."""
+        if settings.llm_api_key:
+            return True
+        if settings.LLM_BASE_URL:
+            return True
+        return False
 
     @classmethod
     def generate_clip_metadata(
@@ -375,71 +378,111 @@ class LLMMetadataService:
             clip_context=resolved_context,
         )
 
-    @staticmethod
-    def _call_gemini(prompt: str) -> dict[str, Any] | None:
-        """Call Gemini with a JSON schema; return None on any failure."""
-        api_key = settings.gemini_api_key
-        if not api_key:
-            return None
+    @classmethod
+    def _call_llm(cls, prompt: str) -> dict[str, Any] | None:
+        """Call OpenAI-compatible chat completions endpoint; return None on any failure."""
+        api_key = settings.llm_api_key
+        base_url = settings.resolved_llm_base_url.rstrip("/")
+        url = (
+            base_url
+            if base_url.endswith("/chat/completions")
+            else f"{base_url}/chat/completions"
+        )
+
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload: dict[str, Any] = {
+            "model": settings.resolved_llm_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You write titles, descriptions and tags for YouTube Shorts made from gaming highlights. "
+                        "Output strictly a valid JSON object with keys 'title', 'description', and 'tags'. "
+                        "Do not include any commentary outside the JSON object."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.7,
+            "response_format": {"type": "json_object"},
+        }
+
         try:
-            from google import genai
-            from google.genai import types
+            import httpx
 
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=_LLMMetadata,
-                    temperature=0.7,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
-                    max_output_tokens=4096,
-                ),
-            )
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(url, headers=headers, json=payload)
+                # Some local / non-OpenAI endpoints don't accept response_format
+                if resp.status_code == 400 and "response_format" in resp.text:
+                    payload.pop("response_format", None)
+                    resp = client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
         except Exception as exc:
-            logger.warning("Gemini metadata generation failed: %s", exc)
+            logger.warning("LLM metadata generation failed: %s", exc)
             return None
 
-        # 1. Prefer SDK structured parsed output if available
-        parsed = getattr(response, "parsed", None)
-        if parsed is not None:
-            if hasattr(parsed, "model_dump"):
-                return parsed.model_dump()
-            if isinstance(parsed, dict):
-                return parsed
-
-        # 2. Parse text response safely, handling markdown code fences
-        logger.debug("Gemini metadata response: %s", response)
-        text = _clean(getattr(response, "text", None))
-        if not text:
-            logger.warning("Gemini metadata response was empty")
+        choices = data.get("choices") or []
+        if not choices:
+            logger.warning("LLM response contained no choices: %s", data)
             return None
 
-        # Strip markdown fences (e.g. ```json ... ```)
-        cleaned_text = re.sub(
-            r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE
-        ).strip()
-        cleaned_text = re.sub(r"\s*```$", "", cleaned_text).strip()
+        content = choices[0].get("message", {}).get("content", "")
+        if not content:
+            logger.warning("LLM response message content was empty")
+            return None
 
+        return cls._parse_json_response(content)
+
+    @classmethod
+    def _call_gemini(cls, prompt: str) -> dict[str, Any] | None:
+        """Alias for _call_llm for backwards compatibility with tests and callers."""
+        return cls._call_llm(prompt)
+
+    @classmethod
+    def _parse_json_response(cls, text: str) -> dict[str, Any] | None:
+        """Parse JSON response from LLM, handling markdown code blocks and raw text."""
+        cleaned_text = _clean(text)
+        if not cleaned_text:
+            return None
+
+        # 1. Direct JSON parse
         try:
             data = json.loads(cleaned_text)
+            if isinstance(data, dict):
+                return data
         except json.JSONDecodeError:
-            # Fallback regex to capture outer {...} block
-            match = re.search(r"\{[\s\S]*\}", text)
-            if match:
-                try:
-                    data = json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "Gemini metadata response was not valid JSON: %s", text
-                    )
-                    return None
-            else:
-                logger.warning("Gemini metadata response was not valid JSON: %s", text)
-                return None
+            pass
 
-        return data if isinstance(data, dict) else None
+        # 2. Strip markdown fences (e.g. ```json ... ```)
+        unfenced = re.sub(
+            r"^```(?:json)?\s*", "", cleaned_text, flags=re.IGNORECASE
+        ).strip()
+        unfenced = re.sub(r"\s*```$", "", unfenced).strip()
+        try:
+            data = json.loads(unfenced)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+        # 3. Fallback regex to capture outer {...} block
+        match = re.search(r"\{[\s\S]*\}", cleaned_text)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        logger.warning("LLM metadata response was not valid JSON: %s", cleaned_text)
+        return None
 
     @classmethod
     def regenerate_clip_metadata(
@@ -642,7 +685,7 @@ class LLMMetadataService:
             "upload_selection": patched,
             "previous": patched.get("previous_metadata") or previous,
             "message": (
-                "Metadata regenerated with Gemini copy."
+                "Metadata regenerated with AI copy."
                 if source == "llm"
                 else "Metadata regenerated with deterministic copy."
             ),

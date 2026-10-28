@@ -93,14 +93,17 @@ OAuth details: [docs/youtube-authentication.md](docs/youtube-authentication.md),
 | `AUTO_STAGE_INTERVAL_HOURS` | `24` | Spacing between consecutive scheduled releases (min 1) |
 | `AUTO_STAGE_TIMEZONE` | `Asia/Kolkata` | Timezone used to interpret `AUTO_STAGE_DAILY_SLOTS` |
 | `AUTO_STAGE_DAILY_SLOTS` | `["08:00", "12:30", "16:00", "18:30", "20:30", "23:00"]` | Daily local release times; when set, schedules roll across days instead of using the interval |
-| `GEMINI_API_KEY` | `None` | Gemini key for Shorts copy; falls back to `GOOGLE_API_KEY`, then to deterministic metadata |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model used for metadata generation |
-| `LLM_METADATA_ENABLED` | `True` | Master switch for LLM copy (deterministic generator always available) |
+| `LLM_METADATA_ENABLED` | `False` | Master switch for AI copy (deterministic generator used by default when false) |
+| `LLM_BASE_URL` | `http://localhost:11434/v1` | Base URL for OpenAI-compatible endpoint (Ollama, LM Studio, Groq, OpenAI, Gemini) |
+| `LLM_API_KEY` | `None` | Optional API key (not required for local Ollama; falls back to `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`) |
+| `LLM_MODEL` | `llama3.2` | Model name for chat completions (e.g. `llama3.2`, `gpt-4o-mini`, `gemini-2.5-flash`) |
+| `GEMINI_API_KEY` | `None` | (Legacy) Gemini key; automatically resolves to Gemini's OpenAI-compatible endpoint |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | (Legacy) Model name when using Gemini key |
 | `YOUTUBE_DAILY_QUOTA_UNITS` | `10000` | Daily YouTube Data API unit budget |
 | `YOUTUBE_UPLOAD_QUOTA_COST` | `1600` | Units consumed per upload (6 uploads/day at defaults) |
 | `YOUTUBE_QUOTA_TIMEZONE` | `America/Los_Angeles` | Timezone whose midnight resets the quota day |
 
-Staging behaviour: clips are rendered as private vertical Shorts, metadata is generated with Gemini (or the deterministic generator), and staggered `publishAt` slots are assigned so YouTube releases them without the local machine staying online. See [ROADMAP.md](ROADMAP.md) §Phase 8.
+Staging behaviour: clips are rendered as private vertical Shorts, metadata is generated with deterministic copy by default (or AI copy when enabled), and staggered `publishAt` slots are assigned so YouTube releases them without the local machine staying online. See [ROADMAP.md](ROADMAP.md) §Phase 8.
 
 ### 6.2 Maintenance Pipeline — Uploaded Render Cleanup & Batch Staging
 

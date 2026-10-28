@@ -165,5 +165,5 @@ class StagedClipsResponse(BaseModel):
     total: int = 0
     quota: YouTubeQuotaResponse | None = None
     llm_available: bool = Field(
-        False, description="Whether a Gemini key is configured for AI copy"
+        False, description="Whether an LLM provider is configured for AI copy"
     )

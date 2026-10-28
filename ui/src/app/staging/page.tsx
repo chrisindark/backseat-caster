@@ -110,7 +110,7 @@ export default function StagingPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
 
   // AI vs deterministic regeneration
-  const [useAiCopy, setUseAiCopy] = useState<boolean>(true);
+  const [useAiCopy, setUseAiCopy] = useState<boolean>(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [previousCopies, setPreviousCopies] = useState<
     Record<
@@ -280,7 +280,7 @@ export default function StagingPage() {
 
       setSuccessMessage(
         res.used_llm
-          ? `Gemini AI copy generated for ${clipId}!`
+          ? `AI copy generated for ${clipId}!`
           : `Deterministic copy refreshed for ${clipId}.`
       );
       setTimeout(() => setSuccessMessage(null), 3500);
@@ -489,7 +489,7 @@ export default function StagingPage() {
               <span>Publishing Staging Queue</span>
             </h1>
             <p className="text-xs lg:text-sm text-slate-400">
-              Watch clips, verify hero identity & play context, generate Gemini AI copy, and publish to YouTube Shorts.
+              Watch clips, verify hero identity & play context, generate AI copy, and publish to YouTube Shorts.
             </p>
           </div>
 
@@ -652,7 +652,7 @@ export default function StagingPage() {
             <div>
               <span className="text-[11px] font-semibold text-violet-300 uppercase tracking-wider block flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                <span>AI Copy Engine (Gemini)</span>
+                <span>AI Copy Engine</span>
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Conditions on hero identity, kill streaks, and gameplay context notes.
@@ -665,7 +665,7 @@ export default function StagingPage() {
                 onChange={(e) => setUseAiCopy(e.target.checked)}
                 className="h-4 w-4 rounded accent-violet-600 cursor-pointer"
               />
-              <span className="font-medium">Use AI copy (Gemini) when regenerating</span>
+              <span className="font-medium">Use AI copy when regenerating</span>
             </label>
           </div>
         </div>
@@ -892,7 +892,7 @@ export default function StagingPage() {
                             <span>
                               {regeneratingId === render.clip_id
                                 ? "Generating Copy..."
-                                : `Generate (${useAiCopy ? "Gemini AI" : "Deterministic"}) Copy`}
+                                : `Generate (${useAiCopy ? "AI" : "Deterministic"}) Copy`}
                             </span>
                           </button>
 

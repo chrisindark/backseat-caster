@@ -844,3 +844,226 @@ def test_list_highlight_runs_endpoint(client, dummy_video, db_session):
         f"{settings.API_PREFIX}/videos/nonexistent_vid/highlights/runs"
     )
     assert res_404.status_code == 404
+
+
+def test_list_highlight_candidates_lifecycle_status(client, dummy_video, db_session):
+    """Verify GET /highlights accurately resolves candidate lifecycle states (uploaded, rendered, unprocessed)."""
+    from app.models.render_job import RenderJob
+
+    # Candidate 1: Uploaded to YouTube
+    c1 = HighlightCandidate(
+        id="cand_test_up",
+        video_id=dummy_video.id,
+        start_seconds=10.0,
+        end_seconds=30.0,
+        duration_seconds=20.0,
+        score=0.95,
+        event_type="team_wipe",
+        details_json="{}",
+    )
+    # Candidate 2: Rendered locally, not uploaded
+    c2 = HighlightCandidate(
+        id="cand_test_rend",
+        video_id=dummy_video.id,
+        start_seconds=40.0,
+        end_seconds=60.0,
+        duration_seconds=20.0,
+        score=0.85,
+        event_type="multi_ko",
+        details_json="{}",
+    )
+    # Candidate 3: Unprocessed / Left
+    c3 = HighlightCandidate(
+        id="cand_test_left",
+        video_id=dummy_video.id,
+        start_seconds=70.0,
+        end_seconds=90.0,
+        duration_seconds=20.0,
+        score=0.75,
+        event_type="clutch",
+        details_json="{}",
+    )
+    db_session.add_all([c1, c2, c3])
+    db_session.commit()
+
+    # Job for c1 (Uploaded)
+    j1 = RenderJob(
+        id="job_c1",
+        clip_id="auto_cand_test_up",
+        video_id=dummy_video.id,
+        highlight_candidate_id=c1.id,
+        status="completed",
+        start_seconds=10.0,
+        duration_seconds=20.0,
+        youtube_upload_status="completed",
+        youtube_video_id="yt_vid_123",
+        youtube_upload_url="https://youtube.com/shorts/yt_vid_123",
+    )
+    # Job for c2 (Rendered only)
+    j2 = RenderJob(
+        id="job_c2",
+        clip_id="auto_cand_test_rend",
+        video_id=dummy_video.id,
+        highlight_candidate_id=c2.id,
+        status="completed",
+        start_seconds=40.0,
+        duration_seconds=20.0,
+        youtube_upload_status="not_uploaded",
+    )
+    db_session.add_all([j1, j2])
+    db_session.commit()
+
+    res = client.get(f"{settings.API_PREFIX}/videos/{dummy_video.id}/highlights")
+    assert res.status_code == 200
+    data = res.json()["response"]
+
+    assert data["count"] == 3
+    assert data["uploaded_count"] == 1
+    assert data["rendered_count"] == 1
+    assert data["unprocessed_count"] == 1
+    assert data["top_rated_left_count"] == 0  # c3 score is 0.75 (< 0.8)
+
+    candidates = {c["candidate_id"]: c for c in data["candidates"]}
+    assert candidates["cand_test_up"]["processing_status"] == "uploaded"
+    assert candidates["cand_test_up"]["youtube_video_id"] == "yt_vid_123"
+
+    assert candidates["cand_test_rend"]["processing_status"] == "rendered"
+    assert candidates["cand_test_rend"]["render_status"] == "completed"
+
+    assert candidates["cand_test_left"]["processing_status"] == "unprocessed"
+    assert candidates["cand_test_left"]["render_status"] is None
+
+
+def test_batch_publish_slots_same_day_catchup(db_session):
+    """Verify compute_batch_publish_slots catches up missed early slots at the next slot on the same day."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from app.services.auto_stage import AutoStageService
+
+    tz = ZoneInfo("Asia/Kolkata")
+    # Simulate current time: 13:51 IST (slots 08:00 and 12:30 have passed, remaining are 16:00, 18:30, 20:30, 23:00)
+    simulated_now = datetime(2026, 10, 27, 13, 51, tzinfo=tz).astimezone(UTC)
+
+    slots = AutoStageService.compute_batch_publish_slots(
+        db=db_session,
+        count=6,
+        same_day_catchup=True,
+        now=simulated_now,
+    )
+    assert len(slots) == 6
+
+    # Convert all slots to local IST date & time
+    local_slots = [s.astimezone(tz) for s in slots]
+    target_date = datetime(2026, 10, 27).date()
+
+    # Verify ALL 6 slots are scheduled on the SAME DAY (2026-10-27)
+    for s in local_slots:
+        assert s.date() == target_date
+
+    # The 2 missed early slots catch up at 16:00 (spaced 3 mins apart: 16:00, 16:03, 16:06)
+    assert local_slots[0].hour == 16 and local_slots[0].minute == 0
+    assert local_slots[1].hour == 16 and local_slots[1].minute == 3
+    assert local_slots[2].hour == 16 and local_slots[2].minute == 6
+    # The remaining 3 slots fill the remaining daily slots: 18:30, 20:30, 23:00
+    assert local_slots[3].hour == 18 and local_slots[3].minute == 30
+    assert local_slots[4].hour == 20 and local_slots[4].minute == 30
+    assert local_slots[5].hour == 23 and local_slots[5].minute == 0
+
+
+def test_batch_stage_highlights_endpoint(client, dummy_video, db_session, monkeypatch):
+    """Verify POST /highlights/batch-stage stages candidates and guarantees idempotency."""
+    from app.models.render_job import RenderJob
+    from app.services.llm_metadata import LLMMetadataService
+    from app.services.renders import RenderService
+
+    c1 = HighlightCandidate(
+        id="cand_batch_1",
+        video_id=dummy_video.id,
+        start_seconds=10.0,
+        end_seconds=25.0,
+        duration_seconds=15.0,
+        score=0.9,
+        event_type="team_wipe",
+        details_json="{}",
+    )
+    c2 = HighlightCandidate(
+        id="cand_batch_2",
+        video_id=dummy_video.id,
+        start_seconds=50.0,
+        end_seconds=65.0,
+        duration_seconds=15.0,
+        score=0.85,
+        event_type="multi_ko",
+        details_json="{}",
+    )
+    db_session.add_all([c1, c2])
+    db_session.commit()
+
+    def fake_create_render(db, request, background_tasks=None):
+        job = RenderJob(
+            id=f"job_{request.clip_id}",
+            clip_id=request.clip_id,
+            video_id=request.video_id,
+            status="completed",
+            progress=100.0,
+            start_seconds=request.start_seconds,
+            duration_seconds=request.duration_seconds,
+            modes=",".join(request.modes or []),
+            selected_format=(request.modes or ["third_person"])[0],
+        )
+        db.add(job)
+        db.commit()
+
+        class Rendered:
+            job_id = job.id
+
+        return Rendered()
+
+    monkeypatch.setattr(
+        RenderService, "create_render", staticmethod(fake_create_render)
+    )
+    monkeypatch.setattr(
+        LLMMetadataService,
+        "generate_clip_metadata",
+        staticmethod(
+            lambda **kwargs: {
+                "title": "Batch Staged Highlight",
+                "description": "Batch copy",
+                "tags": ["Shorts"],
+                "preferred_format": "third_person",
+                "privacy": "private",
+                "metadata_source": "llm",
+            }
+        ),
+    )
+
+    # Batch stage explicit candidate
+    res = client.post(
+        f"{settings.API_PREFIX}/videos/{dummy_video.id}/highlights/batch-stage",
+        json={
+            "candidate_ids": ["cand_batch_1"],
+            "clipping_mode": "third_person",
+            "schedule": True,
+            "same_day_catchup": True,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()["response"]
+    assert data["staged_count"] == 1
+    assert data["skipped_count"] == 0
+    assert len(data["staged_clips"]) == 1
+
+    # Repeating the same candidate ID skips it (idempotent)
+    res_repeat = client.post(
+        f"{settings.API_PREFIX}/videos/{dummy_video.id}/highlights/batch-stage",
+        json={
+            "candidate_ids": ["cand_batch_1"],
+            "clipping_mode": "third_person",
+        },
+    )
+    assert res_repeat.status_code == 200
+    data_repeat = res_repeat.json()["response"]
+    assert data_repeat["staged_count"] == 0
+    assert data_repeat["skipped_count"] == 1
+    assert "cand_batch_1" in data_repeat["skipped_candidate_ids"]

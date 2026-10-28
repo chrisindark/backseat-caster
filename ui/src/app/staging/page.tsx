@@ -15,7 +15,6 @@ import {
 } from "@/lib/api";
 import {
   RenderManifest,
-  UploadSelectionPayload,
   YouTubeAuthStatus,
   YouTubeQuota,
   YouTubeUploadResult,
@@ -32,7 +31,6 @@ import {
   History,
   Layers,
   Loader2,
-  Radio,
   RefreshCw,
   Scissors,
   Smartphone,
@@ -43,7 +41,7 @@ import {
   Wand2,
 } from "lucide-react";
 import Link from "next/link";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 export type UploadFormat = string;
 
@@ -124,12 +122,12 @@ export default function StagingPage() {
   // Load staged renders, YouTube auth, and quota
   const loadStagingData = useCallback(async () => {
     try {
-      setErrorMessage(null);
       const [rendersRes, authRes, quotaRes] = await Promise.allSettled([
         fetchRenders(),
         getYouTubeAuthStatus(),
         fetchYouTubeQuota(),
       ]);
+      setErrorMessage(null);
 
       if (rendersRes.status === "fulfilled" && rendersRes.value?.items) {
         // Filter renders selected for upload or auto-staged
@@ -167,7 +165,15 @@ export default function StagingPage() {
   }, []);
 
   useEffect(() => {
-    loadStagingData();
+    let active = true;
+    async function init() {
+      await loadStagingData();
+      if (!active) return;
+    }
+    void init();
+    return () => {
+      active = false;
+    };
   }, [loadStagingData]);
 
   const handleRefresh = () => {

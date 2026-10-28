@@ -18,6 +18,7 @@ from app.config import settings
 from app.database import get_task_db_session
 from app.models.highlight_candidate import HighlightCandidate
 from app.models.highlight_run import HighlightRun
+from app.models.render_job import RenderJob
 from app.models.video import Video
 from app.schemas.highlight import (
     DeleteHighlightsResponse,
@@ -304,6 +305,56 @@ class HighlightService:
             .all()
         )
 
+        # Phase 8.5: Aggregate associated RenderJobs to resolve candidate lifecycle status
+        render_jobs = (
+            db.query(RenderJob)
+            .filter(RenderJob.video_id == video_id)
+            .order_by(RenderJob.created_at.desc())
+            .all()
+        )
+
+        def _job_priority(j: RenderJob) -> int:
+            if (
+                j.youtube_upload_status == "completed"
+                or j.youtube_video_id
+                or j.youtube_upload_url
+            ):
+                return 5
+            if j.is_selected_for_upload or j.scheduled_publish_at is not None:
+                return 4
+            if j.status == "completed":
+                return 3
+            if j.status in ("rendering", "pending"):
+                return 2
+            return 1
+
+        cand_job_map: dict[str, RenderJob] = {}
+        for j in render_jobs:
+            target_id = j.highlight_candidate_id
+            if not target_id and j.clip_id and j.clip_id.startswith("auto_cand_"):
+                target_id = j.clip_id[5:]
+            if target_id:
+                existing = cand_job_map.get(target_id)
+                if not existing or _job_priority(j) > _job_priority(existing):
+                    cand_job_map[target_id] = j
+
+        # Fallback check by temporal proximity for manual renders if unlinked
+        for c in candidates:
+            if c.id not in cand_job_map:
+                for j in render_jobs:
+                    if j.start_seconds is not None and j.duration_seconds is not None:
+                        j_end = j.start_seconds + j.duration_seconds
+                        if (
+                            c.start_seconds < j_end
+                            and c.end_seconds > j.start_seconds
+                            and abs(c.start_seconds - j.start_seconds) <= 5.0
+                        ):
+                            existing = cand_job_map.get(c.id)
+                            if not existing or _job_priority(j) > _job_priority(
+                                existing
+                            ):
+                                cand_job_map[c.id] = j
+
         candidate_responses: list[HighlightCandidateResponse] = []
         for c in candidates:
             c_dict = c.to_dict()
@@ -318,6 +369,43 @@ class HighlightService:
                 trigger_events=triggers,
                 **details_kwargs,
             )
+
+            job = cand_job_map.get(c.id)
+            proc_status = "unprocessed"
+            render_status = None
+            render_job_id = None
+            clip_id = None
+            yt_status = None
+            yt_vid = None
+            yt_url = None
+            sched_at = None
+
+            if job:
+                render_status = job.status
+                render_job_id = job.id
+                clip_id = job.clip_id
+                yt_status = job.youtube_upload_status
+                yt_vid = job.youtube_video_id
+                yt_url = job.youtube_upload_url
+                sched_at = (
+                    job.scheduled_publish_at.isoformat()
+                    if job.scheduled_publish_at
+                    else None
+                )
+
+                if job.youtube_upload_status == "completed" or yt_vid or yt_url:
+                    proc_status = "uploaded"
+                elif job.is_selected_for_upload or sched_at is not None:
+                    proc_status = "staged"
+                elif job.status == "completed":
+                    proc_status = "rendered"
+                elif job.status in ("pending", "rendering"):
+                    proc_status = "rendering"
+                elif job.status == "failed" or job.youtube_upload_status == "failed":
+                    proc_status = "failed"
+                else:
+                    proc_status = "unprocessed"
+
             candidate_responses.append(
                 HighlightCandidateResponse(
                     candidate_id=c.id,
@@ -334,15 +422,46 @@ class HighlightService:
                     peak_timestamp=c.peak_timestamp,
                     suggested_title=c.suggested_title or "",
                     suggested_tags=c_dict.get("suggested_tags", []),
+                    processing_status=proc_status,
+                    render_status=render_status,
+                    render_job_id=render_job_id,
+                    clip_id=clip_id,
+                    youtube_upload_status=yt_status,
+                    youtube_video_id=yt_vid,
+                    youtube_upload_url=yt_url,
+                    scheduled_publish_at=sched_at,
                     created_at=c_dict.get("created_at"),
                     updated_at=c_dict.get("updated_at"),
                 )
             )
 
+        unprocessed_cnt = sum(
+            1 for cr in candidate_responses if cr.processing_status == "unprocessed"
+        )
+        rendered_cnt = sum(
+            1 for cr in candidate_responses if cr.processing_status == "rendered"
+        )
+        staged_cnt = sum(
+            1 for cr in candidate_responses if cr.processing_status == "staged"
+        )
+        uploaded_cnt = sum(
+            1 for cr in candidate_responses if cr.processing_status == "uploaded"
+        )
+        top_rated_left_cnt = sum(
+            1
+            for cr in candidate_responses
+            if cr.processing_status == "unprocessed" and cr.score >= 0.8
+        )
+
         return HighlightCandidateListResponse(
             video_id=video.id,
             status=video.highlight_status or "idle",
             count=len(candidate_responses),
+            unprocessed_count=unprocessed_cnt,
+            rendered_count=rendered_cnt,
+            staged_count=staged_cnt,
+            uploaded_count=uploaded_cnt,
+            top_rated_left_count=top_rated_left_cnt,
             candidates=candidate_responses,
         )
 

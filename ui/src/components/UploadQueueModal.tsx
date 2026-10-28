@@ -648,12 +648,12 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
 
                     {/* Form Fields for Publishing */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                      {/* Hero & Context Hints for LLM copy generation */}
+                      {/* Hero & Context Hints for copy generation */}
                       <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-violet-500/20">
                         <div className="space-y-1">
                           <label className="text-[11px] font-semibold text-violet-300 flex items-center justify-between">
                             <span>Hero Identity</span>
-                            <span className="text-[10px] text-slate-500 font-normal">Context for AI</span>
+                            <span className="text-[10px] text-slate-500 font-normal">Used in AI & Deterministic Copy</span>
                           </label>
                           <input
                             type="text"

@@ -27,6 +27,7 @@ from app.schemas.render import (
 from app.services.upload_metadata import (
     build_description,
     build_tags,
+    build_title,
 )
 from app.worker import helpers
 from app.worker.celery_app import celery_app
@@ -559,9 +560,15 @@ class RenderService:
         return RenderService.get_render_status(db=db, target_id=job.id)
 
     @staticmethod
-    def delete_render_job(db: Session, job_id: str) -> dict[str, Any] | None:
-        """Delete a render job by ID, including disk files and DB records."""
-        return RenderService.delete_render(db=db, clip_id=job_id)
+    def delete_render_job(
+        db: Session, job_id: str, preserve_uploaded_history: bool = True
+    ) -> dict[str, Any] | None:
+        """Delete a render job by ID, including disk files and DB records, preserving upload history by default."""
+        return RenderService.delete_render(
+            db=db,
+            clip_id=job_id,
+            preserve_uploaded_history=preserve_uploaded_history,
+        )
 
     @staticmethod
     def get_render_status(db: Session, target_id: str) -> RenderJobResponse | None:
@@ -723,8 +730,13 @@ class RenderService:
         return clips
 
     @staticmethod
-    def delete_render(db: Session, clip_id: str) -> dict[str, Any] | None:
-        """Delete rendered files from disk and remove all associated RenderJob rows from database."""
+    def delete_render(
+        db: Session,
+        clip_id: str,
+        preserve_uploaded_history: bool = True,
+    ) -> dict[str, Any] | None:
+        """Delete rendered files from disk and remove associated RenderJob rows,
+        preserving database records for clips already uploaded to YouTube."""
         renders_root = settings.renders_path
         clip_dir = renders_root / clip_id
         deleted_files = False
@@ -737,7 +749,8 @@ class RenderService:
             .filter((RenderJob.clip_id == clip_id) | (RenderJob.id == clip_id))
             .all()
         )
-        deleted_jobs_count = len(jobs)
+        deleted_jobs_count = 0
+        preserved_jobs_count = 0
         for j in jobs:
             if not deleted_files and j.clip_id:
                 alt_dir = renders_root / j.clip_id
@@ -749,27 +762,55 @@ class RenderService:
                 if out_p.exists() and out_p.is_dir():
                     shutil.rmtree(out_p)
                     deleted_files = True
-            db.delete(j)
+
+            is_uploaded = (
+                j.youtube_upload_status == "completed"
+                or bool(j.youtube_video_id)
+                or bool(j.youtube_upload_url)
+            )
+            if preserve_uploaded_history and is_uploaded:
+                # Clear local disk paths to free space while preserving upload audit record
+                j.output_dir = None
+                j.landscape_path = None
+                j.vertical_blur_path = None
+                j.vertical_crop_path = None
+                j.manifest_path = None
+                preserved_jobs_count += 1
+            else:
+                db.delete(j)
+                deleted_jobs_count += 1
         db.commit()
 
-        if not deleted_files and deleted_jobs_count == 0:
+        if not deleted_files and deleted_jobs_count == 0 and preserved_jobs_count == 0:
             return None
 
+        msg_extra = (
+            f" (preserved upload history for {preserved_jobs_count} job(s))"
+            if preserved_jobs_count
+            else ""
+        )
         return {
             "status": "deleted",
             "clip_id": clip_id,
             "deleted_files": deleted_files,
             "deleted_jobs_count": deleted_jobs_count,
-            "message": f"Successfully deleted render '{clip_id}'",
+            "preserved_jobs_count": preserved_jobs_count,
+            "message": f"Successfully deleted render '{clip_id}'{msg_extra}",
         }
 
     @staticmethod
-    def bulk_delete_renders(db: Session, clip_ids: list[str]) -> dict[str, Any]:
-        """Bulk delete rendered clips and their associated RenderJob records from disk and DB."""
+    def bulk_delete_renders(
+        db: Session,
+        clip_ids: list[str],
+        preserve_uploaded_history: bool = True,
+    ) -> dict[str, Any]:
+        """Bulk delete rendered clips and their associated records from disk and DB,
+        preserving database records for clips already uploaded to YouTube."""
         renders_root = settings.renders_path
         deleted_clip_ids: list[str] = []
         failed_clip_ids: list[str] = []
         not_found_clip_ids: list[str] = []
+        preserved_jobs_count = 0
 
         for cid in clip_ids:
             try:
@@ -784,11 +825,36 @@ class RenderService:
                     .filter((RenderJob.clip_id == cid) | (RenderJob.id == cid))
                     .all()
                 )
-                deleted_jobs_count = len(jobs)
+                deleted_jobs_count = 0
                 for j in jobs:
-                    db.delete(j)
+                    if not deleted_files and j.clip_id:
+                        alt_dir = renders_root / j.clip_id
+                        if alt_dir.exists() and alt_dir.is_dir():
+                            shutil.rmtree(alt_dir)
+                            deleted_files = True
+                    if not deleted_files and j.output_dir:
+                        out_p = Path(j.output_dir)
+                        if out_p.exists() and out_p.is_dir():
+                            shutil.rmtree(out_p)
+                            deleted_files = True
 
-                if deleted_files or deleted_jobs_count > 0:
+                    is_uploaded = (
+                        j.youtube_upload_status == "completed"
+                        or bool(j.youtube_video_id)
+                        or bool(j.youtube_upload_url)
+                    )
+                    if preserve_uploaded_history and is_uploaded:
+                        j.output_dir = None
+                        j.landscape_path = None
+                        j.vertical_blur_path = None
+                        j.vertical_crop_path = None
+                        j.manifest_path = None
+                        preserved_jobs_count += 1
+                    else:
+                        db.delete(j)
+                        deleted_jobs_count += 1
+
+                if deleted_files or deleted_jobs_count > 0 or preserved_jobs_count > 0:
                     deleted_clip_ids.append(cid)
                 else:
                     not_found_clip_ids.append(cid)
@@ -802,13 +868,19 @@ class RenderService:
             logger.error("Failed to commit bulk delete transaction: %s", commit_err)
             db.rollback()
 
+        msg_extra = (
+            f" (preserved upload history for {preserved_jobs_count} job(s))"
+            if preserved_jobs_count
+            else ""
+        )
         return {
             "deleted_clip_ids": deleted_clip_ids,
             "failed_clip_ids": failed_clip_ids,
             "not_found_clip_ids": not_found_clip_ids,
             "deleted_count": len(deleted_clip_ids),
+            "preserved_jobs_count": preserved_jobs_count,
             "total_requested": len(clip_ids),
-            "message": f"Successfully deleted {len(deleted_clip_ids)} of {len(clip_ids)} render(s)",
+            "message": f"Successfully deleted {len(deleted_clip_ids)} of {len(clip_ids)} render(s){msg_extra}",
         }
 
     @staticmethod
@@ -849,56 +921,7 @@ class RenderService:
             else None
         )
 
-        # 1. Resolve Title (ensure it never falls back to null)
-        if request.title is not None and request.title.strip():
-            final_title = request.title.strip()
-        elif existing_meta.get("title"):
-            final_title = str(existing_meta["title"]).strip()
-        elif video and video.title:
-            start_s = (
-                int(job.start_seconds) if job and job.start_seconds is not None else 0
-            )
-            dur_s = (
-                int(job.duration_seconds)
-                if job and job.duration_seconds is not None
-                else 15
-            )
-            final_title = (
-                f"{video.title[:50]} - Highlight ({start_s}s-{start_s + dur_s}s)"
-            )
-        else:
-            final_title = f"Gameplay Highlight - {clip_id}"
-
-        # 2. Resolve Description (dynamic default when not staged/user-supplied)
-        if request.description is not None and request.description.strip():
-            final_description = request.description.strip()
-        elif existing_meta.get("description"):
-            final_description = str(existing_meta["description"]).strip()
-        else:
-            final_description = build_description(video, job, clip_id, is_short=False)
-
-        # 3. Resolve Tags (dynamic default when not staged/user-supplied)
-        if request.tags is not None and len(request.tags) > 0:
-            final_tags = [t.strip() for t in request.tags if t and t.strip()]
-        elif existing_meta.get("tags") and len(existing_meta["tags"]) > 0:
-            final_tags = [t.strip() for t in existing_meta["tags"] if t and t.strip()]
-        else:
-            final_tags = build_tags(video, job, is_short=False)
-
-        # 4. Resolve Privacy (default to public)
-        final_privacy = request.privacy or existing_meta.get("privacy") or "public"
-        if final_privacy not in ("private", "unlisted", "public"):
-            final_privacy = "public"
-
-        # 5. Resolve Format
-        final_format = (
-            request.preferred_format
-            or (job.selected_format if job else None)
-            or existing_meta.get("preferred_format")
-            or "vertical_blur"
-        )
-
-        # 6. Resolve Hero & Clip Context (preserve existing or update if provided)
+        # Resolve Hero & Clip Context (preserve existing or update if provided)
         final_hero = (
             request.hero_name.strip()
             if getattr(request, "hero_name", None)
@@ -909,6 +932,63 @@ class RenderService:
             if getattr(request, "clip_context", None)
             else existing_meta.get("clip_context")
         )
+
+        # Resolve Format
+        final_format = (
+            request.preferred_format
+            or (job.selected_format if job else None)
+            or existing_meta.get("preferred_format")
+            or "vertical_blur"
+        )
+        is_short = final_format != "landscape"
+
+        # 1. Resolve Title (ensure it never falls back to null)
+        if request.title is not None and request.title.strip():
+            final_title = request.title.strip()
+        elif existing_meta.get("title"):
+            final_title = str(existing_meta["title"]).strip()
+        else:
+            final_title = build_title(
+                video=video,
+                job=job,
+                clip_id=clip_id,
+                hero_name=final_hero,
+                clip_context=final_context,
+                is_short=is_short,
+            )
+
+        # 2. Resolve Description (dynamic default when not staged/user-supplied)
+        if request.description is not None and request.description.strip():
+            final_description = request.description.strip()
+        elif existing_meta.get("description"):
+            final_description = str(existing_meta["description"]).strip()
+        else:
+            final_description = build_description(
+                video=video,
+                job=job,
+                clip_id=clip_id,
+                is_short=is_short,
+                hero_name=final_hero,
+                clip_context=final_context,
+            )
+
+        # 3. Resolve Tags (dynamic default when not staged/user-supplied)
+        if request.tags is not None and len(request.tags) > 0:
+            final_tags = [t.strip() for t in request.tags if t and t.strip()]
+        elif existing_meta.get("tags") and len(existing_meta["tags"]) > 0:
+            final_tags = [t.strip() for t in existing_meta["tags"] if t and t.strip()]
+        else:
+            final_tags = build_tags(
+                video=video,
+                job=job,
+                is_short=is_short,
+                hero_name=final_hero,
+            )
+
+        # 4. Resolve Privacy (default to public)
+        final_privacy = request.privacy or existing_meta.get("privacy") or "public"
+        if final_privacy not in ("private", "unlisted", "public"):
+            final_privacy = "public"
 
         upload_dict = {
             "is_selected": request.is_selected,
@@ -1199,6 +1279,7 @@ def execute_bulk_delete_job(
     clip_ids: list[str],
     celery_task_instance=None,
     db_session: Session | None = None,
+    preserve_uploaded_history: bool = True,
 ) -> dict[str, Any]:
     """Execute bulk render deletion outside a request context."""
     db = db_session
@@ -1207,7 +1288,11 @@ def execute_bulk_delete_job(
         db = get_task_db_session()
 
     try:
-        result = RenderService.bulk_delete_renders(db=db, clip_ids=clip_ids)
+        result = RenderService.bulk_delete_renders(
+            db=db,
+            clip_ids=clip_ids,
+            preserve_uploaded_history=preserve_uploaded_history,
+        )
         return result
     finally:
         import sys
@@ -1226,11 +1311,17 @@ def execute_bulk_delete_job(
 
 
 @celery_app.task(bind=True, name="bulk_delete_renders_task")
-def bulk_delete_renders_celery_task(self, clip_ids: list[str]):
+def bulk_delete_renders_celery_task(
+    self, clip_ids: list[str], preserve_uploaded_history: bool = True
+):
     """Celery task for bulk deleting render clips."""
     logger.info(
         "Celery task started: bulk deleting %d renders (task_id: %s)",
         len(clip_ids),
         self.request.id,
     )
-    return execute_bulk_delete_job(clip_ids=clip_ids, celery_task_instance=self)
+    return execute_bulk_delete_job(
+        clip_ids=clip_ids,
+        celery_task_instance=self,
+        preserve_uploaded_history=preserve_uploaded_history,
+    )

@@ -1,11 +1,24 @@
 "use client";
 
 import { Badge } from "@radix-ui/themes";
-import { Compass, Film, Layers, Radio, RefreshCw, Scissors, Search, UploadCloud } from "lucide-react";
+import {
+  AlertCircle,
+  Compass,
+  Film,
+  Layers,
+  Radio,
+  RefreshCw,
+  Scissors,
+  Search,
+  UploadCloud,
+  Zap,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React, { useEffect, useState } from "react";
-import { fetchRenderJobs } from "@/lib/api";
+import { fetchRenderJobs, fetchSystemHealth } from "@/lib/api";
+import { PreflightReportItem } from "@/types/video";
+import { PreflightModal } from "./PreflightModal";
 
 interface NavbarProps {
   channelInput?: string;
@@ -30,6 +43,42 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const pathname = usePathname();
   const [internalActiveJobs, setInternalActiveJobs] = useState<number>(0);
+  const [preflightReport, setPreflightReport] = useState<PreflightReportItem | null>(null);
+  const [isPreflightModalOpen, setIsPreflightModalOpen] = useState<boolean>(false);
+  const [isPreflightLoading, setIsPreflightLoading] = useState<boolean>(false);
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(false);
+
+  // Load preflight status on mount
+  const loadPreflight = async () => {
+    setIsPreflightLoading(true);
+    try {
+      const health = await fetchSystemHealth();
+      if (health?.preflight) {
+        setPreflightReport(health.preflight);
+      }
+    } catch {
+      // quiet fallback
+    } finally {
+      setIsPreflightLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const health = await fetchSystemHealth();
+        if (mounted && health?.preflight) {
+          setPreflightReport(health.preflight);
+        }
+      } catch {
+        // quiet fallback
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [backendHealthy]);
 
   // Poll for active jobs if not controlled via props
   useEffect(() => {
@@ -67,6 +116,35 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-50 glass-nav border-b border-white/10 px-4 lg:px-8 py-3 backdrop-blur-xl">
+      {/* Preflight Dependency Failure Alert Banner */}
+      {preflightReport && !preflightReport.ready && !bannerDismissed && (
+        <div className="max-w-7xl mx-auto mb-2 p-2 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-between text-xs text-rose-200 gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span className="truncate">
+              <strong>Preflight System Alert:</strong> Critical dependencies missing (
+              {preflightReport.errors.length} issue{preflightReport.errors.length > 1 ? "s" : ""}). Video clipping/rendering cannot run.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsPreflightModalOpen(true)}
+              className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition-colors cursor-pointer"
+            >
+              View Instructions
+            </button>
+            <button
+              type="button"
+              onClick={() => setBannerDismissed(true)}
+              className="text-rose-400 hover:text-white text-[11px] px-1.5 py-1"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
         {/* Brand & Nav Links */}
         <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-start">
@@ -155,15 +233,35 @@ export const Navbar: React.FC<NavbarProps> = ({
             </Link>
           </nav>
 
-          {/* Backend Status indicator */}
-          <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/80 border border-white/5 text-xs text-slate-400">
+          {/* Backend & Preflight Status indicator */}
+          <button
+            type="button"
+            onClick={() => setIsPreflightModalOpen(true)}
+            title="Click to view system preflight checks & storage diagnostics"
+            className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-white/10 text-xs text-slate-300 transition-colors cursor-pointer"
+          >
             <span
               className={`w-2 h-2 rounded-full ${
-                backendHealthy ? "bg-emerald-400 shadow-sm shadow-emerald-400" : "bg-rose-500"
+                !backendHealthy
+                  ? "bg-rose-500 shadow-sm shadow-rose-500"
+                  : preflightReport && !preflightReport.ready
+                  ? "bg-rose-500 shadow-sm shadow-rose-500 animate-pulse"
+                  : preflightReport?.status === "degraded"
+                  ? "bg-amber-400 shadow-sm shadow-amber-400"
+                  : "bg-emerald-400 shadow-sm shadow-emerald-400"
               }`}
             />
-            <span>{backendHealthy ? "API Ready" : "API Offline"}</span>
-          </div>
+            <span className="font-medium">
+              {!backendHealthy
+                ? "API Offline"
+                : preflightReport && !preflightReport.ready
+                ? "Preflight Error"
+                : preflightReport?.status === "degraded"
+                ? "Low Storage"
+                : "API Ready"}
+            </span>
+            <Zap className="w-3 h-3 text-slate-500 hover:text-slate-300 ml-0.5" />
+          </button>
         </div>
 
         {/* Search Input (if callback provided) */}
@@ -207,6 +305,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
       </div>
+
+      <PreflightModal
+        isOpen={isPreflightModalOpen}
+        onClose={() => setIsPreflightModalOpen(false)}
+        report={preflightReport}
+        isLoading={isPreflightLoading}
+        onRefresh={loadPreflight}
+      />
     </header>
   );
 };

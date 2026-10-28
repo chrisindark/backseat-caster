@@ -265,10 +265,14 @@ class LLMMetadataService:
         fallback = generate_upload_metadata(
             video=video,
             job=job,
+            candidate=candidate,
             clip_id=clip_id,
             preferred_format=preferred_format,
             existing=existing,
             is_short_hint=is_short,
+            hero_name=hero_name,
+            clip_context=clip_context,
+            game=game,
         )
 
         if force_source == "fallback":

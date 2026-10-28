@@ -103,6 +103,39 @@ class HighlightCandidateResponse(BaseModel):
     suggested_tags: list[str] = Field(
         default_factory=list, description="Recommended YouTube hashtags and tags"
     )
+    # Lifecycle state & render / upload linkage (Phase 8.5)
+    processing_status: str = Field(
+        default="unprocessed",
+        description="Lifecycle state: unprocessed, rendering, rendered, staged, uploaded, failed",
+    )
+    render_status: str | None = Field(
+        default=None,
+        description="Render job status: pending, rendering, completed, failed",
+    )
+    render_job_id: str | None = Field(
+        default=None,
+        description="Associated RenderJob ID if rendered/rendering",
+    )
+    clip_id: str | None = Field(
+        default=None,
+        description="Associated RenderJob clip ID",
+    )
+    youtube_upload_status: str | None = Field(
+        default=None,
+        description="YouTube upload status: not_uploaded, completed, failed",
+    )
+    youtube_video_id: str | None = Field(
+        default=None,
+        description="Published YouTube Video ID",
+    )
+    youtube_upload_url: str | None = Field(
+        default=None,
+        description="Direct URL to published YouTube Short",
+    )
+    scheduled_publish_at: str | None = Field(
+        default=None,
+        description="ISO timestamp of scheduled release on YouTube",
+    )
     created_at: str | None = Field(None, description="Creation ISO datetime")
     updated_at: str | None = Field(None, description="Last update ISO datetime")
 
@@ -176,11 +209,29 @@ class HighlightRunListResponse(BaseModel):
 
 
 class HighlightCandidateListResponse(BaseModel):
-    """List of highlight candidates for a video."""
+    """List of highlight candidates for a video with lifecycle summary counts."""
 
     video_id: str
     status: str
     count: int
+    unprocessed_count: int = Field(
+        default=0, description="Count of candidates not yet rendered or staged"
+    )
+    rendered_count: int = Field(
+        default=0,
+        description="Count of candidates rendered locally but not uploaded",
+    )
+    staged_count: int = Field(
+        default=0,
+        description="Count of candidates selected or scheduled for upload",
+    )
+    uploaded_count: int = Field(
+        default=0, description="Count of candidates uploaded to YouTube"
+    )
+    top_rated_left_count: int = Field(
+        default=0,
+        description="Count of unprocessed candidates with score >= 0.8",
+    )
     candidates: list[HighlightCandidateResponse] = Field(default_factory=list)
 
 
@@ -248,4 +299,49 @@ class DeleteHighlightsResponse(BaseModel):
 
     video_id: str
     deleted_count: int
+    message: str
+
+
+class BatchStageHighlightsRequest(BaseModel):
+    """Trigger batch rendering, LLM metadata generation and native scheduling for selected candidates."""
+
+    candidate_ids: list[str] | None = Field(
+        None,
+        description="List of specific candidate IDs to stage (unprocessed items)",
+    )
+    top_n: int | None = Field(
+        None,
+        ge=1,
+        le=50,
+        description="Auto-select top N unprocessed candidates if candidate_ids not provided",
+    )
+    min_score: float | None = Field(
+        0.5, ge=0.0, le=1.0, description="Minimum score threshold for candidates"
+    )
+    clipping_mode: str = Field(
+        "third_person",
+        description="Vertical render framing mode (defaults to 'third_person')",
+    )
+    schedule: bool = Field(True, description="Assign staggered native publishAt slots")
+    same_day_catchup: bool = Field(
+        True,
+        description="Schedule missed early-day slots at the next slot on the same day",
+    )
+    crop_blur_padding: float | None = Field(
+        None, ge=0.0, le=0.6, description="Optional custom blur padding override"
+    )
+    normalize_audio: bool = Field(
+        True, description="Apply EBU R128 loudness normalization (-14 LUFS)"
+    )
+
+
+class BatchStageHighlightsResponse(BaseModel):
+    """Summary of batch render and staging dispatch."""
+
+    video_id: str
+    requested_count: int
+    staged_count: int
+    skipped_count: int
+    staged_clips: list[dict[str, Any]] = Field(default_factory=list)
+    skipped_candidate_ids: list[str] = Field(default_factory=list)
     message: str

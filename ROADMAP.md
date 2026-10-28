@@ -35,6 +35,7 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** des
 | **Phase 6** | UI / Studio | **Creator Studio & Review Interface:** Web studio (`/studio/[id]`), timeline scrubbing, crop overlays, catalog, bulk delete | ✅ Completed |
 | **Phase 7** | Publishing | **YouTube Ingestion & Publishing:** OAuth 2.0 PKCE flow, metadata staging, resumable YouTube Shorts Data API v3 upload | ✅ Completed |
 | **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish, batched maintenance + storage cleanup | ✅ Completed |
+| **Phase 8.5** | Highlights & Workflow | **Highlight Lifecycle Separation & Batch Staging Pipeline:** Separate uploaded, rendered, and left candidates, multi-select & Top-N-Left batch processing | ✅ Completed |
 | **Phase 9** | Multi-Genre | **Generic Video & Speech Mining (STT):** Dialogue-driven highlight discovery via Whisper STT + LLM semantic chunking & sentence snapping | 📋 Planned |
 | **Phase 3** | Vision & OCR | **HUD/OCR & Deep Visual Event Extraction:** Killfeed sequence chains, ultimate charge meters, ability identification | ✅ Completed |
 | **Phase 4** | Multimodal AI | **Gemini Event Verification:** Multimodal clip verification, structured highlight event schema, temporal grounding | 📋 Planned |
@@ -135,14 +136,44 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** des
 
 ---
 
+### Phase 8.5: Highlight Lifecycle State Management & Batch Staging Pipeline
+*End-to-end candidate lifecycle state tracking (Uploaded vs Rendered vs Left) and interactive batch queuing for high-volume mined highlights.*
+
+- ✅ **Highlight Lifecycle Status Engine (Backend):**
+  - Relational aggregation linking `HighlightCandidate` records with `RenderJob` execution history (`status`, `youtube_upload_status`, `youtube_video_id`, `youtube_upload_url`, `scheduled_publish_at`).
+  - Derived `processing_status` state taxonomy on candidates: `uploaded` (published to YouTube Shorts), `staged` (queued with `publishAt` slot), `rendered` (rendered locally, not yet uploaded), `rendering` (active in worker), `unprocessed` / `left` (available candidate), or `failed`.
+  - Enriched `HighlightCandidateResponse` schema returning candidate status, render job links, YouTube upload URLs, and aggregate category counts (`total`, `unprocessed`, `rendered`, `uploaded`, `top_rated_left`).
+- ✅ **Highlight Lifecycle Separation & Filtering (Frontend UI):**
+  - Dedicated lifecycle tabs in [`HighlightCandidatesDrawer.tsx`](file:///Users/christopherpaul/projects/backseat-caster/ui/src/components/HighlightCandidatesDrawer.tsx): **All**, **Left / Unprocessed**, **Rendered**, and **Uploaded**.
+  - Compound filters combining lifecycle state with rating tiers (e.g. *"Top Rated Left"*) and game events (*Team Wipes*, *Multi-KOs*, *Clutches*).
+  - Visual status badges on candidate cards with direct clickable YouTube Shorts links for published clips, and duplicate render prevention.
+- ✅ **Batch Selection & "Select Top N Left" Queueing:**
+  - Multi-candidate selection with individual card checkboxes and "Select All Visible" toggle.
+  - Quick-selection presets (`Top 3 Left`, `Top 5 Left`, `Top 6 Left`, `Top 10 Left`) plus arbitrary selection.
+  - Default vertical framing preset permanently set to `third_person` (hero-centered wide crop with subtle blur margins).
+  - Floating batch action toolbar with framing preset selector (`third_person` default, `direct_crop`, `vertical_blur`, `cinematic`) and native YouTube scheduling toggle.
+  - Dedicated endpoint `POST /api/v1/videos/{video_id}/highlights/batch-stage` accepting explicit `candidate_ids`, dispatching FFmpeg rendering, copy generation, and native `publishAt` slot assignment.
+- ✅ **Same-Day Slot Catchup Algorithm (publishAt Scheduling):**
+  - If a daily slot is missed because generation time has passed the slot time (e.g., 08:00 and 12:30 missed when generating in the afternoon), missed items are scheduled at the immediate next available slot spaced by safe 3-minute intervals so all videos are published on the **same day** instead of waiting for a new day.
+- ✅ **Enhanced Deterministic Copy Generation:**
+  - Rich deterministic copy without hitting an LLM: integrates chosen hero into title templates, adds gameplay context and timing to descriptions, and extracts candidate/game tags into clean YouTube tags.
+- ✅ **Safe Deletion & Upload Audit Preservation:**
+  - Cleaning or bulk-deleting renders now frees up local disk space while permanently preserving database records and YouTube links for published clips.
+
+---
+
 ### Phase 9: Multi-Game Profiles & Generic Semantic Video Mining (STT / Dialogue-Driven)
 *Extending BackseatCaster from Marvel Rivals to any game and generic conversational/IRL video content.*
 
 - 📋 **Modular Game Profile Architecture:**
   - Extending [`BaseHighlightDetector`](file:///Users/christopherpaul/projects/backseat-caster/app/services/highlight/detectors/base.py) with game-specific plugin configurations.
+  - ✅ **Marvel Rivals Detector (`MarvelRivalsDetector`):** Full Stage 1-4 pipeline with killfeed parsing, ultimate meter charge tracking, and hero portrait recognition.
+  - ✅ **Fall Guys Detector (`FallGuysDetector`):** Center/upper banner OCR recognition (Crown Victory, Round Qualified, Final Round, Round Over, Eliminated) combined with audio energy scanning and automatic title/tag generation (`#FallGuys #Shorts`).
+  - ✅ **Generic / Single-Player Detector (`GenericHighlightDetector`):** Audio-first loudness and excitement scanning with zero HUD coupling.
   - Planned profiles: **Valorant** (kill banner, spike status), **Overwatch 2** (elimination skull, ultimate ready), **Apex Legends** (knockdown/kill shields).
   - Automatic game profile detection based on video title, tags, or initial frame classification.
 - 📋 **Generic Video & Speech Mining Engine (Speech-to-Text):**
+  - ✅ **Natural Dialogue & Speech Boundary Snapping (`speech_mining.py`):** FFmpeg `silencedetect` scanning to snap clip in/out boundaries to natural speech pauses, preventing jarring cuts mid-word or mid-sentence.
   - **Voice Activity Detection (VAD) & Whisper STT:** Audio-first scanning for dialogue using `faster-whisper` or Whisper API with word-level timestamps.
   - **LLM Semantic Highlight Discovery:** Prompting Gemini to analyze full transcript chunks for comedic punchlines, viral quotes, high-tension debates, or story climaxes.
   - **Syntactic Sentence Boundary Snapping:** Automatically snapping candidate clip `start_seconds` and `duration_seconds` to complete sentence boundaries using word timestamps, preventing awkward mid-word cutoffs.
@@ -285,8 +316,8 @@ GameHUDDetector (Vision-Heavy)           SemanticSpeechDetector (Audio/Text-Heav
 ### P2 - Polish & Power Features
 | Area | Deliverable | Status | Notes |
 |---|---|---|---|
-| **Auto-Clips Surfacing** | Bring highlights/auto-stage to home/studio with confidence scores, one-click render as Short | 📋 Planned | Leverage existing Phase 8 + mining. |
-| **Batch Creation** | Select multiple ranges and queue renders with shared settings | 📋 Planned | Speed up creating multiple Shorts. |
+| **Auto-Clips & Lifecycle** | Separate uploaded, rendered, and left candidates in Highlight Drawer with score badges | 📋 Planned (Phase 8.5) | Lifecycle tabs & YouTube links on mined highlights. |
+| **Batch Staging & Creation** | Select N left candidates and queue renders + metadata + YouTube scheduling in one click | 📋 Planned (Phase 8.5) | "Select Top N Left" + batch rendering pipeline. |
 | **Timeline UX** | Keyboard shortcuts (J/K/L, I/O), snap, >60s warning, better scrubbing | 📋 Planned | Improve studio efficiency. |
 | **Notifications/Badges** | Navbar badges for active downloads/renders, "X clips ready to publish", toasts for completed uploads/renders | 📋 Planned | Better visibility of processing state. |
 | **Performance** | Virtualize long lists, lazy thumbnails, optimize polling on renders/jobs | 📋 Planned | Smoother with many clips. |

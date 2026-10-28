@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for VisionCaster Python Backend & Celery Worker
+# Multi-stage Dockerfile for BackseatCaster Python Backend & Celery Worker
 FROM python:3.12-slim AS base
 
 # Install system dependencies: ffmpeg (for video remuxing/processing) & curl

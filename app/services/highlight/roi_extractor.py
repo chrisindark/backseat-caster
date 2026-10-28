@@ -97,6 +97,26 @@ MARVEL_RIVALS_HUD_REGIONS: dict[str, HUDRegion] = {
     ),
 }
 
+# Default Fall Guys HUD Geometry (1080p Normalized Coordinates)
+FALL_GUYS_HUD_REGIONS: dict[str, HUDRegion] = {
+    "center_banner": HUDRegion(
+        name="center_banner",
+        x=260,
+        y=200,
+        width=1400,
+        height=400,
+        description="Center screen event banner (QUALIFIED!, ELIMINATED!, WINNER!, ROUND OVER, FINAL ROUND)",
+    ),
+    "upper_banner": HUDRegion(
+        name="upper_banner",
+        x=450,
+        y=40,
+        width=1020,
+        height=180,
+        description="Top banner notifications and round titles",
+    ),
+}
+
 # HUD regions required by the Phase 3 deep visual extraction stages.
 PHASE3_HUD_ROI_NAMES: tuple[str, ...] = (
     "kill_feed",
@@ -336,7 +356,10 @@ class ROIExtractor:
 
     def __init__(self, config: ROIExtractorConfig | None = None) -> None:
         self.config = config or ROIExtractorConfig()
-        self._regions: dict[str, HUDRegion] = dict(MARVEL_RIVALS_HUD_REGIONS)
+        self._regions: dict[str, HUDRegion] = {
+            **MARVEL_RIVALS_HUD_REGIONS,
+            **FALL_GUYS_HUD_REGIONS,
+        }
         if self.config.custom_regions:
             self._regions.update(self.config.custom_regions)
 

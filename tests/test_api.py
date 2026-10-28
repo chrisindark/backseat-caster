@@ -1192,6 +1192,55 @@ def test_bulk_delete_renders_sync(client, db_session, tmp_path, monkeypatch):
     assert len(remaining) == 0
 
 
+def test_bulk_delete_renders_preserves_uploaded_history(
+    client, db_session, tmp_path, monkeypatch
+):
+    """Bulk delete preserves RenderJob database record and YouTube info when clip was published."""
+    monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path))
+
+    clip_dir = tmp_path / "uploaded_clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "landscape.mp4").write_bytes(b"dummy_video")
+
+    job = RenderJob(
+        id="job_uploaded_1",
+        clip_id="uploaded_clip",
+        video_id="v_up",
+        status="completed",
+        progress=100.0,
+        start_seconds=0.0,
+        duration_seconds=10.0,
+        output_dir=str(clip_dir),
+        landscape_path=str(clip_dir / "landscape.mp4"),
+        youtube_video_id="yt_test_123",
+        youtube_upload_status="completed",
+        youtube_upload_url="https://youtube.com/shorts/yt_test_123",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # Bulk delete with default preserve_uploaded_history=True
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/bulk-delete",
+        json={"clip_ids": ["uploaded_clip"], "sync": True},
+    )
+    assert res.status_code == 200
+    resp = res.json()["response"]
+    assert resp["deleted_count"] == 1
+    assert resp["preserved_jobs_count"] == 1
+
+    # Disk files must be cleaned
+    assert not clip_dir.exists()
+
+    # Database record must still exist with YouTube info preserved and disk paths cleared
+    saved_job = db_session.query(RenderJob).filter_by(id="job_uploaded_1").first()
+    assert saved_job is not None
+    assert saved_job.youtube_video_id == "yt_test_123"
+    assert saved_job.youtube_upload_status == "completed"
+    assert saved_job.output_dir is None
+    assert saved_job.landscape_path is None
+
+
 def test_bulk_delete_renders_via_delete_endpoints(
     client, db_session, tmp_path, monkeypatch
 ):
@@ -1244,7 +1293,9 @@ def test_bulk_delete_renders_celery_dispatch(client, monkeypatch):
     resp = res.json()["response"]
     assert resp["task_id"] == "celery-bulk-del-123"
     assert "via Celery" in resp["message"]
-    mock_delay.assert_called_once_with(["clip_a", "clip_b"])
+    mock_delay.assert_called_once_with(
+        ["clip_a", "clip_b"], preserve_uploaded_history=True
+    )
 
 
 def test_bulk_delete_renders_background_fallback(client, monkeypatch):

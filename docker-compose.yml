@@ -8,9 +8,9 @@ services:
     ports:
       - "3001:3001"
     environment:
-      - DATABASE_URL=sqlite:////workspace/data/visioncaster.db
+      - DATABASE_URL=sqlite:////workspace/data/backseatcaster.db
       - DOWNLOADS_DIR=/workspace/data/downloads
-      - DEFAULT_YOUTUBE_CHANNEL=@chrisindark
+      - DEFAULT_YOUTUBE_CHANNEL=${DEFAULT_YOUTUBE_CHANNEL:-}
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - HOST=0.0.0.0
@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
     command: uv run celery -A app.worker.celery_app worker --loglevel=info
     environment:
-      - DATABASE_URL=sqlite:////workspace/data/visioncaster.db
+      - DATABASE_URL=sqlite:////workspace/data/backseatcaster.db
       - DOWNLOADS_DIR=/workspace/data/downloads
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
     command: uv run celery -A app.worker.celery_app beat --loglevel=info --schedule=/workspace/data/celerybeat-schedule
     environment:
-      - DATABASE_URL=sqlite:////workspace/data/visioncaster.db
+      - DATABASE_URL=sqlite:////workspace/data/backseatcaster.db
       - DOWNLOADS_DIR=/workspace/data/downloads
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/1

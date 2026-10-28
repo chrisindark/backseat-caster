@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  batchStageHighlights,
   deleteHighlightCandidates,
   detectHighlights,
   fetchHighlightCandidates,
@@ -17,10 +18,13 @@ import {
   AlertCircle,
   Award,
   Check,
+  CheckSquare,
   ChevronRight,
   Clock,
   Copy,
   Crown,
+  ExternalLink,
+  Film,
   Flame,
   Layers,
   Loader2,
@@ -28,6 +32,7 @@ import {
   RotateCcw,
   Scissors,
   Sparkles,
+  Square,
   Swords,
   Trash2,
   Trophy,
@@ -46,7 +51,15 @@ interface HighlightCandidatesDrawerProps {
   onCandidatesCountChange?: (count: number) => void;
 }
 
-type FilterCategory = "all" | "team_wipe" | "multi_ko" | "clutch" | "high_score";
+type FilterCategory =
+  | "all"
+  | "team_wipe"
+  | "multi_ko"
+  | "clutch"
+  | "crown_victory"
+  | "round_qualified"
+  | "eliminated"
+  | "high_score";
 
 function formatSeconds(sec: number): string {
   if (isNaN(sec) || sec < 0) return "0:00";
@@ -77,8 +90,22 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Filtering & Sorting
+  const [lifecycleFilter, setLifecycleFilter] = useState<
+    "all" | "left" | "rendered" | "uploaded"
+  >("all");
   const [filterCategory, setFilterCategory] = useState<FilterCategory>("all");
   const [sortBy, setSortBy] = useState<"score" | "time">("score");
+
+  // Selection & Batch Staging (Phase 8.5)
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [isBatchStaging, setIsBatchStaging] = useState<boolean>(false);
+  const [batchSuccessMessage, setBatchSuccessMessage] = useState<string | null>(
+    null
+  );
+  const [batchMode, setBatchMode] = useState<string>("third_person");
+  const [batchSchedule, setBatchSchedule] = useState<boolean>(true);
 
   // Interaction feedback states
   const [copiedTitleId, setCopiedTitleId] = useState<string | null>(null);
@@ -191,8 +218,16 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
     setErrorMessage(null);
     setIsScanning(true);
     try {
+      const vtitle = videoTitle?.toLowerCase() || "";
+      const detectedGame =
+        vtitle.includes("fall guys") || vtitle.includes("fallguys")
+          ? "fall_guys"
+          : vtitle.includes("marvel rivals")
+          ? "marvel_rivals"
+          : undefined;
+
       await detectHighlights(videoId, {
-        game: "marvel_rivals",
+        game: detectedGame,
         force_rescan: forceRescan,
         min_score: 0.5,
       });
@@ -241,10 +276,39 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
     }, 2500);
   };
 
+  // Phase 8.5: Lifecycle groupings
+  const leftCandidates = useMemo(
+    () =>
+      candidates.filter(
+        (c) => !c.processing_status || c.processing_status === "unprocessed"
+      ),
+    [candidates]
+  );
+  const renderedCandidates = useMemo(
+    () => candidates.filter((c) => c.processing_status === "rendered"),
+    [candidates]
+  );
+  const uploadedCandidates = useMemo(
+    () => candidates.filter((c) => c.processing_status === "uploaded"),
+    [candidates]
+  );
+
   // Filtered & Sorted candidates
   const filteredCandidates = useMemo(() => {
     let result = [...candidates];
 
+    // Tier 1: Lifecycle state filter
+    if (lifecycleFilter === "left") {
+      result = result.filter(
+        (c) => !c.processing_status || c.processing_status === "unprocessed"
+      );
+    } else if (lifecycleFilter === "rendered") {
+      result = result.filter((c) => c.processing_status === "rendered");
+    } else if (lifecycleFilter === "uploaded") {
+      result = result.filter((c) => c.processing_status === "uploaded");
+    }
+
+    // Tier 2: Event category filter
     if (filterCategory === "team_wipe") {
       result = result.filter(
         (c) => c.event_type === "team_wipe" || c.details?.is_team_wipe
@@ -261,6 +325,12 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
           c.event_type === "objective_clutch" ||
           c.details?.game_phase === "overtime"
       );
+    } else if (filterCategory === "crown_victory") {
+      result = result.filter((c) => c.event_type === "crown_victory");
+    } else if (filterCategory === "round_qualified") {
+      result = result.filter((c) => c.event_type === "round_qualified");
+    } else if (filterCategory === "eliminated") {
+      result = result.filter((c) => c.event_type === "eliminated");
     } else if (filterCategory === "high_score") {
       result = result.filter((c) => c.score >= 0.8);
     }
@@ -272,37 +342,107 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
     }
 
     return result;
-  }, [candidates, filterCategory, sortBy]);
+  }, [candidates, lifecycleFilter, filterCategory, sortBy]);
+
+  const activePool = useMemo(() => {
+    if (lifecycleFilter === "left") return leftCandidates;
+    if (lifecycleFilter === "rendered") return renderedCandidates;
+    if (lifecycleFilter === "uploaded") return uploadedCandidates;
+    return candidates;
+  }, [
+    lifecycleFilter,
+    leftCandidates,
+    renderedCandidates,
+    uploadedCandidates,
+    candidates,
+  ]);
 
   const teamWipeCount = useMemo(
     () =>
-      candidates.filter(
+      activePool.filter(
         (c) => c.event_type === "team_wipe" || c.details?.is_team_wipe
       ).length,
-    [candidates]
+    [activePool]
   );
   const multiKoCount = useMemo(
     () =>
-      candidates.filter((c) =>
+      activePool.filter((c) =>
         ["triple_ko", "double_ko", "team_wipe", "mega_ko", "ultra_ko"].includes(
           c.event_type
         )
       ).length,
-    [candidates]
+    [activePool]
   );
   const clutchCount = useMemo(
     () =>
-      candidates.filter(
+      activePool.filter(
         (c) =>
           c.event_type === "objective_clutch" ||
           c.details?.game_phase === "overtime"
       ).length,
-    [candidates]
+    [activePool]
   );
   const highScoreCount = useMemo(
-    () => candidates.filter((c) => c.score >= 0.8).length,
-    [candidates]
+    () => activePool.filter((c) => c.score >= 0.8).length,
+    [activePool]
   );
+  const crownCount = useMemo(
+    () => activePool.filter((c) => c.event_type === "crown_victory").length,
+    [activePool]
+  );
+  const qualifiedCount = useMemo(
+    () => activePool.filter((c) => c.event_type === "round_qualified").length,
+    [activePool]
+  );
+  const eliminatedCount = useMemo(
+    () => activePool.filter((c) => c.event_type === "eliminated").length,
+    [activePool]
+  );
+
+  const handleToggleSelect = (candidateId: string) => {
+    setSelectedCandidateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) {
+        next.delete(candidateId);
+      } else {
+        next.add(candidateId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectTopNLeft = (n: number) => {
+    const leftSorted = [...leftCandidates].sort((a, b) => b.score - a.score);
+    const topN = leftSorted.slice(0, n).map((c) => c.candidate_id);
+    setSelectedCandidateIds(new Set(topN));
+    setLifecycleFilter("left");
+  };
+
+  const handleExecuteBatchStage = async () => {
+    if (selectedCandidateIds.size === 0 || !videoId) return;
+    setIsBatchStaging(true);
+    setErrorMessage(null);
+    setBatchSuccessMessage(null);
+    try {
+      const res = await batchStageHighlights(videoId, {
+        candidate_ids: Array.from(selectedCandidateIds),
+        clipping_mode: batchMode,
+        schedule: batchSchedule,
+        same_day_catchup: true,
+      });
+      setSelectedCandidateIds(new Set());
+      setBatchSuccessMessage(
+        res.message || `Successfully enqueued ${res.staged_count} clips!`
+      );
+      setTimeout(() => setBatchSuccessMessage(null), 6000);
+      await loadCandidates();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
+      setIsBatchStaging(false);
+    }
+  };
 
   const getEventBadge = (cand: HighlightCandidateItem) => {
     const type = cand.event_type.toLowerCase();
@@ -336,6 +476,46 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
         icon: Trophy,
         classes:
           "bg-emerald-500/20 text-emerald-200 border-emerald-500/40 shadow-sm shadow-emerald-950/50",
+      };
+    }
+    if (type === "crown_victory") {
+      return {
+        label: "CROWN VICTORY",
+        icon: Crown,
+        classes:
+          "bg-gradient-to-r from-amber-500/30 via-yellow-500/25 to-amber-600/30 text-yellow-200 border-yellow-400/50 shadow-sm shadow-amber-950/50",
+      };
+    }
+    if (type === "round_qualified") {
+      return {
+        label: "QUALIFIED!",
+        icon: Zap,
+        classes:
+          "bg-gradient-to-r from-emerald-500/30 to-teal-500/25 text-emerald-200 border-emerald-400/50 shadow-sm shadow-emerald-950/50",
+      };
+    }
+    if (type === "final_round") {
+      return {
+        label: "FINAL ROUND",
+        icon: Flame,
+        classes:
+          "bg-gradient-to-r from-orange-500/30 to-rose-500/25 text-orange-200 border-orange-400/50 shadow-sm shadow-orange-950/50",
+      };
+    }
+    if (type === "eliminated") {
+      return {
+        label: "ELIMINATED",
+        icon: AlertCircle,
+        classes:
+          "bg-rose-950/40 text-rose-300 border-rose-800/60 shadow-sm shadow-black/50",
+      };
+    }
+    if (type === "round_over") {
+      return {
+        label: "ROUND OVER",
+        icon: Clock,
+        classes:
+          "bg-blue-900/30 text-blue-200 border-blue-500/40 shadow-sm shadow-blue-950/50",
       };
     }
     return {
@@ -470,6 +650,23 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
               </div>
             )}
 
+            {/* Success Feedback Alert */}
+            {batchSuccessMessage && (
+              <div className="p-3 bg-emerald-950/60 border-b border-emerald-500/30 text-xs text-emerald-200 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{batchSuccessMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBatchSuccessMessage(null)}
+                  className="p-1 rounded text-emerald-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Error Message Alert */}
             {errorMessage && (
               <div className="p-4 bg-rose-950/40 border-b border-rose-500/30 text-xs text-rose-300 flex items-center justify-between gap-2 shrink-0">
@@ -489,86 +686,218 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
 
             {/* Filter and Sorting Toolbar */}
             {candidates.length > 0 && (
-              <div className="p-3 bg-black/30 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
-                {/* Filter Chips */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-                  <button
-                    type="button"
-                    onClick={() => setFilterCategory("all")}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
-                      filterCategory === "all"
-                        ? "bg-rose-600 text-white shadow-md shadow-rose-950"
-                        : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    All ({candidates.length})
-                  </button>
-                  {teamWipeCount > 0 && (
+              <div className="flex flex-col border-b border-white/5 shrink-0">
+                {/* Tier 1: Lifecycle State Switcher + Quick Select Top N */}
+                <div className="p-3 bg-black/40 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
                     <button
                       type="button"
-                      onClick={() => setFilterCategory("team_wipe")}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
-                        filterCategory === "team_wipe"
-                          ? "bg-purple-600 text-white shadow-md shadow-purple-950"
+                      onClick={() => setLifecycleFilter("all")}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                        lifecycleFilter === "all"
+                          ? "bg-white/20 text-white shadow"
                           : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
                       }`}
                     >
-                      Team Wipes ({teamWipeCount})
+                      <span>All</span>
+                      <span className="px-1.5 py-0.5 rounded-full bg-black/40 text-[10px] font-mono">
+                        {candidates.length}
+                      </span>
                     </button>
-                  )}
-                  {multiKoCount > 0 && (
+
                     <button
                       type="button"
-                      onClick={() => setFilterCategory("multi_ko")}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
-                        filterCategory === "multi_ko"
+                      onClick={() => setLifecycleFilter("left")}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                        lifecycleFilter === "left"
                           ? "bg-rose-600 text-white shadow-md shadow-rose-950"
-                          : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
+                          : "bg-white/5 hover:bg-white/10 text-rose-300/80 hover:text-rose-200"
                       }`}
                     >
-                      Multi-KOs ({multiKoCount})
+                      <span>Left</span>
+                      <span className="px-1.5 py-0.5 rounded-full bg-black/40 text-[10px] font-mono text-rose-200">
+                        {leftCandidates.length}
+                      </span>
                     </button>
-                  )}
-                  {clutchCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setFilterCategory("clutch")}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
-                        filterCategory === "clutch"
-                          ? "bg-emerald-600 text-white shadow-md shadow-emerald-950"
-                          : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Clutch ({clutchCount})
-                    </button>
-                  )}
-                  {highScoreCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setFilterCategory("high_score")}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
-                        filterCategory === "high_score"
-                          ? "bg-amber-600 text-white shadow-md shadow-amber-950"
-                          : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Top Rated ({highScoreCount})
-                    </button>
+
+                    {renderedCandidates.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setLifecycleFilter("rendered")}
+                        className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                          lifecycleFilter === "rendered"
+                            ? "bg-blue-600 text-white shadow-md shadow-blue-950"
+                            : "bg-white/5 hover:bg-white/10 text-blue-300/80 hover:text-blue-200"
+                        }`}
+                      >
+                        <span>Rendered</span>
+                        <span className="px-1.5 py-0.5 rounded-full bg-black/40 text-[10px] font-mono text-blue-200">
+                          {renderedCandidates.length}
+                        </span>
+                      </button>
+                    )}
+
+                    {uploadedCandidates.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setLifecycleFilter("uploaded")}
+                        className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                          lifecycleFilter === "uploaded"
+                            ? "bg-emerald-600 text-white shadow-md shadow-emerald-950"
+                            : "bg-white/5 hover:bg-white/10 text-emerald-300/80 hover:text-emerald-200"
+                        }`}
+                      >
+                        <span>Uploaded</span>
+                        <span className="px-1.5 py-0.5 rounded-full bg-black/40 text-[10px] font-mono text-emerald-200">
+                          {uploadedCandidates.length}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Quick Select Left presets */}
+                  {leftCandidates.length > 0 && (
+                    <div className="flex items-center gap-1 self-end sm:self-auto shrink-0 text-[11px]">
+                      <span className="text-slate-400 font-semibold mr-1">
+                        Select Left:
+                      </span>
+                      {[3, 5, 6, 10].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => handleSelectTopNLeft(n)}
+                          title={`Select top ${n} left candidates`}
+                          className="px-2 py-0.5 rounded bg-white/5 hover:bg-rose-600 hover:text-white text-slate-300 font-mono text-[10px] font-bold border border-white/10 transition-colors cursor-pointer"
+                        >
+                          Top {n}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
 
-                {/* Sort Option */}
-                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                  <span className="text-slate-400">Sort:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as "score" | "time")}
-                    aria-label="Sort highlight candidates"
-                    className="px-2 py-1 bg-black/60 border border-white/10 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-rose-500 cursor-pointer"
-                  >
-                    <option value="score">Highest Score</option>
-                    <option value="time">Chronological</option>
-                  </select>
+                {/* Tier 2: Category filter chips & Sort */}
+                <div className="p-2.5 bg-black/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                    <button
+                      type="button"
+                      onClick={() => setFilterCategory("all")}
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                        filterCategory === "all"
+                          ? "bg-white/15 text-white"
+                          : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      All ({activePool.length})
+                    </button>
+                    {highScoreCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("high_score")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "high_score"
+                            ? "bg-amber-600 text-white shadow-md shadow-amber-950"
+                            : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Top Rated {lifecycleFilter === "left" ? "Left " : ""}({highScoreCount})
+                      </button>
+                    )}
+                    {teamWipeCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("team_wipe")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "team_wipe"
+                            ? "bg-purple-600 text-white shadow-md shadow-purple-950"
+                            : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Team Wipes ({teamWipeCount})
+                      </button>
+                    )}
+                    {multiKoCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("multi_ko")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "multi_ko"
+                            ? "bg-rose-600 text-white shadow-md shadow-rose-950"
+                            : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Multi-KOs ({multiKoCount})
+                      </button>
+                    )}
+                    {clutchCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("clutch")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "clutch"
+                            ? "bg-emerald-600 text-white shadow-md shadow-emerald-950"
+                            : "bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Clutch ({clutchCount})
+                      </button>
+                    )}
+                    {crownCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("crown_victory")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "crown_victory"
+                            ? "bg-amber-500 text-black font-bold shadow-md shadow-amber-950"
+                            : "bg-white/5 hover:bg-white/10 text-amber-300 hover:text-white"
+                        }`}
+                      >
+                        Crowns 👑 ({crownCount})
+                      </button>
+                    )}
+                    {qualifiedCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("round_qualified")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "round_qualified"
+                            ? "bg-teal-600 text-white shadow-md shadow-teal-950"
+                            : "bg-white/5 hover:bg-white/10 text-teal-300 hover:text-white"
+                        }`}
+                      >
+                        Qualified ⚡ ({qualifiedCount})
+                      </button>
+                    )}
+                    {eliminatedCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("eliminated")}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer shrink-0 ${
+                          filterCategory === "eliminated"
+                            ? "bg-rose-900 text-white shadow-md shadow-rose-950"
+                            : "bg-white/5 hover:bg-white/10 text-rose-400 hover:text-white"
+                        }`}
+                      >
+                        Eliminated 💀 ({eliminatedCount})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Sort Option */}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                    <span className="text-slate-400">Sort:</span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) =>
+                        setSortBy(e.target.value as "score" | "time")
+                      }
+                      aria-label="Sort highlight candidates"
+                      className="px-2 py-1 bg-black/60 border border-white/10 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-rose-500 cursor-pointer"
+                    >
+                      <option value="score">Highest Score</option>
+                      <option value="time">Chronological</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             )}
@@ -639,18 +968,66 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                       className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-3.5 group relative ${
                         isApplied
                           ? "bg-rose-950/30 border-rose-500 shadow-lg shadow-rose-950/30"
+                          : selectedCandidateIds.has(candidate.candidate_id)
+                          ? "bg-rose-950/20 border-rose-500/50 shadow-md shadow-rose-950/20"
                           : "bg-[#141620] border-white/10 hover:border-white/20 hover:bg-[#171926]"
                       }`}
                     >
-                      {/* Top Header: Badge, Duration Chip & Score Pill */}
+                      {/* Top Header: Checkbox, Badge, Lifecycle Status & Score Pill */}
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-2">
+                          {/* Selection Checkbox for unprocessed candidates */}
+                          {(!candidate.processing_status ||
+                            candidate.processing_status === "unprocessed") && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleToggleSelect(candidate.candidate_id)
+                              }
+                              aria-label="Select candidate for batch action"
+                              className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                            >
+                              {selectedCandidateIds.has(
+                                candidate.candidate_id
+                              ) ? (
+                                <CheckSquare className="w-4 h-4 text-rose-500" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-500" />
+                              )}
+                            </button>
+                          )}
+
                           <span
                             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${badge.classes}`}
                           >
                             <BadgeIcon className="w-3.5 h-3.5 shrink-0" />
                             <span>{badge.label}</span>
                           </span>
+
+                          {/* Lifecycle Status Pill */}
+                          {candidate.processing_status === "uploaded" && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                              <Check className="w-3 h-3 stroke-[3]" />
+                              <span>Uploaded</span>
+                            </span>
+                          )}
+                          {candidate.processing_status === "rendered" && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                              <Film className="w-3 h-3" />
+                              <span>Rendered</span>
+                            </span>
+                          )}
+                          {candidate.processing_status === "staged" && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                              <span>📅 Scheduled</span>
+                            </span>
+                          )}
+                          {candidate.processing_status === "rendering" && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Rendering...</span>
+                            </span>
+                          )}
 
                           <span className="text-[11px] font-mono text-slate-400 bg-black/40 px-2 py-0.5 rounded border border-white/5">
                             #{idx + 1} • {candidate.game}
@@ -788,17 +1165,37 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {onQuickRender && (
-                            <button
-                              type="button"
-                              onClick={() => onQuickRender(candidate)}
-                              title="Quick Render (Third-Person Wide Crop)"
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-black/40 hover:bg-black/80 text-slate-300 hover:text-white rounded-xl border border-white/10 text-xs font-semibold transition-colors cursor-pointer"
+                          {/* Watch on YouTube button for uploaded clips */}
+                          {candidate.processing_status === "uploaded" && (
+                            <a
+                              href={
+                                candidate.youtube_upload_url ||
+                                (candidate.youtube_video_id
+                                  ? `https://youtube.com/shorts/${candidate.youtube_video_id}`
+                                  : "#")
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 hover:text-white rounded-xl border border-emerald-500/40 text-xs font-semibold transition-colors cursor-pointer"
                             >
-                              <Play className="w-3.5 h-3.5" />
-                              <span>Quick Render</span>
-                            </button>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>Watch on YouTube</span>
+                            </a>
                           )}
+
+                          {onQuickRender &&
+                            (!candidate.processing_status ||
+                              candidate.processing_status === "unprocessed") && (
+                              <button
+                                type="button"
+                                onClick={() => onQuickRender(candidate)}
+                                title="Quick Render (Third-Person Wide Crop)"
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-black/40 hover:bg-black/80 text-slate-300 hover:text-white rounded-xl border border-white/10 text-xs font-semibold transition-colors cursor-pointer"
+                              >
+                                <Play className="w-3.5 h-3.5" />
+                                <span>Quick Render</span>
+                              </button>
+                            )}
 
                           <button
                             type="button"
@@ -806,6 +1203,8 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                             className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer ${
                               isApplied
                                 ? "bg-emerald-600 text-white shadow-emerald-950"
+                                : candidate.processing_status === "uploaded"
+                                ? "bg-white/10 hover:bg-white/20 text-slate-300"
                                 : "bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white shadow-rose-950"
                             }`}
                           >
@@ -829,6 +1228,82 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                 })
               )}
             </div>
+
+            {/* Floating Batch Action Dock when items are selected */}
+            <AnimatePresence>
+              {selectedCandidateIds.size > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 30 }}
+                  className="p-3 bg-[#13151f] border-t border-rose-500/30 shadow-2xl flex flex-wrap items-center justify-between gap-3 shrink-0 z-20"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-rose-600/30 text-rose-300 font-bold text-xs border border-rose-500/40 font-mono">
+                      {selectedCandidateIds.size} Selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCandidateIds(new Set())}
+                      className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={batchMode}
+                      onChange={(e) => setBatchMode(e.target.value)}
+                      aria-label="Batch crop preset"
+                      className="px-2.5 py-1.5 bg-black/60 border border-white/15 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-rose-500 cursor-pointer"
+                    >
+                      <option value="third_person">
+                        Third-Person Wide (9:16)
+                      </option>
+                      <option value="direct_crop">
+                        Direct Center Crop (9:16)
+                      </option>
+                      <option value="vertical_blur">Vertical Blur (9:16)</option>
+                      <option value="cinematic">Cinematic Crop (9:16)</option>
+                    </select>
+
+                    <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={batchSchedule}
+                        onChange={(e) => setBatchSchedule(e.target.checked)}
+                        className="rounded border-white/20 text-rose-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span className="hidden sm:inline">
+                        Same-Day Scheduling
+                      </span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleExecuteBatchStage}
+                      disabled={isBatchStaging}
+                      className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-950/50 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    >
+                      {isBatchStaging ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Queueing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-3.5 h-3.5" />
+                          <span>
+                            Batch Render & Stage ({selectedCandidateIds.size})
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Footer Summary Strip */}
             <div className="p-4 bg-black/60 border-t border-white/5 flex items-center justify-between text-xs text-slate-400 shrink-0">

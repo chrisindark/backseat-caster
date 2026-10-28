@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.responses import BaseResponse
 from app.database import get_db
 from app.schemas.highlight import (
+    BatchStageHighlightsRequest,
+    BatchStageHighlightsResponse,
     DeleteHighlightsResponse,
     DetectHighlightsRequest,
     DetectHighlightsResponse,
@@ -16,6 +18,7 @@ from app.schemas.highlight import (
     HighlightRunListResponse,
     HighlightStatusResponse,
 )
+from app.services.auto_stage import AutoStageService
 from app.services.highlight.service import HighlightService
 
 logger = logging.getLogger(__name__)
@@ -96,6 +99,42 @@ def list_highlight_candidates(
     except Exception as e:
         logger.exception("Failed to list highlight candidates for %s: %s", video_id, e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/batch-stage", response_model=BaseResponse[BatchStageHighlightsResponse])
+def batch_stage_highlights(
+    video_id: str,
+    request: BatchStageHighlightsRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Render, enrich with LLM metadata, and schedule selected highlight candidates.
+    Supports either explicit candidate IDs or auto-picking the top N unprocessed (left) candidates.
+    Defaults to 'third_person' vertical framing and same-day catchup scheduling.
+    """
+    try:
+        result = AutoStageService.stage_selected_candidates(
+            db=db,
+            video_id=video_id,
+            candidate_ids=request.candidate_ids,
+            top_n=request.top_n,
+            min_score=request.min_score,
+            clipping_mode=request.clipping_mode,
+            schedule=request.schedule,
+            same_day_catchup=request.same_day_catchup,
+            crop_blur_padding=request.crop_blur_padding,
+            normalize_audio=request.normalize_audio,
+            background_tasks=background_tasks,
+        )
+        return BaseResponse.success_response(
+            response=BatchStageHighlightsResponse(**result)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Batch stage failed for video %s: %s", video_id, e)
+        raise HTTPException(status_code=500, detail=f"Batch stage failed: {e!s}")
 
 
 @router.delete("", response_model=BaseResponse[DeleteHighlightsResponse])

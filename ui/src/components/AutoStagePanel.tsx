@@ -407,7 +407,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                             : "bg-slate-800 text-slate-300 border-white/10"
                         }`}
                       >
-                        {source === "llm" ? "Gemini copy" : "Fallback copy"}
+                        {source === "llm" ? "Gemini copy" : "Deterministic copy"}
                       </span>
                     </div>
 

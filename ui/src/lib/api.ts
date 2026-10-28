@@ -1,4 +1,6 @@
 import {
+  BatchStageHighlightsRequest,
+  BatchStageHighlightsResponse,
   DeleteHighlightsResponse,
   DetectHighlightsRequest,
   DetectHighlightsResponse,
@@ -16,6 +18,7 @@ import {
   SyncResponse,
   UploadSelectionPayload,
   StagedClipsResponse,
+  SystemHealthResponse,
   VideoItem,
   VideoListResponse,
   VideoStorageCleanupOptions,
@@ -77,6 +80,15 @@ export async function checkBackendHealth(): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealthResponse | null> {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    return await parseResponse<SystemHealthResponse>(res, "fetch system health and preflight");
+  } catch {
+    return null;
   }
 }
 
@@ -608,6 +620,24 @@ export async function deleteHighlightCandidates(
   return parseResponse<DeleteHighlightsResponse>(
     res,
     `delete highlight candidates for ${videoId}`
+  );
+}
+
+export async function batchStageHighlights(
+  videoId: string,
+  request: BatchStageHighlightsRequest
+): Promise<BatchStageHighlightsResponse> {
+  const res = await fetch(
+    `${API_BASE}/videos/${videoId}/highlights/batch-stage`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }
+  );
+  return parseResponse<BatchStageHighlightsResponse>(
+    res,
+    `batch stage highlights for ${videoId}`
   );
 }
 

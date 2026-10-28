@@ -196,6 +196,10 @@ class BulkDeleteRendersRequest(BaseModel):
         True,
         description="Whether to perform deletion synchronously or dispatch to background task / Celery",
     )
+    preserve_uploaded_history: bool = Field(
+        True,
+        description="Whether to preserve database records and YouTube links for already uploaded renders while deleting local video files",
+    )
 
 
 class BulkDeleteRendersResponse(BaseModel):
@@ -203,7 +207,9 @@ class BulkDeleteRendersResponse(BaseModel):
     failed_clip_ids: list[str] = Field(default_factory=list)
     not_found_clip_ids: list[str] = Field(default_factory=list)
     deleted_count: int = 0
+    preserved_jobs_count: int = 0
     total_requested: int = 0
+    message: str | None = None
     task_id: str | None = None
     message: str
 

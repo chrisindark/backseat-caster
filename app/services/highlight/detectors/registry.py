@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.highlight.detectors.base import BaseHighlightDetector
+from app.services.highlight.detectors.fall_guys import FallGuysDetector
 from app.services.highlight.detectors.generic import GenericHighlightDetector
 from app.services.highlight.detectors.marvel_rivals import MarvelRivalsDetector
 
@@ -14,6 +15,13 @@ MARVEL_RIVALS_ALIASES = {
     "mvr",
     "marvelrivals",
     "marvel-rivals",
+}
+
+FALL_GUYS_ALIASES = {
+    "fall_guys",
+    "fall guys",
+    "fallguys",
+    "fall-guys",
 }
 
 
@@ -37,12 +45,16 @@ def get_detector(
         norm = game.strip().lower()
         if norm in MARVEL_RIVALS_ALIASES:
             return MarvelRivalsDetector()
+        if norm in FALL_GUYS_ALIASES:
+            return FallGuysDetector()
         return GenericHighlightDetector(game_name=game)
 
     # Auto-detect from video metadata
     combined = f"{video_title} {video_description}".lower()
     if any(alias in combined for alias in ("marvel rivals", "marvel_rivals")):
         return MarvelRivalsDetector()
+    if any(alias in combined for alias in ("fall guys", "fall_guys", "fallguys")):
+        return FallGuysDetector()
 
     return GenericHighlightDetector(game_name="Generic")
 
@@ -61,6 +73,14 @@ def list_supported_detectors() -> list[dict[str, Any]]:
             "description": (
                 "HUD OCR banners, structured killfeed chains, ultimate meter casts "
                 "and hero/ability template identification."
+            ),
+        },
+        {
+            "id": "fall_guys",
+            "name": "Fall Guys",
+            "description": (
+                "Banner OCR recognition (Crown Victory, Qualified, Final Round, Eliminated) "
+                "combined with physics/audio chaos detection and natural dialogue boundary snapping."
             ),
         },
     ]

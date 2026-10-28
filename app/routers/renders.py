@@ -191,10 +191,18 @@ def update_render_job(
 
 
 @router.delete("/jobs/{job_id}", response_model=BaseResponse[dict[str, Any]])
-def delete_render_job(job_id: str, db: Session = Depends(get_db)):
-    """Delete a specific render job and its associated files."""
+def delete_render_job(
+    job_id: str,
+    preserve_uploaded_history: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Delete a specific render job and its associated files, preserving upload records by default."""
     try:
-        result = RenderService.delete_render_job(db=db, job_id=job_id)
+        result = RenderService.delete_render_job(
+            db=db,
+            job_id=job_id,
+            preserve_uploaded_history=preserve_uploaded_history,
+        )
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -258,33 +266,47 @@ def bulk_delete_renders(
     """
     Bulk delete rendered clips and their associated database job records.
     Supports synchronous deletion or asynchronous background / Celery task dispatch.
+    Preserves database records and YouTube links for already uploaded renders by default.
     """
     try:
         if request.sync:
-            result = RenderService.bulk_delete_renders(db=db, clip_ids=request.clip_ids)
+            result = RenderService.bulk_delete_renders(
+                db=db,
+                clip_ids=request.clip_ids,
+                preserve_uploaded_history=request.preserve_uploaded_history,
+            )
             return BaseResponse.success_response(response=result)
 
         if is_celery_broker_online():
-            task = bulk_delete_renders_celery_task.delay(request.clip_ids)
+            task = bulk_delete_renders_celery_task.delay(
+                request.clip_ids,
+                preserve_uploaded_history=request.preserve_uploaded_history,
+            )
             return BaseResponse.success_response(
                 response={
                     "deleted_clip_ids": [],
                     "failed_clip_ids": [],
                     "not_found_clip_ids": [],
                     "deleted_count": 0,
+                    "preserved_jobs_count": 0,
                     "total_requested": len(request.clip_ids),
                     "task_id": task.id,
                     "message": f"Dispatched bulk delete for {len(request.clip_ids)} render(s) via Celery",
                 }
             )
 
-        background_tasks.add_task(execute_bulk_delete_job, clip_ids=request.clip_ids)
+        background_tasks.add_task(
+            execute_bulk_delete_job,
+            clip_ids=request.clip_ids,
+            preserve_uploaded_history=request.preserve_uploaded_history,
+        )
         return BaseResponse.success_response(
             response={
                 "deleted_clip_ids": [],
                 "failed_clip_ids": [],
                 "not_found_clip_ids": [],
                 "deleted_count": 0,
+                "preserved_jobs_count": 0,
                 "total_requested": len(request.clip_ids),
                 "task_id": None,
                 "message": f"Queued bulk delete for {len(request.clip_ids)} render(s) in background worker",
@@ -410,10 +432,19 @@ def run_auto_pipeline(
 
 
 @router.delete("/{clip_id}", response_model=BaseResponse[dict[str, Any]])
-def delete_render(clip_id: str, db: Session = Depends(get_db)):
-    """Delete a rendered clip directory from disk and remove associated database job records."""
+def delete_render(
+    clip_id: str,
+    preserve_uploaded_history: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Delete a rendered clip directory from disk and remove associated database job records,
+    preserving database records and YouTube links for already uploaded renders by default."""
     try:
-        result = RenderService.delete_render(db=db, clip_id=clip_id)
+        result = RenderService.delete_render(
+            db=db,
+            clip_id=clip_id,
+            preserve_uploaded_history=preserve_uploaded_history,
+        )
         if not result:
             raise HTTPException(
                 status_code=404,

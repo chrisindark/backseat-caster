@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     HIGHLIGHTS_DIR: str = "./data/highlights"
     HERO_TEMPLATES_DIR: str = "./data/hero_templates"
 
+    # Preflight configuration
+    PREFLIGHT_MIN_DISK_SPACE_GB: float = 2.0
+
     # YouTube API & OAuth configuration
     YOUTUBE_CLIENT_SECRETS_FILE: str = "./data/client_secrets.json"
     YOUTUBE_TOKEN_FILE: str = "./data/youtube_token.json"

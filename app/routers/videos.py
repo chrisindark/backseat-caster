@@ -77,7 +77,7 @@ def list_videos(
 def get_channel_youtube_videos(
     channel: str = Query(
         default=settings.DEFAULT_YOUTUBE_CHANNEL,
-        description="YouTube channel handle or URL (e.g. @chrisindark)",
+        description="YouTube channel handle or URL (e.g. @YourChannel)",
     ),
     limit: int = Query(20, ge=1, le=100, description="Max videos to load"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),

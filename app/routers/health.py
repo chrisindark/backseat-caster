@@ -3,6 +3,7 @@ from fastapi_health import health
 
 from app.config import settings
 from app.core.responses import BaseResponse
+from app.schemas.preflight import PreflightReport
 from app.services.health import (
     celery_failure_handler,
     celery_success_handler,
@@ -16,20 +17,31 @@ from app.services.health import (
     readiness_failure_handler,
     readiness_success_handler,
 )
+from app.services.preflight import run_preflight_checks
 
 router = APIRouter(prefix="/health", tags=["Health"])
 
 
 @router.get("", response_model=BaseResponse[dict])
 def health_check():
-    """Basic health check endpoint returning API status."""
+    """Basic health check endpoint returning API status and system preflight diagnostics."""
+    preflight = run_preflight_checks()
     return BaseResponse.success_response(
         response={
-            "status": "healthy",
+            "status": preflight.status,
+            "ready": preflight.ready,
             "version": settings.VERSION,
             "downloads_dir": str(settings.downloads_path),
+            "preflight": preflight.model_dump(),
         }
     )
+
+
+@router.get("/preflight", response_model=BaseResponse[PreflightReport])
+def get_preflight_report():
+    """Dedicated endpoint returning full preflight diagnostic checks for CLI tools and storage."""
+    preflight = run_preflight_checks()
+    return BaseResponse.success_response(response=preflight)
 
 
 router.add_api_route(

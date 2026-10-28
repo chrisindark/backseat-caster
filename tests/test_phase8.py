@@ -565,7 +565,9 @@ def test_upload_uses_publish_at_and_private_privacy(
     assert usage.units_used == 1_600
 
 
-def test_upload_allowed_over_quota_with_warning(client, db_session, tmp_path, monkeypatch):
+def test_upload_allowed_over_quota_with_warning(
+    client, db_session, tmp_path, monkeypatch
+):
     """An exhausted daily budget dispatches the upload instead of returning 429."""
     clip_id = "clip_quota_warn"
     job, mock_videos = _prepare_scheduled_upload(
@@ -893,6 +895,79 @@ def test_regenerate_metadata_with_explicit_hero_and_context(
     # Verify that the LLM prompt received hero and context
     assert "Hero: Magneto" in captured_prompt["prompt"]
     assert "Extra context: 5k defense holding point B" in captured_prompt["prompt"]
+
+
+def test_regenerate_metadata_deterministic_uses_hero_context_and_tags(
+    client, db_session
+):
+    """Deterministic copy incorporates hero name, clip context, candidate tags, and suggested title without LLM."""
+    from app.models.highlight_candidate import HighlightCandidate
+
+    video = _video(db_session, "vid_det_rich")
+    cand = HighlightCandidate(
+        id="cand_det_rich_1",
+        video_id=video.id,
+        start_seconds=150.0,
+        end_seconds=185.0,
+        duration_seconds=35.0,
+        score=0.99,
+        event_type="team_wipe",
+        game="Marvel Rivals",
+        suggested_title="Insane Team Wipe Ultimate! 💥 #MarvelRivals",
+        suggested_tags_json=json.dumps(
+            ["Marvel Rivals", "team wipe", "Venom", "Shorts"]
+        ),
+        details_json=json.dumps(
+            {
+                "hero_name": "Venom",
+                "is_team_wipe": True,
+                "kill_count": 5,
+            }
+        ),
+    )
+    db_session.add(cand)
+    db_session.commit()
+
+    job = _staged_clip(db_session, video, "clip_det_rich", "job_det_rich")
+    job.highlight_candidate_id = "cand_det_rich_1"
+    job.start_seconds = 150.0
+    job.duration_seconds = 35.0
+    db_session.commit()
+
+    res = client.post(
+        f"{settings.API_PREFIX}/renders/clip_det_rich/regenerate-metadata",
+        json={
+            "use_llm": False,
+            "hero_name": "Venom",
+            "clip_context": "clutch team wipe holding choke point B",
+            "game": "Marvel Rivals",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+    assert body["used_llm"] is False
+    assert body["metadata_source"] == "fallback"
+
+    sel = body["upload_selection"]
+    # 1. Title features the hero!
+    assert "Venom" in sel["title"]
+    assert "Team Wipe" in sel["title"]
+    assert "#MarvelRivals" in sel["title"]
+
+    # 2. Description features the hero and context!
+    assert "Venom" in sel["description"]
+    assert "clutch team wipe holding choke point B" in sel["description"]
+    assert "#Shorts" in sel["description"]
+    assert "#MarvelRivals" in sel["description"]
+
+    # 3. Tags include candidate tags, hero and game!
+    tags = sel["tags"]
+    assert "Venom" in tags
+    assert "Marvel Rivals" in tags
+    assert "team wipe" in tags
+    assert "Shorts" in tags
+    assert sel["hero_name"] == "Venom"
+    assert sel["clip_context"] == "clutch team wipe holding choke point B"
 
 
 def test_regenerate_metadata_auto_matches_candidate_by_timestamp(

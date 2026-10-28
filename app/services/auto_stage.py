@@ -174,6 +174,237 @@ class AutoStageService:
         return earliest_allowed + timedelta(hours=1)
 
     @classmethod
+    def compute_batch_publish_slots(
+        cls,
+        db: Session,
+        count: int,
+        *,
+        same_day_catchup: bool = True,
+        now: datetime | None = None,
+        booked_slots: set[datetime] | None = None,
+    ) -> list[datetime]:
+        """Compute chronological publishAt timestamps for a batch of clips.
+
+        When same_day_catchup is True and AUTO_STAGE_DAILY_SLOTS is configured in AUTO_STAGE_TIMEZONE:
+        If generation happens after some of today's slots have passed (e.g. at 13:51, missing 08:00 and 12:30),
+        the missed items catch up at the immediate next available slot (spaced by subtle 3-minute intervals)
+        so that all `count` clips are scheduled for publication on the SAME DAY instead of rolling over.
+        """
+        if count <= 0:
+            return []
+
+        current_utc = as_utc(now) or datetime.now(UTC)
+        daily_slots_raw = getattr(settings, "AUTO_STAGE_DAILY_SLOTS", None)
+        parsed_slots: list[tuple[int, int]] = []
+        if daily_slots_raw:
+            slots_list = (
+                daily_slots_raw
+                if isinstance(daily_slots_raw, list)
+                else [s.strip() for s in str(daily_slots_raw).split(",")]
+            )
+            for s in slots_list:
+                parsed = _parse_time_slot(s)
+                if parsed:
+                    parsed_slots.append(parsed)
+            parsed_slots.sort()
+
+        # If no daily slots defined, fall back to sequential legacy next_publish_slot
+        if not parsed_slots:
+            allocated: list[datetime] = []
+            booked = set(booked_slots or ())
+            slot = cls.next_publish_slot(db, now=current_utc, booked_slots=booked)
+            for _ in range(count):
+                allocated.append(slot)
+                booked.add(slot)
+                slot = cls.next_publish_slot(
+                    db, now=current_utc, after=slot, booked_slots=booked
+                )
+            return allocated
+
+        tz = _get_target_timezone()
+        booked = set(booked_slots or ())
+        if not booked:
+            rows = (
+                db.query(RenderJob.scheduled_publish_at)
+                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .all()
+            )
+            for r in rows:
+                dt_utc = as_utc(r[0])
+                if dt_utc:
+                    booked.add(dt_utc)
+
+        min_buffer = timedelta(minutes=15)
+        earliest_allowed = current_utc + min_buffer
+        local_ref = earliest_allowed.astimezone(tz)
+        today = local_ref.date()
+
+        remaining_today: list[datetime] = []
+        for h, m in parsed_slots:
+            local_slot = datetime(
+                today.year, today.month, today.day, h, m, 0, tzinfo=tz
+            )
+            slot_utc = local_slot.astimezone(UTC)
+            if slot_utc >= earliest_allowed:
+                remaining_today.append(slot_utc)
+
+        if same_day_catchup and remaining_today:
+            allocated = []
+            overflow = max(0, count - len(remaining_today))
+            catchup_slot = remaining_today[0]
+            # Catchup items for missed slots placed at the first available slot, offset by 3 mins
+            for i in range(overflow + 1):
+                if len(allocated) < count:
+                    target = catchup_slot + timedelta(minutes=i * 3)
+                    allocated.append(target)
+            # Remaining today slots get 1 each
+            for s_dt in remaining_today[1:]:
+                if len(allocated) < count:
+                    allocated.append(s_dt)
+            return allocated
+
+        # Sequential rollover fallback if no remaining slots today or same_day_catchup disabled
+        allocated = []
+        slot = cls.next_publish_slot(db, now=current_utc, booked_slots=booked)
+        for _ in range(count):
+            allocated.append(slot)
+            booked.add(slot)
+            slot = cls.next_publish_slot(
+                db, now=current_utc, after=slot, booked_slots=booked
+            )
+        return allocated
+
+    @classmethod
+    def stage_selected_candidates(
+        cls,
+        db: Session,
+        video_id: str,
+        *,
+        candidate_ids: list[str] | None = None,
+        top_n: int | None = None,
+        min_score: float | None = None,
+        clipping_mode: str | None = None,
+        schedule: bool = True,
+        same_day_catchup: bool = True,
+        crop_blur_padding: float | None = None,
+        normalize_audio: bool = True,
+        background_tasks: Any = None,
+    ) -> dict[str, Any]:
+        """Stage selected candidate IDs, or auto-pick top N left candidates for a video."""
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            raise ValueError(f"Video '{video_id}' not found")
+
+        mode = clipping_mode or settings.AUTO_STAGE_CLIPPING_MODE or "third_person"
+        if mode not in VERTICAL_MODES:
+            mode = "third_person"
+
+        # Query all existing render jobs for this video to ensure idempotency
+        already_staged_ids: set[str] = set()
+        jobs = db.query(RenderJob).filter(RenderJob.video_id == video_id).all()
+        for j in jobs:
+            if j.highlight_candidate_id:
+                already_staged_ids.add(j.highlight_candidate_id)
+            elif j.clip_id and j.clip_id.startswith("auto_cand_"):
+                already_staged_ids.add(j.clip_id[5:])
+
+        candidates_to_stage: list[HighlightCandidate] = []
+        skipped_ids: list[str] = []
+
+        if candidate_ids:
+            # Explicit selection mode
+            cands = (
+                db.query(HighlightCandidate)
+                .filter(
+                    HighlightCandidate.video_id == video_id,
+                    HighlightCandidate.id.in_(candidate_ids),
+                )
+                .order_by(HighlightCandidate.score.desc())
+                .all()
+            )
+            cand_map = {c.id: c for c in cands}
+            for cid in candidate_ids:
+                if cid in already_staged_ids:
+                    skipped_ids.append(cid)
+                elif cid in cand_map:
+                    candidates_to_stage.append(cand_map[cid])
+        else:
+            # Top N Left mode
+            count = max(
+                0, int(top_n if top_n is not None else settings.AUTO_STAGE_TOP_N)
+            )
+            threshold = float(
+                min_score if min_score is not None else settings.AUTO_STAGE_MIN_SCORE
+            )
+            candidates = (
+                db.query(HighlightCandidate)
+                .filter(
+                    HighlightCandidate.video_id == video_id,
+                    HighlightCandidate.score >= threshold,
+                )
+                .order_by(
+                    HighlightCandidate.score.desc(), HighlightCandidate.start_seconds
+                )
+                .all()
+            )
+            for c in candidates:
+                if c.id in already_staged_ids:
+                    skipped_ids.append(c.id)
+                elif len(candidates_to_stage) < count:
+                    candidates_to_stage.append(c)
+
+        if not candidates_to_stage:
+            return {
+                "video_id": video_id,
+                "requested_count": len(candidate_ids)
+                if candidate_ids
+                else (top_n or 0),
+                "staged_count": 0,
+                "skipped_count": len(skipped_ids),
+                "staged_clips": [],
+                "skipped_candidate_ids": skipped_ids,
+                "message": "No eligible unprocessed candidates found to stage.",
+            }
+
+        slots: list[datetime] = []
+        if schedule:
+            slots = cls.compute_batch_publish_slots(
+                db,
+                count=len(candidates_to_stage),
+                same_day_catchup=same_day_catchup,
+            )
+
+        staged: list[dict[str, Any]] = []
+        for idx, candidate in enumerate(candidates_to_stage):
+            assigned_slot = slots[idx] if idx < len(slots) else None
+            try:
+                summary = cls._stage_candidate(
+                    db,
+                    video=video,
+                    candidate=candidate,
+                    mode=mode,
+                    slot=assigned_slot,
+                    background_tasks=background_tasks,
+                )
+                staged.append(summary)
+            except Exception as exc:
+                logger.warning(
+                    "Batch stage failed for candidate %s: %s", candidate.id, exc
+                )
+                db.rollback()
+                continue
+
+        return {
+            "video_id": video_id,
+            "requested_count": len(candidate_ids) if candidate_ids else (top_n or 0),
+            "staged_count": len(staged),
+            "skipped_count": len(skipped_ids),
+            "staged_clips": staged,
+            "skipped_candidate_ids": skipped_ids,
+            "message": f"Successfully staged {len(staged)} highlight clip(s) as {mode}.",
+        }
+
+    @classmethod
     def stage_top_candidates(
         cls,
         db: Session,
@@ -450,6 +681,8 @@ class AutoStageService:
                 description=metadata.get("description"),
                 tags=metadata.get("tags") or [],
                 privacy=privacy,
+                hero_name=metadata.get("hero_name"),
+                clip_context=metadata.get("clip_context"),
             ),
         )
 
@@ -466,6 +699,12 @@ class AutoStageService:
         )
         staged_meta["highlight_candidate_id"] = candidate.id
         staged_meta["highlight_score"] = candidate.score
+        if metadata.get("hero_name"):
+            staged_meta["hero_name"] = metadata["hero_name"]
+        if metadata.get("clip_context"):
+            staged_meta["clip_context"] = metadata["clip_context"]
+        if metadata.get("game"):
+            staged_meta["game"] = metadata["game"]
         job.upload_metadata = json.dumps(staged_meta)
         db.commit()
 

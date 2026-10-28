@@ -19,6 +19,7 @@ from app.routers import (
     videos_router,
     youtube_router,
 )
+from app.services.preflight import log_preflight_report, run_preflight_checks
 
 # Initialize the custom colored logger with correlation ID
 setup_logger()
@@ -31,6 +32,11 @@ async def lifespan(app: FastAPI):
     await DependencyContainer.initialize()
     # Ensure local storage directories exist
     settings.ensure_directories()
+
+    # Run startup preflight verification for media tools & storage
+    preflight_report = run_preflight_checks()
+    log_preflight_report(preflight_report)
+
     logger.info(
         "BackseatCaster API initialized. Downloads: %s, Renders: %s, Highlights: %s",
         settings.downloads_path,

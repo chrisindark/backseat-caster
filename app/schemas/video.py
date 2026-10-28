@@ -113,7 +113,7 @@ class VideoListRequest(BaseModel):
         description="Maximum number of videos to fetch/sync from table",
     )
     channel: str | None = Field(
-        None, description="YouTube channel handle or name (e.g., @chrisindark)"
+        None, description="YouTube channel handle or name (e.g., @YourChannel)"
     )
     status_filter: str | None = Field(
         None,

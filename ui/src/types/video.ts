@@ -469,6 +469,15 @@ export interface HighlightCandidateItem {
   peak_timestamp: number;
   suggested_title: string;
   suggested_tags: string[];
+  // Lifecycle state & render / upload linkage (Phase 8.5)
+  processing_status?: "unprocessed" | "rendering" | "rendered" | "staged" | "uploaded" | "failed";
+  render_status?: string | null;
+  render_job_id?: string | null;
+  clip_id?: string | null;
+  youtube_upload_status?: string | null;
+  youtube_video_id?: string | null;
+  youtube_upload_url?: string | null;
+  scheduled_publish_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -502,6 +511,11 @@ export interface HighlightCandidateListResponse {
   video_id: string;
   status: string;
   count: number;
+  unprocessed_count?: number;
+  rendered_count?: number;
+  staged_count?: number;
+  uploaded_count?: number;
+  top_rated_left_count?: number;
   candidates: HighlightCandidateItem[];
 }
 
@@ -541,4 +555,69 @@ export interface DeleteHighlightsResponse {
   video_id: string;
   deleted_count: number;
   message: string;
+}
+
+export interface BatchStageHighlightsRequest {
+  candidate_ids?: string[];
+  top_n?: number;
+  min_score?: number;
+  clipping_mode?: string;
+  schedule?: boolean;
+  same_day_catchup?: boolean;
+  crop_blur_padding?: number;
+  normalize_audio?: boolean;
+}
+
+export interface BatchStageHighlightsResponse {
+  video_id: string;
+  requested_count: number;
+  staged_count: number;
+  skipped_count: number;
+  staged_clips: Array<Record<string, unknown>>;
+  skipped_candidate_ids: string[];
+  message: string;
+}
+
+export interface ToolStatusItem {
+  name: string;
+  status: "ok" | "warning" | "error" | string;
+  installed: boolean;
+  version?: string | null;
+  path?: string | null;
+  error?: string | null;
+  remedy?: string | null;
+}
+
+export interface DiskStatusItem {
+  path: string;
+  status: "ok" | "warning" | "error" | string;
+  total_gb: number;
+  used_gb: number;
+  free_gb: number;
+  percent_used: number;
+  min_required_gb: number;
+  error?: string | null;
+  remedy?: string | null;
+}
+
+export interface PreflightReportItem {
+  ready: boolean;
+  status: "healthy" | "degraded" | "unhealthy" | string;
+  checks: {
+    ffmpeg: ToolStatusItem;
+    ffprobe: ToolStatusItem;
+    yt_dlp: ToolStatusItem;
+    disk_space: DiskStatusItem;
+    [key: string]: unknown;
+  };
+  errors: string[];
+  warnings: string[];
+}
+
+export interface SystemHealthResponse {
+  status: string;
+  ready: boolean;
+  version: string;
+  downloads_dir: string;
+  preflight?: PreflightReportItem;
 }

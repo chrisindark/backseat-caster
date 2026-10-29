@@ -20,6 +20,7 @@ import {
   Compass,
   Film,
   RefreshCw,
+  Sparkles,
   Tv,
 } from "lucide-react";
 import Link from "next/link";
@@ -517,8 +518,15 @@ function HomeContent() {
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <Link
+                  href="/setup"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-rose-900/40 transition-all cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>Try a Demo (Instant 3 Shorts)</span>
+                </Link>
+                <Link
                   href="/youtube"
-                  className="flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg shadow-lg shadow-rose-900/40 transition-all cursor-pointer"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-lg border border-white/10 transition-all cursor-pointer"
                 >
                   <Compass className="w-4 h-4" />
                   <span>Browse YouTube Channel</span>
@@ -526,7 +534,7 @@ function HomeContent() {
                 <button
                   onClick={handleSync}
                   disabled={isSyncing}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-lg border border-white/10 transition-all cursor-pointer"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 text-sm font-semibold rounded-lg border border-white/5 transition-all cursor-pointer"
                 >
                   <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
                   <span>{isSyncing ? "Syncing Videos..." : "Sync Default Channel"}</span>

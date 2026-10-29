@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Scissors,
   Search,
+  Sliders,
   UploadCloud,
   Zap,
 } from "lucide-react";
@@ -230,6 +231,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Compass className="w-3.5 h-3.5" />
               <span>Publish / YouTube</span>
+            </Link>
+
+            <Link
+              href="/setup"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                pathname?.startsWith("/setup")
+                  ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Setup</span>
             </Link>
           </nav>
 

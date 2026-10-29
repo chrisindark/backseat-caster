@@ -621,3 +621,80 @@ export interface SystemHealthResponse {
   downloads_dir: string;
   preflight?: PreflightReportItem;
 }
+
+// -----------------------------------------------------------------------------
+// Setup Wizard, In-App Settings, and Demo Interfaces
+// -----------------------------------------------------------------------------
+
+export interface SetupCheckItem {
+  name: string;
+  title: string;
+  status: "ok" | "warning" | "error" | string;
+  required: boolean;
+  message: string;
+  remedy?: string | null;
+  details?: Record<string, unknown>;
+}
+
+export interface SetupStatusResponse {
+  ready: boolean;
+  checks: SetupCheckItem[];
+  ai_status: {
+    enabled: boolean;
+    configured: boolean;
+    available: boolean;
+    model: string;
+    base_url: string;
+    has_api_key: boolean;
+  };
+  youtube_status: YouTubeAuthStatus;
+  sample_project: {
+    is_loaded: boolean;
+    video_id: string | null;
+    rendered_count: number;
+  };
+}
+
+export interface SetupSettings {
+  llm_enabled: boolean;
+  llm_base_url?: string | null;
+  llm_model?: string | null;
+  llm_has_api_key: boolean;
+  default_clipping_mode: string;
+  auto_stage_top_n: number;
+  auto_stage_min_score: number;
+  auto_cleanup_uploaded_renders: boolean;
+  auto_cleanup_vod: boolean;
+  youtube_redirect_uri: string;
+}
+
+export interface UpdateSetupSettingsPayload {
+  llm_enabled?: boolean;
+  llm_base_url?: string | null;
+  llm_api_key?: string | null;
+  llm_model?: string | null;
+  default_clipping_mode?: string | null;
+  auto_stage_top_n?: number | null;
+  auto_stage_min_score?: number | null;
+  auto_cleanup_uploaded_renders?: boolean | null;
+  auto_cleanup_vod?: boolean | null;
+  youtube_redirect_uri?: string | null;
+}
+
+export interface DemoProjectResponse {
+  success: boolean;
+  message: string;
+  video_id: string;
+  video_title: string;
+  candidates_count: number;
+  staged_jobs_count: number;
+  rendered_jobs_count: number;
+  clip_ids: string[];
+}
+
+export interface YouTubeCredentialsPayload {
+  client_id?: string;
+  client_secret?: string;
+  refresh_token?: string;
+  client_secrets_json?: string;
+}

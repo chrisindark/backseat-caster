@@ -16,10 +16,12 @@ from app.routers import (
     health_router,
     highlights_router,
     renders_router,
+    setup_router,
     videos_router,
     youtube_router,
 )
 from app.services.preflight import log_preflight_report, run_preflight_checks
+from app.services.settings_manager import SettingsManager
 
 # Initialize the custom colored logger with correlation ID
 setup_logger()
@@ -29,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Apply user-customized in-app settings
+    SettingsManager.apply_settings_to_runtime()
+
     await DependencyContainer.initialize()
     # Ensure local storage directories exist
     settings.ensure_directories()
@@ -86,6 +91,7 @@ def root():
 
 
 # Register routers
+app.include_router(setup_router, prefix=settings.API_PREFIX)
 app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(videos_router, prefix=settings.API_PREFIX)
 app.include_router(renders_router, prefix=settings.API_PREFIX)

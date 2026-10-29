@@ -2,6 +2,7 @@ import {
   BatchStageHighlightsRequest,
   BatchStageHighlightsResponse,
   DeleteHighlightsResponse,
+  DemoProjectResponse,
   DetectHighlightsRequest,
   DetectHighlightsResponse,
   DownloadResponse,
@@ -15,10 +16,13 @@ import {
   RenderJobResponse,
   RenderManifest,
   RenderRequest,
+  SetupSettings,
+  SetupStatusResponse,
   SyncResponse,
   UploadSelectionPayload,
   StagedClipsResponse,
   SystemHealthResponse,
+  UpdateSetupSettingsPayload,
   VideoItem,
   VideoListResponse,
   VideoStorageCleanupOptions,
@@ -27,6 +31,7 @@ import {
   YouTubeBatchUploadResponse,
   YouTubeChannelResponse,
   YouTubeChannelVideoItem,
+  YouTubeCredentialsPayload,
   YouTubeQuota,
   YouTubeUploadResult,
 } from "@/types/video";
@@ -658,4 +663,66 @@ export function getHighlightThumbnailUrl(
   candidateId: string
 ): string {
   return `${API_BASE}/videos/${videoId}/highlights/${candidateId}/thumb.jpg`;
+}
+
+// -----------------------------------------------------------------------------
+// Setup Wizard, In-App Settings, and Demo Helpers
+// -----------------------------------------------------------------------------
+
+export async function fetchSetupStatus(): Promise<SetupStatusResponse> {
+  const res = await fetch(`${API_BASE}/setup/status`, {
+    cache: "no-store",
+  });
+  return parseResponse<SetupStatusResponse>(res, "fetch setup status");
+}
+
+export async function fetchSetupSettings(): Promise<SetupSettings> {
+  const res = await fetch(`${API_BASE}/setup/settings`, {
+    cache: "no-store",
+  });
+  return parseResponse<SetupSettings>(res, "fetch runtime settings");
+}
+
+export async function updateSetupSettings(
+  payload: UpdateSetupSettingsPayload
+): Promise<SetupSettings> {
+  const res = await fetch(`${API_BASE}/setup/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<SetupSettings>(res, "update runtime settings");
+}
+
+export async function loadDemoProject(options: {
+  auto_render?: boolean;
+  sync?: boolean;
+} = {}): Promise<DemoProjectResponse> {
+  const res = await fetch(`${API_BASE}/setup/demo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  return parseResponse<DemoProjectResponse>(res, "load sample demo project");
+}
+
+export async function configureYouTubeCredentials(
+  payload: YouTubeCredentialsPayload
+): Promise<{ message: string; auth_status: YouTubeAuthStatus }> {
+  const res = await fetch(`${API_BASE}/youtube/auth/credentials`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<{ message: string; auth_status: YouTubeAuthStatus }>(
+    res,
+    "configure YouTube credentials"
+  );
+}
+
+export async function revokeYouTubeCredentials(): Promise<{ message: string }> {
+  const res = await fetch(`${API_BASE}/youtube/auth/revoke`, {
+    method: "POST",
+  });
+  return parseResponse<{ message: string }>(res, "revoke YouTube credentials");
 }

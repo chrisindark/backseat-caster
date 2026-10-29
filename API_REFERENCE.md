@@ -26,6 +26,15 @@ Error responses use the same envelope shape with `success: false` and a populate
 |---|---|---|
 | `GET` | `/api/v1/health` | Healthcheck incl. Redis/storage status |
 
+## Setup & First-Run Wizard — `app/routers/setup.py`
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/setup/status` | 4-point setup health status: FFmpeg, Disk Space, AI Key (optional), YouTube connected (optional) |
+| `GET` | `/api/v1/setup/settings` | Active in-app settings (AI model/url, clipping defaults, auto-stage, cleanup) |
+| `PATCH` | `/api/v1/setup/settings` | Update in-app settings without editing `.env` (persisted to `data/settings.json`) |
+| `POST` | `/api/v1/setup/demo` | Seed 60-second Marvel Rivals highlight demo project and render 3 vertical Shorts |
+
 ## Videos — `app/routers/videos.py`
 
 | Method | Path | Description |

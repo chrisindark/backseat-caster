@@ -63,6 +63,8 @@ backseat-caster/
 │   │   ├── renders.py           # RenderService: render jobs, manifests, deletions
 │   │   ├── auto_stage.py        # AutoStageService: top-N rendering, metadata staging, publish slots
 │   │   ├── auto_pipeline.py     # AutoPipelineService: uploaded-render cleanup + batched stage sweep
+│   │   ├── setup.py             # SetupService: 4-check diagnostics, demo highlight seeding
+│   │   ├── settings_manager.py  # SettingsManager: runtime in-app settings persistence (data/settings.json)
 │   │   ├── llm_metadata.py      # LLMMetadataService: OpenAI-compatible LLM copy + deterministic fallback
 │   │   ├── upload_metadata.py   # Deterministic YouTube title/description/tag builder
 │   │   ├── youtube_quota.py     # YouTubeQuotaService: advisory daily unit accounting
@@ -73,6 +75,7 @@ backseat-caster/
 │   │   ├── videos.py            # /api/v1/videos
 │   │   ├── renders.py           # /api/v1/renders (incl. cleanup + auto-pipeline)
 │   │   ├── highlights.py        # /api/v1/videos/{id}/highlights
+│   │   ├── setup.py             # /api/v1/setup (readiness diagnostics, in-app settings, 60s demo)
 │   │   ├── youtube.py           # /api/v1/youtube
 │   │   └── health.py            # /api/v1/health
 │   ├── rendering/               # FFmpeg rendering engine

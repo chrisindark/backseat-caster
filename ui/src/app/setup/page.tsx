@@ -11,42 +11,27 @@ import {
   revokeYouTubeCredentials,
   updateSetupSettings,
 } from "@/lib/api";
-import {
-  DemoProjectResponse,
-  SetupCheckItem,
-  SetupSettings,
-  SetupStatusResponse,
-} from "@/types/video";
+import { SetupSettings, SetupStatusResponse } from "@/types/video";
 import {
   AlertCircle,
   ArrowRight,
-  Bot,
   Check,
   CheckCircle2,
-  ChevronRight,
   Copy,
   Cpu,
   ExternalLink,
-  Film,
   HardDrive,
-  HelpCircle,
-  Key,
   Layers,
   Loader2,
   LogOut,
   Play,
-  Radio,
   RefreshCw,
   Save,
   Scissors,
-  Settings as SettingsIcon,
   Sliders,
   Sparkles,
-  Tv,
   UploadCloud,
   Video,
-  Wand2,
-  XCircle,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
@@ -62,7 +47,6 @@ export default function SetupWizardPage() {
 
   // Demo Project state
   const [isLaunchingDemo, setIsLaunchingDemo] = useState<boolean>(false);
-  const [demoResult, setDemoResult] = useState<DemoProjectResponse | null>(null);
 
   // Guided YouTube Connect state
   const [clientSecretsInput, setClientSecretsInput] = useState<string>("");
@@ -110,6 +94,10 @@ export default function SetupWizardPage() {
   }, []);
 
   useEffect(() => {
+    // loadData awaits its fetches before it touches any state, so this effect
+    // does not trigger a synchronous cascading render. The react-hooks lint rule
+    // can't see through the async boundary and flags the call anyway.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -124,7 +112,6 @@ export default function SetupWizardPage() {
     setErrorMsg(null);
     try {
       const res = await loadDemoProject({ auto_render: true, sync: true });
-      setDemoResult(res);
       setSuccessMsg(res.message);
       await loadData();
     } catch (err) {
@@ -150,7 +137,7 @@ export default function SetupWizardPage() {
     setIsSavingCreds(true);
     setErrorMsg(null);
     try {
-      const res = await configureYouTubeCredentials({
+      await configureYouTubeCredentials({
         client_secrets_json: clientSecretsInput.trim(),
       });
       setSuccessMsg("OAuth client credentials saved! You can now authorize your channel.");

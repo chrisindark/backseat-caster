@@ -37,7 +37,9 @@ from app.schemas.video import (
     VideoUpdateRequest,
     YouTubeChannelVideosResponse,
 )
+from app.schemas.watch import WatchScanResponse, WatchStatusResponse
 from app.services.videos import VideoService
+from app.services.watch_folder import WatchFolderService
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,55 @@ def sync_channel_videos(request: SyncChannelRequest, db: Session = Depends(get_d
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Could not fetch videos from YouTube channel: {e!s}",
+        )
+
+
+@router.get("/watch/status", response_model=BaseResponse[WatchStatusResponse])
+def get_watch_folder_status(
+    recent_limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Inspect the OBS watch folder: whether it is configured, how many finished
+    recordings are waiting, and the recent ingest ledger.
+    """
+    try:
+        result = WatchFolderService.status(db, recent_limit=recent_limit)
+        return BaseResponse.success_response(response=WatchStatusResponse(**result))
+    except Exception as e:
+        logger.exception("Failed reading watch folder status: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed reading watch folder status: {e!s}",
+        )
+
+
+@router.post("/watch/scan", response_model=BaseResponse[WatchScanResponse])
+def scan_watch_folder(
+    dry_run: bool = Query(
+        False, description="Only report what would be ingested, without copying files"
+    ),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Scan the OBS watch folder once and ingest any finished recordings.
+
+    Normally triggered automatically by Celery beat; this endpoint lets a creator
+    pull the trigger immediately from the UI or a script.
+    """
+    try:
+        result = WatchFolderService.scan(
+            db,
+            background_tasks=background_tasks,
+            ingest=not dry_run,
+        )
+        return BaseResponse.success_response(response=WatchScanResponse(**result))
+    except Exception as e:
+        logger.exception("Failed scanning watch folder: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed scanning watch folder: {e!s}",
         )
 
 
@@ -403,6 +454,7 @@ def upload_local_video(
     file: UploadFile = File(...),
     title: str | None = Form(None),
     channel_name: str | None = Form("OBS Studio"),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
 ):
     """Directly upload and ingest an OBS or local gameplay recording (.mp4, .mkv, .mov, .webm, etc.)."""
@@ -412,6 +464,7 @@ def upload_local_video(
             file=file,
             title=title,
             channel_name=channel_name,
+            background_tasks=background_tasks,
         )
         return BaseResponse.success_response(
             response=video_res,

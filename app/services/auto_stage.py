@@ -22,8 +22,10 @@ from app.models.highlight_candidate import HighlightCandidate
 from app.models.render_job import RenderJob
 from app.models.video import Video
 from app.schemas.render import RenderClipRequest, UploadSelectionRequest
+from app.services.channel_profile import ChannelProfileService
 from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
+from app.services.upload_metadata import apply_title_template
 
 logger = logging.getLogger(__name__)
 
@@ -59,16 +61,18 @@ def _parse_time_slot(slot_str: str) -> tuple[int, int] | None:
     return None
 
 
-def _get_target_timezone() -> ZoneInfo:
-    """Resolve configured timezone or fall back to UTC."""
-    tz_name = (getattr(settings, "AUTO_STAGE_TIMEZONE", "") or "").strip()
-    if tz_name:
+def _get_target_timezone(tz_name: str | None = None) -> ZoneInfo:
+    """Resolve a configured timezone or fall back to UTC."""
+    candidate = (
+        tz_name or (getattr(settings, "AUTO_STAGE_TIMEZONE", "") or "")
+    ).strip()
+    if candidate:
         try:
-            return ZoneInfo(tz_name)
+            return ZoneInfo(candidate)
         except Exception as e:
             logger.warning(
                 "Invalid AUTO_STAGE_TIMEZONE '%s': %s, falling back to UTC",
-                tz_name,
+                candidate,
                 e,
             )
     return ZoneInfo("UTC")
@@ -92,19 +96,13 @@ class AutoStageService:
         Otherwise falls back to the legacy +AUTO_STAGE_INTERVAL_HOURS offset.
         """
         current_utc = as_utc(now) or datetime.now(UTC)
-        daily_slots_raw = getattr(settings, "AUTO_STAGE_DAILY_SLOTS", None)
+        slots_list, tz_name = ChannelProfileService.schedule_config(db)
         parsed_slots: list[tuple[int, int]] = []
-        if daily_slots_raw:
-            slots_list = (
-                daily_slots_raw
-                if isinstance(daily_slots_raw, list)
-                else [s.strip() for s in str(daily_slots_raw).split(",")]
-            )
-            for s in slots_list:
-                parsed = _parse_time_slot(s)
-                if parsed:
-                    parsed_slots.append(parsed)
-            parsed_slots.sort()
+        for s in slots_list:
+            parsed = _parse_time_slot(s)
+            if parsed:
+                parsed_slots.append(parsed)
+        parsed_slots.sort()
 
         # If no daily slots defined, use legacy relative interval
         if not parsed_slots:
@@ -123,7 +121,7 @@ class AutoStageService:
             return first
 
         # Daily slots mode (e.g. Asia/Kolkata)
-        tz = _get_target_timezone()
+        tz = _get_target_timezone(tz_name)
         booked: set[datetime] = set(booked_slots or ())
         if not booked:
             rows = (
@@ -194,19 +192,13 @@ class AutoStageService:
             return []
 
         current_utc = as_utc(now) or datetime.now(UTC)
-        daily_slots_raw = getattr(settings, "AUTO_STAGE_DAILY_SLOTS", None)
+        slots_list, tz_name = ChannelProfileService.schedule_config(db)
         parsed_slots: list[tuple[int, int]] = []
-        if daily_slots_raw:
-            slots_list = (
-                daily_slots_raw
-                if isinstance(daily_slots_raw, list)
-                else [s.strip() for s in str(daily_slots_raw).split(",")]
-            )
-            for s in slots_list:
-                parsed = _parse_time_slot(s)
-                if parsed:
-                    parsed_slots.append(parsed)
-            parsed_slots.sort()
+        for s in slots_list:
+            parsed = _parse_time_slot(s)
+            if parsed:
+                parsed_slots.append(parsed)
+        parsed_slots.sort()
 
         # If no daily slots defined, fall back to sequential legacy next_publish_slot
         if not parsed_slots:
@@ -221,7 +213,7 @@ class AutoStageService:
                 )
             return allocated
 
-        tz = _get_target_timezone()
+        tz = _get_target_timezone(tz_name)
         booked = set(booked_slots or ())
         if not booked:
             rows = (
@@ -295,7 +287,13 @@ class AutoStageService:
         if not video:
             raise ValueError(f"Video '{video_id}' not found")
 
-        mode = clipping_mode or settings.AUTO_STAGE_CLIPPING_MODE or "third_person"
+        profile = ChannelProfileService.get_or_create(db)
+        mode = (
+            clipping_mode
+            or profile.default_framing_preset
+            or settings.AUTO_STAGE_CLIPPING_MODE
+            or "third_person"
+        )
         if mode not in VERTICAL_MODES:
             mode = "third_person"
 
@@ -425,7 +423,13 @@ class AutoStageService:
         threshold = float(
             min_score if min_score is not None else settings.AUTO_STAGE_MIN_SCORE
         )
-        mode = clipping_mode or settings.AUTO_STAGE_CLIPPING_MODE
+        profile = ChannelProfileService.get_or_create(db)
+        mode = (
+            clipping_mode
+            or profile.default_framing_preset
+            or settings.AUTO_STAGE_CLIPPING_MODE
+            or "third_person"
+        )
         if mode not in VERTICAL_MODES:
             mode = "third_person"
 
@@ -670,7 +674,22 @@ class AutoStageService:
             preferred_format=mode,
             is_short=duration <= 60.0,
         )
-        privacy = "private" if slot is not None else metadata.get("privacy", "public")
+        profile = ChannelProfileService.get_or_create(db)
+        if profile.title_template:
+            metadata["title"] = apply_title_template(
+                profile.title_template,
+                metadata.get("title") or "",
+                channel_name=profile.channel_name,
+                hero_name=metadata.get("hero_name"),
+                game=metadata.get("game"),
+                event_type=getattr(candidate, "event_type", None),
+                clip_id=clip_id,
+            )
+        privacy = (
+            "private"
+            if slot is not None
+            else (profile.default_privacy or metadata.get("privacy") or "public")
+        )
         RenderService.update_upload_selection(
             db,
             clip_id,

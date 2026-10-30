@@ -15,7 +15,12 @@ from app.config import settings
 from app.database import get_task_db_session
 from app.models.render_job import RenderJob
 from app.models.video import Video
-from app.rendering.config import RenderConfig
+from app.rendering.config import (
+    CROP_PADDING_PRESETS,
+    QUALITY_PRESETS,
+    RenderConfig,
+    default_branding_config,
+)
 from app.rendering.engine import RenderEngine
 from app.schemas.render import (
     RenderClipRequest,
@@ -24,11 +29,16 @@ from app.schemas.render import (
     RenderJobUpdateRequest,
     UploadSelectionRequest,
 )
+from app.services.channel_profile import ChannelProfileService
 from app.services.upload_metadata import (
+    append_pinned_hashtags,
+    apply_title_template,
     build_description,
     build_tags,
     build_title,
+    merge_pinned_hashtags,
 )
+from app.services.youtube_errors import legacy_youtube_error_message
 from app.worker import helpers
 from app.worker.celery_app import celery_app
 
@@ -131,6 +141,31 @@ class RenderService:
                 f"Local video file not found for ID: {request.video_id}. Download the VOD first."
             )
 
+        profile = ChannelProfileService.get_or_create(db)
+        explicit_preset = (
+            request.crop_preset if "crop_preset" in request.model_fields_set else None
+        )
+        resolved_preset = (
+            explicit_preset or profile.default_framing_preset or "third_person"
+        )
+        if resolved_preset not in (
+            "third_person",
+            "cinematic",
+            "direct_crop",
+            "custom",
+            "vertical_blur",
+        ):
+            resolved_preset = "third_person"
+
+        explicit_quality = (
+            request.quality_preset
+            if "quality_preset" in request.model_fields_set
+            else None
+        )
+        resolved_quality = explicit_quality or profile.default_quality_preset or "high"
+        if resolved_quality not in QUALITY_PRESETS:
+            resolved_quality = "high"
+
         clip_id = (
             request.clip_id
             or f"clip_{request.video_id}_{int(request.start_seconds)}s_{int(request.duration_seconds)}s"
@@ -143,9 +178,7 @@ class RenderService:
 
         resolved_modes = request.modes
         if not resolved_modes:
-            resolved_modes = [
-                request.crop_preset or "third_person",
-            ]
+            resolved_modes = [resolved_preset]
 
         clean_modes: list[str] = []
         for m in resolved_modes:
@@ -160,7 +193,7 @@ class RenderService:
             ):
                 clean_modes.append(m)
         if not clean_modes:
-            clean_modes = [request.crop_preset or "third_person"]
+            clean_modes = [resolved_preset]
 
         # Resolve or auto-link highlight candidate
         cand_id = getattr(request, "highlight_candidate_id", None)
@@ -210,16 +243,17 @@ class RenderService:
             narration_path=str(narr_file) if narr_file else None,
             encoder=request.encoder,
             crop_preset=(
-                request.crop_preset
-                if request.crop_preset
+                resolved_preset
+                if resolved_preset
                 in ("third_person", "cinematic", "direct_crop", "custom")
                 else "third_person"
             ),
             crop_blur_padding=(
                 request.crop_blur_padding
                 if request.crop_blur_padding is not None
-                else 0.3333
+                else CROP_PADDING_PRESETS.get(resolved_preset, 0.3333)
             ),
+            quality_preset=resolved_quality,
             modes=",".join(clean_modes),
             overwrite=request.overwrite,
             normalize_audio=request.normalize_audio,
@@ -390,6 +424,7 @@ class RenderService:
             encoder=job.encoder or "auto",
             crop_preset=job.crop_preset or "third_person",
             crop_blur_padding=job.crop_blur_padding,
+            quality_preset=job.quality_preset or "high",
             normalize_audio=bool(job.normalize_audio)
             if job.normalize_audio is not None
             else True,
@@ -443,7 +478,7 @@ class RenderService:
             youtube_uploaded_at=job.youtube_uploaded_at.isoformat()
             if job.youtube_uploaded_at
             else None,
-            youtube_upload_error=job.youtube_upload_error,
+            youtube_upload_error=legacy_youtube_error_message(job.youtube_upload_error),
             created_at=job.created_at.isoformat() if job.created_at else None,
             updated_at=job.updated_at.isoformat() if job.updated_at else None,
             completed_at=job.completed_at.isoformat() if job.completed_at else None,
@@ -722,6 +757,29 @@ class RenderService:
                             else None,
                         }
 
+                    if job:
+                        # Surface upload failures (including YouTube quota vs
+                        # channel upload-limit errors) on the staging cards.
+                        formatted["youtube_upload_status"] = (
+                            job.youtube_upload_status or "not_uploaded"
+                        )
+                        formatted["youtube_upload_error"] = (
+                            legacy_youtube_error_message(job.youtube_upload_error)
+                        )
+                        formatted["youtube_upload_progress"] = (
+                            job.youtube_upload_progress or 0.0
+                        )
+                        formatted["youtube_uploaded_at"] = (
+                            job.youtube_uploaded_at.isoformat()
+                            if job.youtube_uploaded_at
+                            else None
+                        )
+                        formatted["scheduled_publish_at"] = (
+                            job.scheduled_publish_at.isoformat()
+                            if job.scheduled_publish_at
+                            else None
+                        )
+
                     clips.append(formatted)
                 except Exception as e:
                     logger.error("Failed to read manifest file: %s", e)
@@ -896,6 +954,8 @@ class RenderService:
             .filter((RenderJob.clip_id == clip_id) | (RenderJob.id == clip_id))
             .first()
         )
+        profile = ChannelProfileService.get_or_create(db)
+        pinned_hashtags = ChannelProfileService.pinned_hashtags(profile)
 
         existing_meta: dict[str, Any] = {}
         manifest_data: dict[str, Any] = {}
@@ -943,6 +1003,7 @@ class RenderService:
         is_short = final_format != "landscape"
 
         # 1. Resolve Title (ensure it never falls back to null)
+        title_generated = False
         if request.title is not None and request.title.strip():
             final_title = request.title.strip()
         elif existing_meta.get("title"):
@@ -955,6 +1016,17 @@ class RenderService:
                 hero_name=final_hero,
                 clip_context=final_context,
                 is_short=is_short,
+            )
+            title_generated = True
+
+        if title_generated and profile.title_template:
+            final_title = apply_title_template(
+                profile.title_template,
+                final_title,
+                channel_name=profile.channel_name,
+                hero_name=final_hero,
+                game=existing_meta.get("game"),
+                clip_id=clip_id,
             )
 
         # 2. Resolve Description (dynamic default when not staged/user-supplied)
@@ -985,8 +1057,16 @@ class RenderService:
                 hero_name=final_hero,
             )
 
-        # 4. Resolve Privacy (default to public)
-        final_privacy = request.privacy or existing_meta.get("privacy") or "public"
+        final_tags = merge_pinned_hashtags(final_tags, pinned_hashtags)
+        final_description = append_pinned_hashtags(final_description, pinned_hashtags)
+
+        # 4. Resolve Privacy (channel default, then public)
+        final_privacy = (
+            request.privacy
+            or existing_meta.get("privacy")
+            or profile.default_privacy
+            or "public"
+        )
         if final_privacy not in ("private", "unlisted", "public"):
             final_privacy = "public"
 
@@ -1142,8 +1222,16 @@ class RenderService:
                 Path(job.narration_path).resolve() if job.narration_path else None
             )
 
+            profile = ChannelProfileService.get_or_create(db)
+            resolved_quality = job.quality_preset or profile.default_quality_preset
+            if resolved_quality not in QUALITY_PRESETS:
+                resolved_quality = "high"
+
+            branding_config = default_branding_config()
+
             config = RenderConfig(
                 preferred_encoder=job.encoder,
+                quality_preset=resolved_quality,
                 crop_preset=job.crop_preset
                 if job.crop_preset
                 in ("third_person", "cinematic", "direct_crop", "custom")
@@ -1156,6 +1244,8 @@ class RenderService:
                 else True,
                 target_lufs=job.target_lufs if job.target_lufs is not None else -14.0,
                 api_prefix=settings.API_PREFIX,
+                watermark=ChannelProfileService.watermark_config(db),
+                branding=branding_config,
             )
             engine = RenderEngine(config=config)
 
@@ -1193,7 +1283,25 @@ class RenderService:
                 if job.normalize_audio is not None
                 else True,
                 target_lufs=job.target_lufs if job.target_lufs is not None else -14.0,
+                branding=branding_config,
             )
+
+            if result.branding_applied:
+                logger.info(
+                    "Clip %s rendered with branded bookends (intro %.2fs, outro "
+                    "%.2fs, total %.2fs)",
+                    job.clip_id,
+                    result.branding_intro_seconds,
+                    result.branding_outro_seconds,
+                    result.total_duration_seconds,
+                )
+                if result.total_duration_seconds > 60.5:
+                    logger.warning(
+                        "Clip %s is %.1fs after branding, which exceeds the 60s "
+                        "Shorts limit; shorten the clip window or the bookends",
+                        job.clip_id,
+                        result.total_duration_seconds,
+                    )
 
             prefix = settings.API_PREFIX
             if result.clamped and result.effective_duration_seconds > 0:

@@ -82,6 +82,8 @@ class YouTubeUploadResult(BaseModel):
     progress: float = 0.0
     scheduled_publish_at: str | None = None
     error_message: str | None = None
+    error_code: str | None = None
+    retry_at: str | None = None
     uploaded_at: str | None = None
 
 
@@ -104,7 +106,15 @@ class YouTubeQuotaResponse(BaseModel):
     max_uploads_per_day: int
     uploads_today: int
     uploads_remaining: int
+    failed_uploads: int = 0
     can_upload: bool
+    blocked_reason: str | None = None
+    blocked_until: str | None = None
+    api_quota_exhausted: bool = False
+    upload_limit_exceeded: bool = False
+    last_error_code: str | None = None
+    last_error_message: str | None = None
+    last_error_at: str | None = None
     resets_at: str
 
 

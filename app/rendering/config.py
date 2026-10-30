@@ -48,6 +48,133 @@ QUALITY_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 
+class WatermarkConfig(BaseModel):
+    """Channel watermark/logo overlaid on every rendered clip."""
+
+    enabled: bool = Field(False, description="Master switch for the logo overlay")
+    path: str | None = Field(None, description="Absolute path to the logo image")
+    position: Literal[
+        "top_left", "top_right", "bottom_left", "bottom_right", "center"
+    ] = "bottom_right"
+    opacity: float = Field(0.85, ge=0.05, le=1.0)
+    scale: float = Field(
+        0.14,
+        ge=0.02,
+        le=0.6,
+        description="Logo width as a fraction of the output width",
+    )
+    margin: float = Field(
+        0.03,
+        ge=0.0,
+        le=0.2,
+        description="Edge margin as a fraction of the output short edge",
+    )
+
+    @property
+    def active(self) -> bool:
+        return bool(self.enabled and self.path and Path(self.path).exists())
+
+    def describe(self) -> dict[str, Any]:
+        """Serialisable summary recorded in the render manifest."""
+        return {
+            "enabled": self.active,
+            "position": self.position,
+            "opacity": self.opacity,
+            "scale": self.scale,
+            "margin": self.margin,
+        }
+
+
+class BrandingConfig(BaseModel):
+    """Branded intro/outro card settings applied to every rendered clip.
+
+    Cards are rasterised locally with Pillow and concatenated in the same FFmpeg
+    pass as the clip, so branding costs no extra encode generation.
+    """
+
+    enabled: bool = Field(
+        False, description="Master switch; when off renders are untouched"
+    )
+    intro: bool = Field(True, description="Render the intro card when enabled")
+    outro: bool = Field(True, description="Render the outro card when enabled")
+
+    intro_seconds: float = Field(
+        1.2, ge=0.2, le=5.0, description="Intro card duration in seconds"
+    )
+    outro_seconds: float = Field(
+        2.0, ge=0.2, le=10.0, description="Outro card duration in seconds"
+    )
+
+    intro_title: str = Field("", description="Intro headline (defaults to channel)")
+    intro_subtitle: str = Field("", description="Intro secondary line")
+    outro_title: str = Field("SUBSCRIBE", description="Outro headline")
+    outro_subtitle: str = Field(
+        "", description="Outro secondary line (defaults to channel handle)"
+    )
+    channel_name: str = Field("", description="Channel handle shown on cards")
+
+    background_color: str = Field("#0B0D13", description="Card background (hex)")
+    accent_color: str = Field("#F43F5E", description="Accent rule/text (hex)")
+    text_color: str = Field("#FFFFFF", description="Headline text colour (hex)")
+    font_path: str | None = Field(
+        None, description="Optional TTF/OTF override for card typography"
+    )
+
+    @property
+    def has_intro(self) -> bool:
+        return self.enabled and self.intro
+
+    @property
+    def has_outro(self) -> bool:
+        return self.enabled and self.outro
+
+    @property
+    def has_bookends(self) -> bool:
+        """True when at least one card should be rendered."""
+        return self.has_intro or self.has_outro
+
+    def resolved_intro_title(self) -> str:
+        """Headline for the intro card."""
+        return (self.intro_title or self.channel_name or "BACKSEATCASTER").strip()
+
+    def resolved_outro_subtitle(self) -> str:
+        """Secondary line for the outro card."""
+        return (self.outro_subtitle or self.channel_name or "").strip()
+
+    def describe(self) -> dict[str, Any]:
+        """Serialisable summary recorded in the render manifest."""
+        return {
+            "enabled": self.has_bookends,
+            "intro": self.has_intro,
+            "outro": self.has_outro,
+            "intro_seconds": self.intro_seconds if self.has_intro else 0.0,
+            "outro_seconds": self.outro_seconds if self.has_outro else 0.0,
+            "intro_title": self.resolved_intro_title() if self.has_intro else None,
+            "outro_title": self.outro_title if self.has_outro else None,
+            "channel_name": self.channel_name or None,
+        }
+
+
+def default_branding_config() -> BrandingConfig:
+    """Build branding defaults from application settings (env or /setup UI)."""
+    return BrandingConfig(
+        enabled=settings.BRANDING_ENABLED,
+        intro=settings.BRANDING_INTRO_ENABLED,
+        outro=settings.BRANDING_OUTRO_ENABLED,
+        intro_seconds=settings.BRANDING_INTRO_SECONDS,
+        outro_seconds=settings.BRANDING_OUTRO_SECONDS,
+        intro_title=settings.BRANDING_INTRO_TITLE,
+        intro_subtitle=settings.BRANDING_INTRO_SUBTITLE,
+        outro_title=settings.BRANDING_OUTRO_TITLE,
+        outro_subtitle=settings.BRANDING_OUTRO_SUBTITLE,
+        channel_name=settings.branding_channel_name,
+        background_color=settings.BRANDING_BACKGROUND_COLOR,
+        accent_color=settings.BRANDING_ACCENT_COLOR,
+        text_color=settings.BRANDING_TEXT_COLOR,
+        font_path=settings.BRANDING_FONT_PATH,
+    )
+
+
 class RenderConfig(BaseModel):
     """Configuration for clip rendering engine."""
 
@@ -104,6 +231,12 @@ class RenderConfig(BaseModel):
         11.0,
         description="Target loudness range in LU",
     )
+
+    # Branded intro/outro cards (Phase 10.5)
+    branding: BrandingConfig = Field(default_factory=default_branding_config)
+
+    # Tier 3: channel watermark/logo overlay (applied to every render)
+    watermark: WatermarkConfig = Field(default_factory=WatermarkConfig)
 
     # Output defaults
     default_output_root: Path = settings.renders_path

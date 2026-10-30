@@ -25,6 +25,9 @@ def write_manifest(
     target_lufs: float = -14.0,
     requested_duration_seconds: float | None = None,
     clamped: bool = False,
+    quality_preset: str | None = None,
+    watermark: dict[str, Any] | None = None,
+    branding: dict[str, Any] | None = None,
 ) -> Path:
     """Generate and write manifest.json into the clip output directory."""
     effective_modes = modes or list(outputs.keys())
@@ -93,6 +96,9 @@ def write_manifest(
             "normalize_audio": normalize_audio,
             "target_lufs": target_lufs,
         },
+        "quality_preset": quality_preset,
+        "watermark": watermark or {"enabled": False},
+        "branding": branding or {"enabled": False},
         "outputs": outputs,
         "created_at": datetime.now(UTC).isoformat(),
         "render_duration_seconds": round(render_duration, 2)

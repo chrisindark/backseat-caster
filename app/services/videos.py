@@ -740,44 +740,22 @@ class VideoService:
         return VideoResponse.model_validate(new_video)
 
     @staticmethod
-    def upload_local_video(
+    def catalog_local_file(
         db: Session,
-        file: UploadFile,
+        *,
+        video_id: str,
+        dest_path: Path,
+        original_filename: str,
         title: str | None = None,
         channel_name: str | None = None,
+        channel_id: str = "local_obs",
+        channel_url: str = "local://obs",
     ) -> VideoResponse:
+        """Probe a local file already on disk and register it as a catalogued video.
+
+        Shared by the OBS drag-and-drop upload and the zero-click watch folder so
+        both ingests produce identical catalog rows, thumbnails and metadata.
         """
-        Handle direct local video upload (OBS drag-and-drop or local file import).
-        Saves file to downloads directory, probes metadata, extracts video thumbnail,
-        and catalogues the video as immediately downloaded and ready for clipping.
-        """
-        original_filename = file.filename or "recording.mp4"
-        suffix = Path(original_filename).suffix.lower()
-        allowed_extensions = {".mp4", ".mkv", ".mov", ".webm", ".flv", ".ts", ".m4v"}
-        if suffix not in allowed_extensions:
-            raise ValueError(
-                f"Unsupported video file format '{suffix}'. Supported formats: {', '.join(sorted(allowed_extensions))}"
-            )
-
-        video_id = f"obs_{uuid.uuid4().hex[:10]}"
-        safe_stem = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", Path(original_filename).stem)
-        saved_filename = f"{video_id}_{safe_stem}{suffix}"
-        dest_path = settings.downloads_path / saved_filename
-
-        settings.downloads_path.mkdir(parents=True, exist_ok=True)
-
-        try:
-            with open(dest_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-        except Exception as write_err:
-            if dest_path.exists():
-                try:
-                    dest_path.unlink()
-                except OSError:
-                    pass
-            raise RuntimeError(f"Failed writing uploaded video to disk: {write_err}")
-
-        # Probe video metadata using ffprobe
         probe = probe_media(dest_path)
         duration_s = max(1, int(round(probe.duration)))
         duration_str = format_duration(duration_s)
@@ -831,8 +809,8 @@ class VideoService:
             duration=duration_s,
             duration_formatted=duration_str,
             channel_name=channel_name or "OBS Studio",
-            channel_id="local_obs",
-            channel_url="local://obs",
+            channel_id=channel_id,
+            channel_url=channel_url,
             view_count=0,
             published_at=datetime.now(UTC).strftime("%Y-%m-%d"),
             webpage_url=f"file://{dest_path}",
@@ -847,6 +825,62 @@ class VideoService:
         db.commit()
         db.refresh(new_video)
         return VideoResponse.model_validate(new_video)
+
+    @staticmethod
+    def upload_local_video(
+        db: Session,
+        file: UploadFile,
+        title: str | None = None,
+        channel_name: str | None = None,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> VideoResponse:
+        """
+        Handle direct local video upload (OBS drag-and-drop or local file import).
+        Saves file to downloads directory, probes metadata, extracts video thumbnail,
+        and catalogues the video as immediately downloaded and ready for clipping.
+        """
+        original_filename = file.filename or "recording.mp4"
+        suffix = Path(original_filename).suffix.lower()
+        allowed_extensions = {".mp4", ".mkv", ".mov", ".webm", ".flv", ".ts", ".m4v"}
+        if suffix not in allowed_extensions:
+            raise ValueError(
+                f"Unsupported video file format '{suffix}'. Supported formats: {', '.join(sorted(allowed_extensions))}"
+            )
+
+        video_id = f"obs_{uuid.uuid4().hex[:10]}"
+        safe_stem = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", Path(original_filename).stem)
+        saved_filename = f"{video_id}_{safe_stem}{suffix}"
+        dest_path = settings.downloads_path / saved_filename
+
+        settings.downloads_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with open(dest_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        except Exception as write_err:
+            if dest_path.exists():
+                try:
+                    dest_path.unlink()
+                except OSError:
+                    pass
+            raise RuntimeError(f"Failed writing uploaded video to disk: {write_err}")
+
+        video_res = VideoService.catalog_local_file(
+            db=db,
+            video_id=video_id,
+            dest_path=dest_path,
+            original_filename=original_filename,
+            title=title,
+            channel_name=channel_name,
+        )
+
+        # Tier 2: chain straight into highlight mining when enabled.
+        from app.services.auto_mine import AutoMineService
+
+        AutoMineService.trigger_after_ingest(
+            db, video_res.id, background_tasks=background_tasks
+        )
+        return video_res
 
     @staticmethod
     def update_video(
@@ -1088,6 +1122,18 @@ class VideoService:
                 video_id,
                 result["local_file_path"],
             )
+
+            # Tier 2: chain straight into highlight mining when enabled.
+            try:
+                from app.services.auto_mine import AutoMineService
+
+                mine_result = AutoMineService.trigger_after_ingest(db, video_id)
+                logger.info("Auto-mine after download %s: %s", video_id, mine_result)
+            except Exception as mine_err:  # never fail a finished download
+                logger.warning(
+                    "Auto-mine dispatch failed for video %s: %s", video_id, mine_err
+                )
+
             return {
                 "status": "completed",
                 "video_id": video_id,

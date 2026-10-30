@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from app.core.responses import BaseResponse
+from app.core.responses import APIException, BaseResponse
 from app.database import get_db
 from app.models.render_job import RenderJob
 from app.models.video import Video
@@ -31,6 +31,7 @@ from app.schemas.youtube import (
 from app.services.auto_stage import AutoStageService, as_utc
 from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
+from app.services.youtube_errors import YouTubeUploadError
 from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import (
     YouTubeUploaderService,
@@ -475,6 +476,25 @@ def upload_clip(
                 db_session=db,
             )
             return BaseResponse.success_response(response=result)
+        except YouTubeUploadError as e:
+            logger.warning(
+                "Synchronous YouTube upload failed for %s (%s): %s",
+                clip_id,
+                e.error_code,
+                e.user_message,
+            )
+            headers = None
+            if e.retry_at is not None:
+                retry_seconds = max(
+                    0, int((e.retry_at - datetime.now(UTC)).total_seconds())
+                )
+                headers = {"Retry-After": str(retry_seconds)}
+            raise APIException(
+                status_code=e.http_status,
+                detail=e.user_message,
+                error_code=e.error_code,
+                headers=headers,
+            )
         except Exception as e:
             logger.exception("Synchronous YouTube upload failed for %s", clip_id)
             raise HTTPException(
@@ -716,7 +736,7 @@ def publish_staged_clip_now(
 
     return upload_clip(
         clip_id=clip_id,
-        request=YouTubeUploadRequest(privacy="public"),
+        request=YouTubeUploadRequest(privacy="public", sync=True),
         background_tasks=background_tasks,
         db=db,
     )

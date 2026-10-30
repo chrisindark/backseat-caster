@@ -13,6 +13,7 @@ from app.core.logger import setup_logger
 from app.core.middlewares import CorrelationIdMiddleware
 from app.core.responses import BaseResponse, register_exception_handlers
 from app.routers import (
+    channel_router,
     health_router,
     highlights_router,
     renders_router,
@@ -92,6 +93,7 @@ def root():
 
 # Register routers
 app.include_router(setup_router, prefix=settings.API_PREFIX)
+app.include_router(channel_router, prefix=settings.API_PREFIX)
 app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(videos_router, prefix=settings.API_PREFIX)
 app.include_router(renders_router, prefix=settings.API_PREFIX)

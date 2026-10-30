@@ -3,6 +3,7 @@
 import { HighlightCandidatesDrawer } from "@/components/HighlightCandidatesDrawer";
 import {
   createRender,
+  fetchChannelProfile,
   fetchHighlightCandidates,
   fetchRenders,
   getDownloadedVideoStreamUrl,
@@ -229,7 +230,8 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   const [normalizeAudio, setNormalizeAudio] = useState<boolean>(true);
   const [targetLufs, setTargetLufs] = useState<number>(-14.0);
 
-  // Clipping modes multi-select (preselected default: Third-Person Wide Crop)
+  // Clipping modes multi-select (initialised from the channel profile)
+  const [defaultFraming, setDefaultFraming] = useState<ClippingMode>("third_person");
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
     "third_person",
   ]);
@@ -274,6 +276,23 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
       .catch(() => {});
   }, [video?.id]);
 
+  useEffect(() => {
+    fetchChannelProfile()
+      .then((profile) => {
+        const preset = profile.default_framing_preset as ClippingMode;
+        if (
+          ["third_person", "cinematic", "direct_crop", "vertical_blur", "custom"].includes(
+            preset
+          )
+        ) {
+          setDefaultFraming(preset);
+          setSelectedModes([preset]);
+          setRightCompareMode(preset);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleApplyHighlightFromModal = (cand: HighlightCandidateItem) => {
     setStartSecondsInput(formatSeconds(cand.start_seconds));
     const dur = Math.round(cand.duration_seconds);
@@ -298,7 +317,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
   };
 
   const handlePresetYouTubeShort = () => {
-    setSelectedModes(["third_person"]);
+    setSelectedModes([defaultFraming]);
   };
 
   const handlePresetVerticalCrop = () => {
@@ -315,10 +334,10 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
 
   const handleQuickRenderHighlightFromModal = (cand: HighlightCandidateItem) => {
     handleApplyHighlightFromModal(cand);
-    setSelectedModes(["third_person"]);
+    setSelectedModes([defaultFraming]);
     setIsHighlightDrawerOpen(false);
     setTimeout(() => {
-      handleStartRender(["third_person"]);
+      handleStartRender([defaultFraming]);
     }, 300);
   };
 

@@ -50,6 +50,7 @@ All runtime artifacts must stay under `./data`. Paths accept relative or absolut
 | `RENDERS_DIR` | `./data/renders` | Per-clip output dirs (`landscape.mp4`, `vertical_blur.mp4`, `vertical_crop.mp4`, `manifest.json`) |
 | `HIGHLIGHTS_DIR` | `./data/highlights` | Highlight run artifacts and candidate thumbnails |
 | `HERO_TEMPLATES_DIR` | `./data/hero_templates` | User-supplied hero portrait / ability icon templates (`<game>/heroes/*.png`, `<game>/abilities/*.png`) |
+| `CHANNEL_ASSETS_DIR` | `./data/channel` | Uploaded channel watermark/logo assets managed from the `/channel` UI |
 
 All four storage directories (`downloads`, `renders`, `highlights`) plus the parent dirs of the OAuth files are created on startup by `Settings.ensure_directories()`.
 
@@ -103,7 +104,7 @@ OAuth details: [docs/youtube-authentication.md](docs/youtube-authentication.md),
 | `YOUTUBE_UPLOAD_QUOTA_COST` | `1600` | Units consumed per upload (6 uploads/day at defaults) |
 | `YOUTUBE_QUOTA_TIMEZONE` | `America/Los_Angeles` | Timezone whose midnight resets the quota day |
 
-Staging behaviour: clips are rendered as private vertical Shorts, metadata is generated with deterministic copy by default (or AI copy when enabled), and staggered `publishAt` slots are assigned so YouTube releases them without the local machine staying online. See [ROADMAP.md](ROADMAP.md) §Phase 8.
+Staging behaviour: clips are rendered as private vertical Shorts, metadata is generated with deterministic copy by default (or AI copy when enabled), and staggered `publishAt` slots are assigned so YouTube releases them without the local machine staying online. The local quota counter charges `YOUTUBE_UPLOAD_QUOTA_COST` only after YouTube accepts an upload; `quotaExceeded` and channel-level `uploadLimitExceeded` responses are tracked separately so the UI can explain which limit was hit. See [ROADMAP.md](ROADMAP.md) §Phase 8.
 
 ### 6.2 Maintenance Pipeline — Uploaded Render Cleanup & Batch Staging
 
@@ -114,6 +115,71 @@ Staging behaviour: clips are rendered as private vertical Shorts, metadata is ge
 | `AUTO_PIPELINE_INTERVAL_MINUTES` | `0` | Minutes between automatic maintenance sweeps via Celery beat (`0` disables scheduling) |
 
 The sweep stages each downloaded video's next `AUTO_STAGE_TOP_N` highlights (highest-scoring video first), so the backlog is consumed in batches across repeated runs. Trigger it on demand with `POST /api/v1/renders/auto-pipeline`, or cleanup-only with `POST /api/v1/renders/cleanup-uploaded`. Scheduling requires Celery beat (`uv run celery -A app.worker.celery_app beat`); the Compose `celery_beat` service runs it automatically.
+
+### 6.3 Zero-Input Ingest — Auto-Mine & OBS Watch Folder
+
+Both features are also editable from the setup wizard (`/setup`) and persist to `data/settings.json`, so editing `.env` is optional.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUTO_MINE_ON_INGEST` | `False` | Mine highlights automatically as soon as a download or OBS upload completes |
+| `AUTO_MINE_GAME` | *(unset)* | Pin a detector profile (`marvel_rivals`, `fall_guys`, …); unset auto-detects from the video title/description |
+| `AUTO_MINE_MIN_SCORE` | `0.5` | Minimum candidate score retained by the auto-mine scan |
+| `AUTO_MINE_AUTO_RENDER_TOP_N` | *(unset)* | Candidates to auto-render after mining; unset falls back to `AUTO_STAGE_TOP_N` when `AUTO_STAGE_ENABLED=True`, otherwise `0` (mine only) |
+| `WATCH_DIR` | *(unset)* | Folder to watch for finished OBS recordings; setting it enables the watch folder |
+| `WATCH_POLL_INTERVAL_MINUTES` | `0` | Minutes between Celery beat watch-folder polls (`0` = manual `POST /api/v1/videos/watch/scan` only) |
+| `WATCH_STABILITY_SECONDS` | `10` | A file is only ingested once its mtime is older than this, preventing truncated files while OBS is still writing |
+| `WATCH_MIN_FILE_MB` | `1.0` | Ignore files smaller than this (partial/empty recordings) |
+| `WATCH_DELETE_AFTER_INGEST` | `False` | `False` copies the recording into `data/downloads`; `True` moves it out of the watch folder |
+| `WATCH_VIDEO_EXTENSIONS` | `.mp4 .mkv .mov .webm .flv .ts .m4v` | Accepted extensions (JSON array or comma-separated) |
+
+Example zero-touch setup:
+
+```dotenv
+WATCH_DIR=/Users/you/Movies/OBS
+WATCH_POLL_INTERVAL_MINUTES=5
+AUTO_MINE_ON_INGEST=True
+AUTO_STAGE_ENABLED=True
+AUTO_STAGE_TOP_N=3
+```
+
+Record, stop, and the recording is picked up within five minutes, mined, and its three best moments are staged as Shorts with `publishAt` slots. Ingests are de-duplicated per source path using a `size:mtime` fingerprint in the `watch_ingests` table, so polls never re-ingest the same take — but a filename OBS overwrites with a new recording is picked up again. See [ROADMAP.md](ROADMAP.md) §Phase 10.
+
+### 6.4 Branded Intro & Outro Cards
+
+Every render can start with a channel card and end with a `SUBSCRIBE` card. Both are also editable from the setup wizard (`/setup`) and persist to `data/settings.json`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `BRANDING_ENABLED` | `False` | Master switch; off renders exactly the requested window |
+| `BRANDING_CHANNEL_NAME` | *(unset)* | Handle/name printed on the intro card and under the outro headline (falls back to `DEFAULT_YOUTUBE_CHANNEL`) |
+| `BRANDING_INTRO_ENABLED` | `True` | Include the intro card when branding is on |
+| `BRANDING_OUTRO_ENABLED` | `True` | Include the outro card when branding is on |
+| `BRANDING_INTRO_SECONDS` | `1.2` | Intro length (0.2–5.0 s) |
+| `BRANDING_OUTRO_SECONDS` | `2.0` | Outro length (0.2–10.0 s) |
+| `BRANDING_INTRO_TITLE` | *(unset)* | Intro headline; unset uses the channel name |
+| `BRANDING_INTRO_SUBTITLE` | *(unset)* | Intro second line (hidden when empty) |
+| `BRANDING_OUTRO_TITLE` | `SUBSCRIBE` | Outro headline |
+| `BRANDING_OUTRO_SUBTITLE` | *(unset)* | Outro second line; unset uses the channel name |
+| `BRANDING_BACKGROUND_COLOR` | `#0B0D13` | Card background |
+| `BRANDING_ACCENT_COLOR` | `#F43F5E` | Accent rules and outro subtitle colour |
+| `BRANDING_TEXT_COLOR` | `#FFFFFF` | Headline colour |
+| `BRANDING_FONT_PATH` | *(unset)* | Optional TTF/OTF override for card typography |
+
+How it renders: cards are drawn locally with Pillow at each output's exact size (one pair per requested format) and fed back into the same single FFmpeg pass as looped image inputs, so there is no second encode generation and no dependency on FFmpeg's `drawtext`/libfreetype. The clip audio is delayed by the intro and padded with silence so lip-sync stays correct behind both cards.
+
+Notes:
+
+- Bookends add `BRANDING_INTRO_SECONDS + BRANDING_OUTRO_SECONDS` to the clip. Nothing is trimmed automatically — if the total crosses 60 s the upload is no longer a Short, so shorten the clip window or the cards.
+- `manifest.json` records the applied branding and the composed `outputs.*.duration`, which includes the cards.
+- `docker-compose.yml` installs `fonts-dejavu-core` in the backend image; on bare macOS the system Arial face is used, and Pillow's bundled font is the last-resort fallback.
+
+```dotenv
+BRANDING_ENABLED=True
+BRANDING_CHANNEL_NAME=@YourChannel
+BRANDING_INTRO_SECONDS=1.2
+BRANDING_OUTRO_SECONDS=2.0
+```
 
 ---
 

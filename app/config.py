@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     RENDERS_DIR: str = "./data/renders"
     HIGHLIGHTS_DIR: str = "./data/highlights"
     HERO_TEMPLATES_DIR: str = "./data/hero_templates"
+    CHANNEL_ASSETS_DIR: str = "./data/channel"
 
     # Preflight configuration
     PREFLIGHT_MIN_DISK_SPACE_GB: float = 2.0
@@ -83,6 +84,46 @@ class Settings(BaseSettings):
     AUTO_CLEANUP_UPLOADED_RENDERS: bool = True
     AUTO_CLEANUP_VOD: bool = False
     AUTO_PIPELINE_INTERVAL_MINUTES: int = 0
+
+    # Phase 10.5: branded intro/outro cards prepended/appended to every render.
+    # Off by default so a plain install renders exactly the clip it asked for;
+    # enable it once and every manual and auto-staged render gets branded.
+    BRANDING_ENABLED: bool = False
+    BRANDING_CHANNEL_NAME: str = ""
+    BRANDING_INTRO_ENABLED: bool = True
+    BRANDING_OUTRO_ENABLED: bool = True
+    BRANDING_INTRO_TITLE: str = ""
+    BRANDING_INTRO_SUBTITLE: str = ""
+    BRANDING_OUTRO_TITLE: str = "SUBSCRIBE"
+    BRANDING_OUTRO_SUBTITLE: str = ""
+    BRANDING_INTRO_SECONDS: float = 1.2
+    BRANDING_OUTRO_SECONDS: float = 2.0
+    BRANDING_BACKGROUND_COLOR: str = "#0B0D13"
+    BRANDING_ACCENT_COLOR: str = "#F43F5E"
+    BRANDING_TEXT_COLOR: str = "#FFFFFF"
+    BRANDING_FONT_PATH: str | None = None
+
+    # Phase 10: zero-input ingest pipeline (auto-mine on download/upload)
+    AUTO_MINE_ON_INGEST: bool = False
+    AUTO_MINE_GAME: str | None = None
+    AUTO_MINE_MIN_SCORE: float = 0.5
+    AUTO_MINE_AUTO_RENDER_TOP_N: int | None = None
+
+    # Phase 10: OBS watch folder (zero-click ingest)
+    WATCH_DIR: str | None = None
+    WATCH_POLL_INTERVAL_MINUTES: int = 0
+    WATCH_STABILITY_SECONDS: int = 10
+    WATCH_MIN_FILE_MB: float = 1.0
+    WATCH_DELETE_AFTER_INGEST: bool = False
+    WATCH_VIDEO_EXTENSIONS: list[str] | str = [
+        ".mp4",
+        ".mkv",
+        ".mov",
+        ".webm",
+        ".flv",
+        ".ts",
+        ".m4v",
+    ]
 
     # Phase 8: LLM metadata generation (Universal OpenAI-compatible: Ollama, OpenAI, Groq, Gemini, etc.)
     LLM_METADATA_ENABLED: bool = False
@@ -177,6 +218,62 @@ class Settings(BaseSettings):
             return [str(s).strip() for s in v if str(s).strip()]
         return v
 
+    @field_validator("WATCH_VIDEO_EXTENSIONS", mode="before")
+    @classmethod
+    def assemble_watch_extensions(cls, v: str | list[str]) -> list[str]:
+        """Normalise the watch-folder extension allowlist to lowercase dot prefixes."""
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    items = [str(s) for s in parsed]
+                else:
+                    items = v.split(",")
+            except Exception:
+                items = v.split(",")
+        else:
+            items = [str(s) for s in v]
+
+        normalised: list[str] = []
+        for item in items:
+            token = item.strip().lower()
+            if not token:
+                continue
+            if not token.startswith("."):
+                token = f".{token}"
+            if token not in normalised:
+                normalised.append(token)
+        return normalised
+
+    @property
+    def auto_mine_top_n(self) -> int:
+        """Resolve how many candidates to auto-render once an ingest mine completes.
+
+        ``AUTO_MINE_AUTO_RENDER_TOP_N`` wins when set; otherwise the Phase 8
+        ``AUTO_STAGE_*`` settings decide, keeping one switch for "should this
+        pipeline publish clips at all".
+        """
+        if self.AUTO_MINE_AUTO_RENDER_TOP_N is not None:
+            return max(0, int(self.AUTO_MINE_AUTO_RENDER_TOP_N))
+        if self.AUTO_STAGE_ENABLED:
+            return max(0, int(self.AUTO_STAGE_TOP_N))
+        return 0
+
+    @property
+    def branding_channel_name(self) -> str:
+        """Channel handle shown on branding cards, falling back to the default channel."""
+        explicit = (self.BRANDING_CHANNEL_NAME or "").strip()
+        if explicit:
+            return explicit
+        return (self.DEFAULT_YOUTUBE_CHANNEL or "").strip()
+
+    @property
+    def watch_path(self) -> Path | None:
+        """Resolved watch folder, or None when the zero-click ingest is disabled."""
+        if not self.WATCH_DIR or not str(self.WATCH_DIR).strip():
+            return None
+        return Path(str(self.WATCH_DIR).strip()).expanduser().resolve()
+
     @property
     def downloads_path(self) -> Path:
         return Path(self.DOWNLOADS_DIR).resolve()
@@ -194,6 +291,10 @@ class Settings(BaseSettings):
         return Path(self.HERO_TEMPLATES_DIR).resolve()
 
     @property
+    def channel_assets_path(self) -> Path:
+        return Path(self.CHANNEL_ASSETS_DIR).resolve()
+
+    @property
     def youtube_token_path(self) -> Path:
         return Path(self.YOUTUBE_TOKEN_FILE).resolve()
 
@@ -207,6 +308,7 @@ class Settings(BaseSettings):
         self.renders_path.mkdir(parents=True, exist_ok=True)
         self.highlights_path.mkdir(parents=True, exist_ok=True)
         self.hero_templates_path.mkdir(parents=True, exist_ok=True)
+        self.channel_assets_path.mkdir(parents=True, exist_ok=True)
         self.youtube_token_path.parent.mkdir(parents=True, exist_ok=True)
         self.youtube_client_secrets_path.parent.mkdir(parents=True, exist_ok=True)
 

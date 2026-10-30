@@ -7,12 +7,13 @@ from pathlib import Path
 import pytest
 
 from app.rendering.audio import build_audio_filter_graph
-from app.rendering.config import RenderConfig
+from app.rendering.config import RenderConfig, WatermarkConfig
 from app.rendering.engine import RenderEngine
 from app.rendering.filters import (
     build_landscape_filter,
     build_vertical_blur_filter,
     build_vertical_crop_filter,
+    build_watermark_filter,
 )
 from app.rendering.probe import probe_media
 from app.rendering.validator import ValidationError, validate_render_parameters
@@ -93,6 +94,72 @@ def synthetic_assets(tmp_path_factory) -> dict:
         "silent_video": silent_video_path,
         "narration": narration_path,
     }
+
+
+def test_watermark_filter_positions():
+    """The overlay builder scales relative to output and respects position."""
+    filter_str = build_watermark_filter(
+        watermark_input="3:v",
+        main_input="v_out_0",
+        output_label="v_wm_0",
+        width=1080,
+        height=1920,
+        position="top_right",
+        opacity=0.7,
+        scale=0.2,
+        margin=0.04,
+    )
+    assert "scale=216:-2" in filter_str
+    assert "colorchannelmixer=aa=0.700" in filter_str
+    assert "overlay=W-w-43:43" in filter_str
+
+
+def test_watermark_overlay_renders(synthetic_assets, tmp_path):
+    """A configured logo is composited into every requested output."""
+    logo = tmp_path / "logo.png"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=64x64:d=1",
+            "-frames:v",
+            "1",
+            str(logo),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+    engine = RenderEngine(
+        RenderConfig(
+            watermark=WatermarkConfig(
+                enabled=True,
+                path=str(logo),
+                position="bottom_right",
+                opacity=0.8,
+                scale=0.15,
+            )
+        )
+    )
+    out_dir = tmp_path / "wm_render"
+    result = engine.render_clip(
+        source_path=synthetic_assets["video"],
+        start_seconds=0.0,
+        duration_seconds=2.0,
+        output_dir=out_dir,
+        clip_id="wm_render",
+        crop_preset="third_person",
+        modes=["third_person", "landscape"],
+    )
+
+    assert result.watermark_applied is True
+    assert (out_dir / "third_person.mp4").exists()
+    assert (out_dir / "landscape.mp4").exists()
+    manifest = json.loads((out_dir / "manifest.json").read_text())
+    assert manifest["watermark"]["enabled"] is True
 
 
 def test_probe_media(synthetic_assets):

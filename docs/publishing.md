@@ -35,7 +35,8 @@ When `AUTO_STAGE_ENABLED` is on (or `auto_render_top_n` is passed to highlight d
 - `GET /api/v1/youtube/staging` lists staged clips awaiting review, including the quota summary and `llm_available`.
 - `POST /api/v1/youtube/staging/{clip_id}/schedule` sets/clears a native `status.publishAt` timestamp; uploads are private and YouTube releases them at that time.
 - `POST /api/v1/youtube/staging/{clip_id}/publish-now` clears the schedule and uploads immediately.
-- `GET /api/v1/youtube/quota` reports today's advisory unit usage and upload headroom.
+- `GET /api/v1/youtube/quota` reports today's advisory unit usage and upload headroom. The local counter charges 1,600 units only after a successful upload; failed attempts are counted separately and any active YouTube block is exposed as `blocked_reason` / `blocked_until`.
+- YouTube rejects uploads for two different reasons: `quotaExceeded` means the project's Data API unit budget is exhausted (resets at Pacific midnight); `uploadLimitExceeded` means the channel has hit its own video upload limit (usually clears within 24h). The API parses both and returns a human-readable `error_message`, plus `error_code` and `retry_at` on batch results. Sync uploads return `429` rather than a raw `HttpError` string.
 
 ## 4. Batch behavior
 
@@ -44,7 +45,7 @@ When `AUTO_STAGE_ENABLED` is on (or `auto_render_top_n` is passed to highlight d
 ## 5. Observability & recovery
 
 - Each clip's upload state is persisted; the UI (`/youtube` page, `UploadQueueModal`) polls the queue for live status.
-- Failed uploads report via their clip entry (detail color-coded in the queue modal); resolution steps include re-linking OAuth or re-rendering the clip if the artifact is missing.
+- Failed uploads report via their clip entry (detail color-coded in the queue modal and staging cards); the message distinguishes API quota exhaustion from the channel upload limit. Resolution steps include re-linking OAuth, retrying after the displayed reset, or re-rendering the clip if the artifact is missing.
 - **Retention & cleanup:** uploaded render folders can be reclaimed on demand (`POST /api/v1/renders/cleanup-uploaded` or the `cleanup` option of `POST /api/v1/renders/auto-pipeline`) or on a schedule via Celery beat (`AUTO_PIPELINE_INTERVAL_MINUTES`). Cleanup deletes local files only — `RenderJob` rows, scheduling metadata and YouTube links are retained. Source VODs are only removed when every completed render for that video is uploaded (`AUTO_CLEANUP_VOD`). A deleted local clip keeps its YouTube copy, and deleting the YouTube video does not alter local records.
 
 ## 6. Testing

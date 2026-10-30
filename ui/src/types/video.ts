@@ -153,6 +153,7 @@ export interface RenderRequest {
   clip_id?: string | null;
   crop_preset?: "third_person" | "direct_crop" | "cinematic" | "custom" | string;
   crop_blur_padding?: number | null;
+  quality_preset?: "high" | "compact" | "archive" | string | null;
   modes?: ClippingMode[] | string[];
   normalize_audio?: boolean;
   target_lufs?: number;
@@ -192,6 +193,7 @@ export interface RenderJobResponse {
   encoder?: string;
   crop_preset?: string;
   crop_blur_padding?: number | null;
+  quality_preset?: string;
   normalize_audio?: boolean;
   target_lufs?: number;
   modes?: string[];
@@ -309,8 +311,21 @@ export interface RenderManifest {
     total_render_seconds: number;
   };
   render_duration_seconds?: number;
+  quality_preset?: string | null;
+  watermark?: {
+    enabled: boolean;
+    position?: string;
+    opacity?: number;
+    scale?: number;
+    margin?: number;
+  };
   auto_staged?: boolean;
   highlight_candidate_id?: string | null;
+  youtube_upload_status?: string | null;
+  youtube_upload_progress?: number | null;
+  youtube_upload_error?: string | null;
+  youtube_uploaded_at?: string | null;
+  scheduled_publish_at?: string | null;
   youtube_upload?: {
     video_id: string;
     url: string;
@@ -345,6 +360,8 @@ export interface YouTubeUploadResult {
   privacy: string;
   progress: number;
   error_message?: string | null;
+  error_code?: string | null;
+  retry_at?: string | null;
   uploaded_at?: string | null;
 }
 
@@ -369,7 +386,15 @@ export interface YouTubeQuota {
   max_uploads_per_day: number;
   uploads_today: number;
   uploads_remaining: number;
+  failed_uploads: number;
   can_upload: boolean;
+  blocked_reason?: string | null;
+  blocked_until?: string | null;
+  api_quota_exhausted: boolean;
+  upload_limit_exceeded: boolean;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  last_error_at?: string | null;
   resets_at: string;
 }
 
@@ -666,6 +691,23 @@ export interface SetupSettings {
   auto_cleanup_uploaded_renders: boolean;
   auto_cleanup_vod: boolean;
   youtube_redirect_uri: string;
+  auto_mine_on_ingest: boolean;
+  watch_dir?: string | null;
+  watch_poll_interval_minutes: number;
+  watch_delete_after_ingest: boolean;
+  branding_enabled: boolean;
+  branding_channel_name?: string | null;
+  branding_intro_enabled: boolean;
+  branding_outro_enabled: boolean;
+  branding_intro_seconds: number;
+  branding_outro_seconds: number;
+  branding_intro_title?: string | null;
+  branding_intro_subtitle?: string | null;
+  branding_outro_title: string;
+  branding_outro_subtitle?: string | null;
+  branding_background_color: string;
+  branding_accent_color: string;
+  branding_text_color: string;
 }
 
 export interface UpdateSetupSettingsPayload {
@@ -679,6 +721,54 @@ export interface UpdateSetupSettingsPayload {
   auto_cleanup_uploaded_renders?: boolean | null;
   auto_cleanup_vod?: boolean | null;
   youtube_redirect_uri?: string | null;
+  auto_mine_on_ingest?: boolean | null;
+  watch_dir?: string | null;
+  watch_poll_interval_minutes?: number | null;
+  watch_delete_after_ingest?: boolean | null;
+  branding_enabled?: boolean | null;
+  branding_channel_name?: string | null;
+  branding_intro_enabled?: boolean | null;
+  branding_outro_enabled?: boolean | null;
+  branding_intro_seconds?: number | null;
+  branding_outro_seconds?: number | null;
+  branding_intro_title?: string | null;
+  branding_intro_subtitle?: string | null;
+  branding_outro_title?: string | null;
+  branding_outro_subtitle?: string | null;
+  branding_background_color?: string | null;
+  branding_accent_color?: string | null;
+  branding_text_color?: string | null;
+}
+
+export interface WatchIngestItem {
+  source_name: string;
+  status: string;
+  video_id?: string | null;
+  title?: string | null;
+  error?: string | null;
+}
+
+export interface WatchScanResponse {
+  enabled: boolean;
+  watch_dir?: string | null;
+  discovered: number;
+  ingested: number;
+  skipped: number;
+  failed: number;
+  items: WatchIngestItem[];
+  message: string;
+}
+
+export interface WatchStatusResponse {
+  enabled: boolean;
+  watch_dir?: string | null;
+  exists: boolean;
+  pending_files: number;
+  poll_interval_minutes: number;
+  delete_after_ingest: boolean;
+  stability_seconds: number;
+  supported_extensions: string[];
+  recent_ingests: Array<Record<string, unknown>>;
 }
 
 export interface DemoProjectResponse {
@@ -690,6 +780,47 @@ export interface DemoProjectResponse {
   staged_jobs_count: number;
   rendered_jobs_count: number;
   clip_ids: string[];
+}
+
+export interface ChannelProfile {
+  channel_name?: string | null;
+  watermark_enabled: boolean;
+  has_watermark: boolean;
+  watermark_url?: string | null;
+  watermark_position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center" | string;
+  watermark_opacity: number;
+  watermark_scale: number;
+  watermark_margin: number;
+  default_framing_preset: "third_person" | "cinematic" | "direct_crop" | "vertical_blur" | "custom" | string;
+  default_quality_preset: "high" | "compact" | "archive" | string;
+  title_template?: string | null;
+  pinned_hashtags: string[];
+  default_privacy: "public" | "unlisted" | "private" | string;
+  upload_slots: string[];
+  upload_timezone: string;
+  updated_at?: string | null;
+}
+
+export interface ChannelProfileUpdate {
+  channel_name?: string | null;
+  watermark_enabled?: boolean;
+  watermark_position?: string;
+  watermark_opacity?: number;
+  watermark_scale?: number;
+  watermark_margin?: number;
+  default_framing_preset?: string;
+  default_quality_preset?: string;
+  title_template?: string | null;
+  pinned_hashtags?: string[];
+  default_privacy?: string;
+  upload_slots?: string[];
+  upload_timezone?: string;
+}
+
+export interface WatermarkUploadResponse {
+  profile: ChannelProfile;
+  filename: string;
+  message: string;
 }
 
 export interface YouTubeCredentialsPayload {

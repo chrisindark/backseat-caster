@@ -36,6 +36,9 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** des
 | **Phase 7** | Publishing | **YouTube Ingestion & Publishing:** OAuth 2.0 PKCE flow, metadata staging, resumable YouTube Shorts Data API v3 upload | ✅ Completed |
 | **Phase 8** | Automation | **Auto-Stage & Scheduler Pipeline:** Auto-render top N highlights, LLM-generated title/tags, native YouTube `publishAt`, 1-click publish, batched maintenance + storage cleanup | ✅ Completed |
 | **Phase 8.5** | Highlights & Workflow | **Highlight Lifecycle Separation & Batch Staging Pipeline:** Separate uploaded, rendered, and left candidates, multi-select & Top-N-Left batch processing | ✅ Completed |
+| **Tier 0/1** | Onboarding | **Installability & First-Run Experience:** Preflight checks, `.env.example`, setup wizard, in-app settings, guided YouTube OAuth, 60-second demo project | ✅ Completed |
+| **Phase 10** | Zero-Input | **Zero-Input Ingest:** OBS watch folder + auto-mine on ingest chaining download/upload straight into mining, auto-staging and `publishAt` | ✅ Completed |
+| **Tier 3** | Branding | **Channel Brand Consistency:** DB-backed channel profile with watermark overlay, framing/quality defaults, title template, pinned hashtags, privacy and upload slots | ✅ Completed |
 | **Phase 9** | Multi-Genre | **Generic Video & Speech Mining (STT):** Dialogue-driven highlight discovery via Whisper STT + LLM semantic chunking & sentence snapping | 📋 Planned |
 | **Phase 3** | Vision & OCR | **HUD/OCR & Deep Visual Event Extraction:** Killfeed sequence chains, ultimate charge meters, ability identification | ✅ Completed |
 | **Phase 4** | Multimodal AI | **Gemini Event Verification:** Multimodal clip verification, structured highlight event schema, temporal grounding | 📋 Planned |
@@ -159,6 +162,36 @@ BackseatCaster is a **local-first AI video editing and publishing pipeline** des
   - Rich deterministic copy without hitting an LLM: integrates chosen hero into title templates, adds gameplay context and timing to descriptions, and extracts candidate/game tags into clean YouTube tags.
 - ✅ **Safe Deletion & Upload Audit Preservation:**
   - Cleaning or bulk-deleting renders now frees up local disk space while permanently preserving database records and YouTube links for published clips.
+
+---
+
+### Phase 10: Zero-Input Ingest (Watch Folder + Auto-Mine)
+*The "least input" north star: record, walk away, come back to staged Shorts.*
+
+- ✅ **Auto-Mine On Ingest (`AUTO_MINE_ON_INGEST`):** a completed YouTube download or OBS upload automatically dispatches the existing detection pipeline, which auto-stages the top candidates (Phase 8) with metadata and native `publishAt` slots. The chain reuses `HighlightService.detect_highlights`, so run records, status transitions, detector resolution and the Celery/`BackgroundTasks` fallback stay in one place (`app/services/auto_mine.py`).
+  - `AUTO_MINE_GAME` pins a detector profile; when unset the registry auto-detects from video metadata instead of silently forcing a generic profile.
+  - `AUTO_MINE_AUTO_RENDER_TOP_N` overrides how many candidates to auto-render; unset falls back to `AUTO_STAGE_TOP_N` when `AUTO_STAGE_ENABLED` is true, otherwise mining only.
+  - Idempotent and non-fatal: videos already `completed`/`scanning` are skipped, and a mining failure never fails the download or upload that succeeded.
+- ✅ **OBS Watch Folder (`WATCH_DIR`):** point the app at the folder OBS writes recordings into and new files are ingested automatically — copied (or moved with `WATCH_DELETE_AFTER_INGEST`) into `data/downloads`, probed, thumbnailed, catalogued, then auto-mined (`app/services/watch_folder.py`).
+  - **Stability gate:** a file is only ingested once its mtime is older than `WATCH_STABILITY_SECONDS`, so a recording OBS is still writing is never truncated into a corrupt catalog entry.
+  - **Dedupe ledger:** a `watch_ingests` table records the `size:mtime` fingerprint per source path, so repeated polls skip already-ingested takes but still pick up a filename OBS overwrites with a new recording.
+  - **Scheduling:** Celery beat polling via `WATCH_POLL_INTERVAL_MINUTES`, or on demand with `POST /api/v1/videos/watch/scan` (plus `GET /api/v1/videos/watch/status`).
+- ✅ **In-App Configuration:** auto-mine toggle, watch folder path, poll interval, and move-vs-copy are all editable from the setup wizard and persist to `data/settings.json` — no `.env` editing required. The setup diagnostics gain a fifth, optional *Zero-Click Ingest* check.
+
+---
+
+### Tier 3: Channel Brand Consistency
+*Retention-oriented defaults so every clip looks like the creator's channel without re-selecting five settings per clip.*
+
+- ✅ **DB-backed singleton profile:** `channel_profiles` stores channel name, watermark path/settings, framing and quality presets, title template, pinned hashtags, privacy default, daily upload slots and timezone (`app/models/channel_profile.py`, `app/services/channel_profile.py`).
+- ✅ **Watermark/logo overlay:** the single-pass renderer adds a scaled, semi-transparent logo input per output format and composites it before optional intro/outro cards (`build_watermark_filter` in [`app/rendering/filters.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/filters.py)). Position, opacity, size and margin are profile-controlled; manifests record the applied watermark.
+- ✅ **Default framing & quality:** renders omit explicit presets and inherit the channel defaults; `RenderJob.quality_preset` and `manifest.json` retain the resolved preset. Studio and highlight batch staging preselect the channel framing.
+- ✅ **Copy & publishing defaults:** title templates with token substitution, pinned hashtags merged into tags/descriptions, default privacy, and daily `publishAt` slots/timezone consumed by auto-stage scheduling.
+- ✅ **Branded intro & outro cards (Phase 10.5):** a channel card is prepended and a `SUBSCRIBE` card appended to every render, hand-finished inside the same single FFmpeg pass.
+  - Cards are rasterised with Pillow at each output's exact size ([`app/rendering/branding.py`](file:///Users/christopherpaul/projects/backseat-caster/app/rendering/branding.py)) and fed back as looped image inputs, so there is no extra encode generation and no `drawtext`/libfreetype dependency (the Homebrew FFmpeg build and slim containers lack it).
+  - `build_branding_plan` / `build_concat_filter` / `build_branding_audio_filter` wrap the per-format video chain in `[intro][main][outro]concat=n=3` and delay+pad the clip audio so lip-sync survives both cards.
+  - Copy, lengths, palette and per-bookend toggles come from `BRANDING_*` settings (setup wizard section or `.env`); manifests record the applied branding plus the composed duration, and throwaway card PNGs are deleted after the encode.
+- ✅ **Channel API & UI:** `/api/v1/channel/profile`, watermark upload/delete/preview endpoints, and a `/channel` editor with live logo preview.
 
 ---
 

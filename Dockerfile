@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     ca-certificates \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv from official dist

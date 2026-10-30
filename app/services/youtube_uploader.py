@@ -26,11 +26,16 @@ from app.schemas.youtube import (
     YouTubeAuthUrlResponse,
     YouTubeUploadResult,
 )
+from app.services.channel_profile import ChannelProfileService
 from app.services.upload_metadata import (
+    append_pinned_hashtags,
+    apply_title_template,
     build_description,
     build_tags,
     build_title,
+    merge_pinned_hashtags,
 )
+from app.services.youtube_errors import parse_youtube_api_error
 from app.services.youtube_quota import YouTubeQuotaService
 from app.worker.celery_app import celery_app
 
@@ -492,6 +497,8 @@ class YouTubeUploaderService:
                 .filter((RenderJob.clip_id == clip_id) | (RenderJob.id == clip_id))
                 .first()
             )
+            profile = ChannelProfileService.get_or_create(db)
+            pinned_hashtags = ChannelProfileService.pinned_hashtags(profile)
 
             # Read staging metadata from DB or manifest.json
             staging_meta: dict[str, Any] = {}
@@ -614,11 +621,23 @@ class YouTubeUploaderService:
                 else None
             )
 
-            final_title = (
-                title
-                or staging_meta.get("title")
-                or build_title(parent_video, job, clip_id)
-            ).strip()
+            generated_title = False
+            if title:
+                final_title = title.strip()
+            elif staging_meta.get("title"):
+                final_title = str(staging_meta["title"]).strip()
+            else:
+                final_title = build_title(parent_video, job, clip_id)
+                generated_title = True
+            if generated_title and profile.title_template:
+                final_title = apply_title_template(
+                    profile.title_template,
+                    final_title,
+                    channel_name=profile.channel_name,
+                    hero_name=staging_meta.get("hero_name"),
+                    game=staging_meta.get("game"),
+                    clip_id=clip_id,
+                )
 
             if (
                 target_is_short
@@ -635,6 +654,7 @@ class YouTubeUploaderService:
                 or staging_meta.get("description")
                 or build_description(parent_video, job, clip_id, bool(target_is_short))
             ).strip()
+            final_desc = append_pinned_hashtags(final_desc, pinned_hashtags)
 
             if (
                 target_is_short
@@ -649,12 +669,18 @@ class YouTubeUploaderService:
                 or staging_meta.get("tags")
                 or build_tags(parent_video, job, bool(target_is_short))
             )
+            final_tags = merge_pinned_hashtags(final_tags, pinned_hashtags)
             if target_is_short and "Shorts" not in final_tags:
                 final_tags.append("Shorts")
 
             # Prepare privacy. A future publishAt requires a private upload;
             # YouTube releases the video at the scheduled instant.
-            final_privacy = privacy or staging_meta.get("privacy") or "public"
+            final_privacy = (
+                privacy
+                or staging_meta.get("privacy")
+                or profile.default_privacy
+                or "public"
+            )
             if final_privacy not in ("private", "unlisted", "public"):
                 final_privacy = "public"
             if scheduled_for is not None:
@@ -696,15 +722,6 @@ class YouTubeUploaderService:
                     .isoformat(timespec="seconds")
                     .replace("+00:00", "Z")
                 )
-
-            # Quota guard: uploads cost 1,600 units against the daily budget.
-            quota_summary = YouTubeQuotaService.reserve_upload(db)
-            logger.info(
-                "YouTube quota after reservation: %d/%d units used (%d upload(s) remaining)",
-                quota_summary["units_used"],
-                quota_summary["daily_limit_units"],
-                quota_summary["uploads_remaining"],
-            )
 
             media = MediaFileUpload(
                 str(video_file),
@@ -760,6 +777,18 @@ class YouTubeUploaderService:
                 raise RuntimeError(
                     "YouTube upload finished without returning a video ID."
                 )
+
+            # Only successful uploads consume the project's 1,600-unit API
+            # budget in the local advisory counter. Rejected requests are
+            # recorded separately with their actual YouTube error reason.
+            quota_summary = YouTubeQuotaService.record_upload_success(db)
+            logger.info(
+                "YouTube quota after successful upload: %d/%d units used "
+                "(%d upload(s) remaining)",
+                quota_summary["units_used"],
+                quota_summary["daily_limit_units"],
+                quota_summary["uploads_remaining"],
+            )
 
             # Construct final URL
             if target_is_short:
@@ -845,17 +874,30 @@ class YouTubeUploaderService:
             )
 
         except Exception as e:
-            logger.exception("Failed uploading clip %s to YouTube", clip_id)
+            error = parse_youtube_api_error(
+                e, quota_reset_at=YouTubeQuotaService.resets_at()
+            )
+            logger.exception(
+                "Failed uploading clip %s to YouTube (%s)",
+                clip_id,
+                error.error_code,
+            )
             if job:
                 job.youtube_upload_status = "failed"
-                job.youtube_upload_error = str(e)
+                job.youtube_upload_error = error.user_message
                 try:
                     db.commit()
                 except Exception as commit_err:
                     logger.warning(
                         "Could not commit upload failure state: %s", commit_err
                     )
-            raise
+            try:
+                YouTubeQuotaService.record_upload_failure(db, error)
+            except Exception as quota_err:
+                logger.warning(
+                    "Could not persist YouTube quota failure state: %s", quota_err
+                )
+            raise error from e
         finally:
             if db_session is None:
                 import sys
@@ -902,8 +944,14 @@ class YouTubeUploaderService:
                     )
                     results.append(res)
                 except Exception as e:
+                    error = parse_youtube_api_error(
+                        e, quota_reset_at=YouTubeQuotaService.resets_at()
+                    )
                     logger.error(
-                        "Failed uploading selected clip %s: %s", job.clip_id, e
+                        "Failed uploading selected clip %s (%s): %s",
+                        job.clip_id,
+                        error.error_code,
+                        error.user_message,
                     )
                     failed_privacy = "public"
                     if job.upload_metadata:
@@ -920,7 +968,11 @@ class YouTubeUploaderService:
                             is_short=True,
                             status="failed",
                             privacy=failed_privacy,
-                            error_message=str(e),
+                            error_message=error.user_message,
+                            error_code=error.error_code,
+                            retry_at=error.retry_at.isoformat()
+                            if error.retry_at
+                            else None,
                         )
                     )
 

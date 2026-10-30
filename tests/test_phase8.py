@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from googleapiclient.errors import HttpError
+from httplib2 import Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -21,6 +23,7 @@ from app.schemas.youtube import YouTubeAuthStatusResponse
 from app.services.auto_stage import AutoStageService
 from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
+from app.services.youtube_errors import parse_youtube_api_error
 from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import YouTubeUploaderService
 
@@ -220,6 +223,148 @@ def test_quota_endpoint(client, db_session):
     assert body["units_used"] == 1_600
     assert body["uploads_remaining"] == 5
     assert body["resets_at"]
+
+
+def _youtube_http_error(status: int, reason: str, message: str) -> HttpError:
+    payload = {
+        "error": {
+            "code": status,
+            "message": message,
+            "errors": [
+                {
+                    "message": message,
+                    "domain": "youtube.video",
+                    "reason": reason,
+                }
+            ],
+        }
+    }
+    return HttpError(Response({"status": status}), json.dumps(payload).encode())
+
+
+def test_parse_youtube_errors_distinguishes_quota_from_channel_limit():
+    quota_error = parse_youtube_api_error(
+        _youtube_http_error(
+            403,
+            "quotaExceeded",
+            "The request cannot be completed because you have exceeded your quota.",
+        ),
+        quota_reset_at=YouTubeQuotaService.resets_at(),
+    )
+    assert quota_error.error_code == "api_quota_exceeded"
+    assert quota_error.api_quota_exhausted is True
+    assert quota_error.upload_limit_exceeded is False
+    assert quota_error.http_status == 429
+
+    limit_error = parse_youtube_api_error(
+        _youtube_http_error(
+            400,
+            "uploadLimitExceeded",
+            "The user has exceeded the number of videos they may upload.",
+        ),
+        quota_reset_at=YouTubeQuotaService.resets_at(),
+    )
+    assert limit_error.error_code == "upload_limit_exceeded"
+    assert limit_error.upload_limit_exceeded is True
+    assert limit_error.api_quota_exhausted is False
+    assert "separate from the Data API unit quota" in limit_error.user_message
+
+
+def test_quota_channel_limit_failure_does_not_consume_api_units(db_session):
+    error = parse_youtube_api_error(
+        _youtube_http_error(
+            400,
+            "uploadLimitExceeded",
+            "The user has exceeded the number of videos they may upload.",
+        ),
+        quota_reset_at=YouTubeQuotaService.resets_at(),
+    )
+    summary = YouTubeQuotaService.record_upload_failure(db_session, error)
+
+    assert summary["units_used"] == 0
+    assert summary["failed_uploads"] == 1
+    assert summary["can_upload"] is False
+    assert summary["upload_limit_exceeded"] is True
+    assert summary["blocked_reason"] == "upload_limit_exceeded"
+    assert summary["blocked_until"]
+
+
+def test_quota_api_failure_marks_full_budget(db_session):
+    error = parse_youtube_api_error(
+        _youtube_http_error(
+            403,
+            "quotaExceeded",
+            "The request cannot be completed because you have exceeded your quota.",
+        ),
+        quota_reset_at=YouTubeQuotaService.resets_at(),
+    )
+    summary = YouTubeQuotaService.record_upload_failure(db_session, error)
+
+    assert summary["units_used"] == 10_000
+    assert summary["units_remaining"] == 0
+    assert summary["api_quota_exhausted"] is True
+    assert summary["blocked_reason"] == "api_quota_exceeded"
+    assert summary["can_upload"] is False
+
+
+def test_sync_upload_limit_error_returns_friendly_429(
+    client, db_session, tmp_path, monkeypatch
+):
+    clip_id = "clip_channel_limit"
+    job, _mock_videos = _prepare_scheduled_upload(
+        db_session, tmp_path, monkeypatch, clip_id
+    )
+    error = _youtube_http_error(
+        400,
+        "uploadLimitExceeded",
+        "The user has exceeded the number of videos they may upload.",
+    )
+    _mock_videos.insert.return_value.next_chunk.side_effect = error
+
+    res = client.post(
+        f"{settings.API_PREFIX}/youtube/upload/{clip_id}", json={"sync": True}
+    )
+    assert res.status_code == 429
+    body = res.json()
+    assert "channel has reached its video upload limit" in body["error_message"]
+    assert "HttpError" not in body["error_message"]
+
+    db_session.refresh(job)
+    assert job.youtube_upload_status == "failed"
+    assert "uploadLimitExceeded" in (job.youtube_upload_error or "")
+
+    usage = db_session.query(YouTubeQuotaUsage).one()
+    assert usage.units_used == 0
+    assert usage.failed_uploads == 1
+    assert usage.blocked_reason == "upload_limit_exceeded"
+
+
+def test_batch_upload_reports_structured_channel_limit_error(
+    client, db_session, tmp_path, monkeypatch
+):
+    _prepare_scheduled_upload(db_session, tmp_path, monkeypatch, "clip_limit_a")
+    _job, mock_videos = _prepare_scheduled_upload(
+        db_session, tmp_path, monkeypatch, "clip_limit_b"
+    )
+    mock_videos.insert.return_value.next_chunk.side_effect = _youtube_http_error(
+        400,
+        "uploadLimitExceeded",
+        "The user has exceeded the number of videos they may upload.",
+    )
+
+    res = client.post(f"{settings.API_PREFIX}/youtube/upload/selected?sync=true")
+    assert res.status_code == 200
+    body = res.json()["response"]
+    assert body["total_failed"] == 2
+    assert all(
+        item["error_code"] == "upload_limit_exceeded" for item in body["results"]
+    )
+    assert all("HttpError" not in item["error_message"] for item in body["results"])
+
+    usage = db_session.query(YouTubeQuotaUsage).one()
+    assert usage.units_used == 0
+    assert usage.failed_uploads == 2
+    assert usage.blocked_reason == "upload_limit_exceeded"
 
 
 # -----------------------------------------------------------------------------

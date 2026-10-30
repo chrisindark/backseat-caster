@@ -76,6 +76,24 @@ class SettingsManager:
             "auto_cleanup_uploaded_renders": "AUTO_CLEANUP_UPLOADED_RENDERS",
             "auto_cleanup_vod": "AUTO_CLEANUP_VOD",
             "youtube_redirect_uri": "YOUTUBE_REDIRECT_URI",
+            "auto_mine_on_ingest": "AUTO_MINE_ON_INGEST",
+            "watch_dir": "WATCH_DIR",
+            "watch_poll_interval_minutes": "WATCH_POLL_INTERVAL_MINUTES",
+            "watch_delete_after_ingest": "WATCH_DELETE_AFTER_INGEST",
+            # Phase 10.5: branded intro/outro cards
+            "branding_enabled": "BRANDING_ENABLED",
+            "branding_channel_name": "BRANDING_CHANNEL_NAME",
+            "branding_intro_enabled": "BRANDING_INTRO_ENABLED",
+            "branding_outro_enabled": "BRANDING_OUTRO_ENABLED",
+            "branding_intro_seconds": "BRANDING_INTRO_SECONDS",
+            "branding_outro_seconds": "BRANDING_OUTRO_SECONDS",
+            "branding_intro_title": "BRANDING_INTRO_TITLE",
+            "branding_intro_subtitle": "BRANDING_INTRO_SUBTITLE",
+            "branding_outro_title": "BRANDING_OUTRO_TITLE",
+            "branding_outro_subtitle": "BRANDING_OUTRO_SUBTITLE",
+            "branding_background_color": "BRANDING_BACKGROUND_COLOR",
+            "branding_accent_color": "BRANDING_ACCENT_COLOR",
+            "branding_text_color": "BRANDING_TEXT_COLOR",
         }
 
         for api_key, attr_name in mapping.items():

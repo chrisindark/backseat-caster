@@ -38,6 +38,7 @@ class RenderJob(Base):
     # Crop preset values: third_person, direct_center, cinematic_balanced
     crop_preset = Column(String(64), default="third_person")
     crop_blur_padding = Column(Float, default=0.3333)
+    quality_preset = Column(String(32), default="high")
     modes = Column(String(256), nullable=True)
     overwrite = Column(Boolean, default=True)
     normalize_audio = Column(Boolean, default=True)
@@ -91,6 +92,7 @@ class RenderJob(Base):
             "encoder": self.encoder,
             "crop_preset": self.crop_preset,
             "crop_blur_padding": self.crop_blur_padding,
+            "quality_preset": self.quality_preset or "high",
             "normalize_audio": bool(self.normalize_audio)
             if self.normalize_audio is not None
             else True,

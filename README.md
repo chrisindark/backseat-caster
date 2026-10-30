@@ -14,6 +14,7 @@
 | Document | Purpose |
 |---|---|
 | [docs/getting-started.md](docs/getting-started.md) | Install, configure, and run the full stack |
+| [docs/channel-branding.md](docs/channel-branding.md) | Channel watermark, framing/quality defaults, title templates and upload slots |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and processing pipeline |
 | [API_REFERENCE.md](API_REFERENCE.md) | HTTP endpoint reference |
 | [CONFIGURATION.md](CONFIGURATION.md) | Environment variables & settings |

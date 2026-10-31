@@ -45,6 +45,10 @@ TEXT_FIELDS = frozenset(
         "branding_background_color",
         "branding_accent_color",
         "branding_text_color",
+        "cta_headline",
+        "cta_subtitle",
+        "cta_speech_text",
+        "cta_voice",
     }
 )
 
@@ -117,6 +121,13 @@ class ChannelProfileService:
             upload_slots=json.dumps(_default_slots()),
             upload_timezone=(settings.AUTO_STAGE_TIMEZONE or "UTC").strip() or "UTC",
             max_clip_seconds=float(settings.MAX_CLIP_SECONDS),
+            cta_enabled=False,
+            cta_style="outro_card",
+            cta_seconds=3.5,
+            cta_headline="SUBSCRIBE & TAP THE BELL",
+            cta_subtitle="Click the bell for more clips",
+            cta_speech_text="Subscribe to the channel and tap the bell for more clips.",
+            cta_voice="en-US-ChristopherNeural",
             **cls._branding_seed_values(),
         )
         db.add(profile)
@@ -192,6 +203,18 @@ class ChannelProfileService:
             branding_text_color=branding.text_color,
             branding_font_path=branding.font_path,
             max_clip_seconds=cls.duration_budget(db).max_seconds,
+            cta_enabled=bool(profile.cta_enabled)
+            if profile.cta_enabled is not None
+            else False,
+            cta_style=profile.cta_style or "outro_card",
+            cta_seconds=float(profile.cta_seconds)
+            if profile.cta_seconds is not None
+            else 3.5,
+            cta_headline=profile.cta_headline or "SUBSCRIBE & TAP THE BELL",
+            cta_subtitle=profile.cta_subtitle or "Click the bell for more clips",
+            cta_speech_text=profile.cta_speech_text
+            or "Subscribe to the channel and tap the bell for more clips.",
+            cta_voice=profile.cta_voice or "en-US-ChristopherNeural",
             title_template=profile.title_template,
             pinned_hashtags=normalize_hashtags(_json_list(profile.pinned_hashtags)),
             default_privacy=profile.default_privacy or "public",

@@ -18,6 +18,7 @@ import {
   Hash,
   Image as ImageIcon,
   Layers,
+  Mic,
   Loader2,
   Palette,
   RefreshCw,
@@ -104,6 +105,17 @@ export default function ChannelProfilePage() {
 
   const [maxClipSeconds, setMaxClipSeconds] = useState(90);
 
+  // CTA voiceover (TTS + bell chime)
+  const [ctaEnabled, setCtaEnabled] = useState(false);
+  const [ctaStyle, setCtaStyle] = useState("outro_card");
+  const [ctaSeconds, setCtaSeconds] = useState(3.5);
+  const [ctaHeadline, setCtaHeadline] = useState("SUBSCRIBE & TAP THE BELL");
+  const [ctaSubtitle, setCtaSubtitle] = useState("Click the bell for more clips");
+  const [ctaSpeechText, setCtaSpeechText] = useState(
+    "Subscribe to the channel and tap the bell for more clips."
+  );
+  const [ctaVoice, setCtaVoice] = useState("en-US-ChristopherNeural");
+
   const [titleTemplate, setTitleTemplate] = useState("");
   const [pinnedHashtags, setPinnedHashtags] = useState("");
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
@@ -132,6 +144,15 @@ export default function ChannelProfilePage() {
     setBrandingAccentColor(data.branding_accent_color || "#F43F5E");
     setBrandingBackgroundColor(data.branding_background_color || "#0B0D13");
     setMaxClipSeconds(data.max_clip_seconds ?? 90);
+    setCtaEnabled(Boolean(data.cta_enabled));
+    setCtaStyle(data.cta_style || "outro_card");
+    setCtaSeconds(data.cta_seconds ?? 3.5);
+    setCtaHeadline(data.cta_headline || "SUBSCRIBE & TAP THE BELL");
+    setCtaSubtitle(data.cta_subtitle || "Click the bell for more clips");
+    setCtaSpeechText(
+      data.cta_speech_text || "Subscribe to the channel and tap the bell for more clips."
+    );
+    setCtaVoice(data.cta_voice || "en-US-ChristopherNeural");
     setTitleTemplate(data.title_template || "");
     setPinnedHashtags((data.pinned_hashtags || []).join(", "));
     setDefaultPrivacy(data.default_privacy || "public");
@@ -197,6 +218,13 @@ export default function ChannelProfilePage() {
         branding_accent_color: brandingAccentColor,
         branding_background_color: brandingBackgroundColor,
         max_clip_seconds: maxClipSeconds,
+        cta_enabled: ctaEnabled,
+        cta_style: ctaStyle,
+        cta_seconds: ctaSeconds,
+        cta_headline: ctaHeadline.trim() || null,
+        cta_subtitle: ctaSubtitle.trim() || null,
+        cta_speech_text: ctaSpeechText.trim() || null,
+        cta_voice: ctaVoice.trim() || null,
         title_template: titleTemplate.trim() || null,
         pinned_hashtags: splitList(pinnedHashtags).map((h) => h.replace(/^#/, "")),
         default_privacy: defaultPrivacy,
@@ -844,6 +872,117 @@ export default function ChannelProfilePage() {
                       {tier}s
                     </span>
                   ))}
+                </div>
+              </div>
+
+              {/* CTA voiceover (TTS + bell chime) */}
+              <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Mic className="w-4 h-4 text-amber-400" />
+                      CTA Voiceover (TTS + Bell)
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Synthesises a neural voiceover plus the bell chime and mixes
+                      it into the outro of every render. Requires network on first
+                      use; results are cached by text + voice.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={ctaEnabled}
+                      onChange={(e) => setCtaEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
+                    <span className="ml-2.5 text-xs font-semibold text-slate-300">
+                      {ctaEnabled ? "On" : "Off"}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Style
+                    </label>
+                    <select
+                      value={ctaStyle}
+                      onChange={(e) => setCtaStyle(e.target.value)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="outro_card">Outro card</option>
+                      <option value="overlay">In-video overlay (planned)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Voiceover length{" "}
+                      <span className="font-mono text-amber-300">
+                        {ctaSeconds.toFixed(1)}s
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={2}
+                      max={10}
+                      step={0.5}
+                      value={ctaSeconds}
+                      onChange={(e) => setCtaSeconds(Number(e.target.value))}
+                      className="w-full accent-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Headline
+                    </label>
+                    <input
+                      type="text"
+                      value={ctaHeadline}
+                      onChange={(e) => setCtaHeadline(e.target.value)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={ctaSubtitle}
+                      onChange={(e) => setCtaSubtitle(e.target.value)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Speech text
+                  </label>
+                  <textarea
+                    value={ctaSpeechText}
+                    onChange={(e) => setCtaSpeechText(e.target.value)}
+                    rows={2}
+                    className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Voice
+                  </label>
+                  <input
+                    type="text"
+                    value={ctaVoice}
+                    onChange={(e) => setCtaVoice(e.target.value)}
+                    className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    edge-tts voice name, e.g. en-US-ChristopherNeural
+                  </span>
                 </div>
               </div>
 

@@ -781,6 +781,13 @@ export interface ChannelProfile {
   branding_text_color: string;
   branding_font_path?: string | null;
   max_clip_seconds: number;
+  cta_enabled: boolean;
+  cta_style: string;
+  cta_seconds: number;
+  cta_headline: string;
+  cta_subtitle: string;
+  cta_speech_text: string;
+  cta_voice: string;
   title_template?: string | null;
   pinned_hashtags: string[];
   default_privacy: "public" | "unlisted" | "private" | string;
@@ -812,6 +819,13 @@ export interface ChannelProfileUpdate {
   branding_text_color?: string | null;
   branding_font_path?: string | null;
   max_clip_seconds?: number;
+  cta_enabled?: boolean;
+  cta_style?: string;
+  cta_seconds?: number;
+  cta_headline?: string | null;
+  cta_subtitle?: string | null;
+  cta_speech_text?: string | null;
+  cta_voice?: string | null;
   title_template?: string | null;
   pinned_hashtags?: string[];
   default_privacy?: string;

@@ -59,6 +59,15 @@ class ChannelProfileResponse(BaseModel):
     branding_font_path: str | None = None
     max_clip_seconds: float = 90.0
 
+    # CTA voiceover (TTS + bell chime)
+    cta_enabled: bool = False
+    cta_style: str = "outro_card"
+    cta_seconds: float = 3.5
+    cta_headline: str = "SUBSCRIBE & TAP THE BELL"
+    cta_subtitle: str = "Click the bell for more clips"
+    cta_speech_text: str = "Subscribe to the channel and tap the bell for more clips."
+    cta_voice: str = "en-US-ChristopherNeural"
+
     title_template: str | None = None
     pinned_hashtags: list[str] = Field(default_factory=list)
     default_privacy: PrivacyStatus = "public"
@@ -99,6 +108,14 @@ class ChannelProfileUpdate(BaseModel):
     branding_text_color: str | None = Field(None, max_length=16)
     branding_font_path: str | None = Field(None, max_length=1024)
     max_clip_seconds: float | None = Field(None, ge=15.0, le=300.0)
+
+    cta_enabled: bool | None = None
+    cta_style: str | None = Field(None, max_length=16)
+    cta_seconds: float | None = Field(None, ge=2.0, le=10.0)
+    cta_headline: str | None = Field(None, max_length=255)
+    cta_subtitle: str | None = Field(None, max_length=255)
+    cta_speech_text: str | None = None
+    cta_voice: str | None = Field(None, max_length=64)
 
     title_template: str | None = Field(None, max_length=255)
     pinned_hashtags: list[str] | None = None

@@ -39,7 +39,7 @@ Error responses use the same envelope shape with `success: false` and a populate
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/channel/profile` | Channel defaults: watermark settings, branded intro/outro cards, framing/quality presets, title template, pinned hashtags, privacy, upload slots, timezone and max clip length |
+| `GET` | `/api/v1/channel/profile` | Channel defaults: watermark settings, branded intro/outro cards, CTA voiceover, framing/quality presets, title template, pinned hashtags, privacy, upload slots, timezone and max clip length |
 | `PUT` / `PATCH` | `/api/v1/channel/profile` | Update any subset of channel defaults (including `branding_*` and `max_clip_seconds`); omitted fields are untouched, blank text clears back to the default |
 | `POST` | `/api/v1/channel/watermark` | Upload/replace the watermark logo (multipart `file`: PNG, JPG or WEBP, max 15 MB); stored under `data/channel/` |
 | `DELETE` | `/api/v1/channel/watermark` | Remove the logo and disable the overlay |

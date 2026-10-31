@@ -1232,6 +1232,41 @@ class RenderService:
             branding_config = ChannelProfileService.branding_config(db)
             duration_budget = ChannelProfileService.duration_budget(db)
 
+            # Optional CTA voiceover (TTS + bell chime) played over the outro.
+            cta_narration_path: Path | None = narr_file
+            cta_narration_start = 0.0
+            cta_audio_total: float | None = None
+            if profile.cta_enabled and branding_config.has_bookends:
+                try:
+                    from app.services.tts import TTSService
+
+                    cta_audio = TTSService.generate_cta_audio(
+                        speech_text=profile.cta_speech_text or "",
+                        voice=profile.cta_voice or "en-US-ChristopherNeural",
+                        include_bell=True,
+                    )
+                    if cta_audio is not None:
+                        cta_narration_path = cta_audio
+                        cta_narration_start = float(job.duration_seconds or 0.0)
+                        outro_seconds = (
+                            branding_config.outro_seconds
+                            if branding_config.has_outro
+                            else 0.0
+                        )
+                        cta_audio_total = float(job.duration_seconds or 0.0) + float(
+                            outro_seconds
+                        )
+                        logger.info(
+                            "CTA voiceover enabled for %s: %s (starts at %.1fs)",
+                            job.clip_id,
+                            cta_audio,
+                            cta_narration_start,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "CTA audio generation failed for %s: %s", job.clip_id, exc
+                    )
+
             config = RenderConfig(
                 preferred_encoder=job.encoder,
                 quality_preset=resolved_quality,
@@ -1277,7 +1312,9 @@ class RenderService:
                 duration_seconds=job.duration_seconds,
                 output_dir=out_dir,
                 clip_id=job.clip_id,
-                narration_path=narr_file,
+                narration_path=cta_narration_path,
+                narration_start_seconds=cta_narration_start,
+                audio_total_seconds=cta_audio_total,
                 overwrite=job.overwrite,
                 crop_preset=job.crop_preset,
                 crop_blur_padding=job.crop_blur_padding,

@@ -482,11 +482,11 @@ function RendersContent() {
     return renders.filter((r) => r.upload_selection?.is_selected);
   }, [renders]);
 
-  // Shorts count (vertical and <= 60.5 seconds)
+  // Shorts count (vertical and <= 90.5 seconds)
   const shortsCount = useMemo(() => {
     return renders.filter((r) => {
       const dur = r.clip?.duration_seconds ?? r.request?.duration_seconds ?? 0;
-      if (dur > 60.5) return false;
+      if (dur > 90.5) return false;
       return Boolean(
         r.vertical_blur_path ||
         r.vertical_crop_path ||
@@ -527,7 +527,7 @@ function RendersContent() {
       }
       if (statusFilter === "shorts") {
         const dur = r.clip?.duration_seconds ?? r.request?.duration_seconds ?? 0;
-        if (dur > 60.5) return false;
+        if (dur > 90.5) return false;
         const isVertical = Boolean(
           r.vertical_blur_path ||
           r.vertical_crop_path ||
@@ -570,7 +570,7 @@ function RendersContent() {
       if (statusFilter === "selected" && !j.is_selected_for_upload) return false;
       if (statusFilter === "published" && j.youtube_upload_status !== "completed" && !j.youtube_upload_url) return false;
       if (statusFilter === "shorts") {
-        if (j.duration_seconds > 60.5) return false;
+        if (j.duration_seconds > 90.5) return false;
         if (j.crop_preset === "landscape" && !j.vertical_blur_path && !j.vertical_crop_path) return false;
       }
 
@@ -805,7 +805,7 @@ function RendersContent() {
                 }`}
               >
                 <Smartphone className="w-3.5 h-3.5 text-purple-400" />
-                <span>Shorts (≤60s) ({shortsCount})</span>
+                <span>Shorts (≤90s) ({shortsCount})</span>
               </button>
 
               <button

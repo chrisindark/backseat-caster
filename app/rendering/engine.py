@@ -20,10 +20,13 @@ from app.rendering.branding import (
     build_branding_plan,
     build_card_video_filter,
     build_concat_filter,
+    cleanup_png_dir,
+    render_cta_overlay_png,
 )
 from app.rendering.config import (
     CROP_PADDING_PRESETS,
     BrandingConfig,
+    DurationBudget,
     RenderConfig,
     default_render_config,
 )
@@ -151,6 +154,32 @@ class RenderEngine:
 
     def __init__(self, config: RenderConfig | None = None):
         self.config = config or default_render_config
+
+    def _duration_budget(self, *, bookend_seconds: float = 0.0) -> DurationBudget:
+        """Upload budget for this render (ceiling minus the cards it adds)."""
+        return DurationBudget(
+            max_seconds=self.config.max_total_seconds,
+            bookend_seconds=bookend_seconds,
+        )
+
+    def _cta_summary(
+        self, *, has_voiceover: bool, voiceover_start_seconds: float
+    ) -> dict[str, Any]:
+        """Manifest-friendly record of the CTA settings that produced this clip."""
+        cta = self.config.cta
+        overlay = bool(cta.enabled and cta.style == "overlay")
+        return {
+            "enabled": bool(cta.enabled),
+            "style": cta.style,
+            "seconds": cta.seconds,
+            "overlay": overlay,
+            "headline": cta.headline,
+            "subtitle": cta.subtitle,
+            "speech_text": cta.speech_text,
+            "voice": cta.voice,
+            "voiceover": has_voiceover,
+            "voiceover_start_seconds": round(max(0.0, voiceover_start_seconds), 3),
+        }
 
     def _render_single_target(
         self,
@@ -402,6 +431,58 @@ class RenderEngine:
                 card_inputs[mode_name] = (intro_idx, outro_idx)
             progress_duration = duration_seconds + branding_plan.padding_seconds
 
+        # CTA in-video overlay (Mode A): a transparent lower-third pill shown
+        # for the last `cta_seconds` of the gameplay segment.
+        cta_overlay_active = (
+            bool(self.config.cta.enabled) and self.config.cta.style == "overlay"
+        )
+        overlay_inputs: dict[str, int] = {}
+        overlay_dir: Path | None = None
+        if cta_overlay_active:
+            _out_dir = (
+                list(targets.values())[0].parent
+                if isinstance(targets, dict) and targets
+                else None
+            )
+            if _out_dir is None:
+                _out_dir = Path(".")
+            overlay_dir = _out_dir / ".cta_overlay"
+            overlay_dir.mkdir(parents=True, exist_ok=True)
+            overlay_seconds = float(self.config.cta.seconds)
+            for mode_name in modes:
+                is_landscape = mode_name == "landscape"
+                ow = (
+                    self.config.landscape_width
+                    if is_landscape
+                    else self.config.vertical_width
+                )
+                oh = (
+                    self.config.landscape_height
+                    if is_landscape
+                    else self.config.vertical_height
+                )
+                overlay_path = render_cta_overlay_png(
+                    overlay_dir / f"{mode_name}_cta.png",
+                    size=(ow, oh),
+                    headline=self.config.cta.headline,
+                    subtitle=self.config.cta.subtitle,
+                    accent=self.config.branding.accent_color,
+                    text_color=self.config.branding.text_color,
+                    font_path=self.config.branding.font_path,
+                )
+                cmd.extend(
+                    [
+                        "-loop",
+                        "1",
+                        "-t",
+                        f"{overlay_seconds:.3f}",
+                        "-i",
+                        str(overlay_path),
+                    ]
+                )
+                overlay_inputs[mode_name] = next_input_index
+                next_input_index += 1
+
         # Tier 3: channel watermark. One still-image input per target keeps the
         # single-pass render intact and lets each output scale the logo for its
         # own orientation.
@@ -546,6 +627,24 @@ class RenderEngine:
                         prefix=f"wm_{i}",
                     )
                 )
+
+            # CTA in-video overlay: composite the lower-third pill onto the
+            # gameplay segment for the last `cta_seconds` of the clip. This is
+            # independent of the branded cards, so the CTA still shows when
+            # intro/outro cards are switched off.
+            cta_overlay_idx = overlay_inputs.get(mode_name)
+            if cta_overlay_idx is not None:
+                start_time = max(0.0, duration_seconds - float(self.config.cta.seconds))
+                overlay_label = f"v_cta_overlay_{i}"
+                filter_parts.append(
+                    # The overlay PNG is already a full-frame canvas with the
+                    # pill at its final position, so composite it at the origin.
+                    f"[{v_composed}][{cta_overlay_idx}:v]overlay="
+                    f"(W-w)/2:H-h:"
+                    f"enable='between(t,{start_time:.3f},{duration_seconds:.3f})'"
+                    f"[{overlay_label}]"
+                )
+                v_composed = overlay_label
 
             if not branding_active:
                 video_map_labels.append(v_composed)
@@ -725,6 +824,7 @@ class RenderEngine:
                 except Exception:
                     pass
             err_thread.join(timeout=2.0)
+            cleanup_png_dir(overlay_dir)
 
         err_msg = "".join(stderr_output).strip()
 
@@ -748,6 +848,8 @@ class RenderEngine:
         output_dir: Path | str,
         clip_id: str | None = None,
         narration_path: Path | str | None = None,
+        narration_start_seconds: float = 0.0,
+        audio_total_seconds: float | None = None,
         overwrite: bool = False,
         crop_preset: str | None = None,
         crop_blur_padding: float | None = None,
@@ -825,6 +927,8 @@ class RenderEngine:
             duration_seconds=effective_duration,
             has_source_audio=probe.has_audio,
             has_narration=narr_file is not None,
+            narration_start_seconds=narration_start_seconds,
+            audio_total_seconds=audio_total_seconds,
             ducked_game_gain=self.config.ducked_game_gain,
             narration_gain=self.config.narration_gain,
             limiter_enabled=self.config.limiter_enabled,
@@ -897,6 +1001,15 @@ class RenderEngine:
         total_duration = effective_duration + (
             branding_plan.padding_seconds if branding_plan else 0.0
         )
+
+        duration_budget = self._duration_budget(
+            bookend_seconds=branding_plan.padding_seconds if branding_plan else 0.0
+        )
+        if branding_plan is not None and not duration_budget.fits(effective_duration):
+            logger.warning(
+                "Branded clip exceeds the upload ceiling: %s",
+                duration_budget.over_ceiling_message(effective_duration),
+            )
 
         # 5. Execute Single-Pass Multi-Target Render
         if progress_callback:
@@ -1026,6 +1139,11 @@ class RenderEngine:
                 if effective_branding is not None
                 else {"enabled": False}
             ),
+            cta=self._cta_summary(
+                has_voiceover=narr_file is not None,
+                voiceover_start_seconds=narration_start_seconds,
+            ),
+            duration_budget=duration_budget.describe_composed(total_duration),
         )
         files_created.append(str(manifest_file))
 

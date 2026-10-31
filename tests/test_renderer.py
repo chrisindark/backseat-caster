@@ -333,6 +333,8 @@ def test_audio_filters_unducked_vs_ducked():
     )
     assert "volume=0.30" in ducked_graph
     assert "amix=" in ducked_graph
+    # The narration feeds the sidechain key and the mix, so it must be split.
+    assert "asplit=2[a_narr_key][a_narr_mix]" in ducked_graph
     assert "alimiter=" in ducked_graph
     assert "loudnorm=I=-14.0:TP=-1.5:LRA=11.0" in ducked_graph
 

@@ -372,6 +372,87 @@ def test_batch_upload_reports_structured_channel_limit_error(
 # -----------------------------------------------------------------------------
 
 
+def test_auto_stage_clamps_long_candidates_to_the_ceiling(db_session, monkeypatch):
+    """A 120s candidate is clamped to the branded clip budget, not 60s."""
+    from app.models.render_job import RenderJob
+    from app.schemas.channel import ChannelProfileUpdate
+    from app.services.auto_stage import AutoStageService
+    from app.services.channel_profile import ChannelProfileService
+    from app.services.llm_metadata import LLMMetadataService
+    from app.services.renders import RenderService
+
+    video = _video(db_session, "vid_ceiling")
+    candidate = _candidate(db_session, video, "cand_long", 0.9, start=0.0)
+    candidate.duration_seconds = 120.0
+    db_session.commit()
+
+    # Turn branding on so bookends shrink the budget.
+    ChannelProfileService.update(
+        db_session,
+        ChannelProfileUpdate(
+            branding_enabled=True,
+            branding_intro_seconds=1.2,
+            branding_outro_seconds=2.0,
+        ),
+    )
+
+    captured = {}
+
+    def fake_create_render(db, request, background_tasks=None):
+        captured["duration"] = request.duration_seconds
+        job = RenderJob(
+            id=f"job_{request.clip_id}",
+            clip_id=request.clip_id,
+            video_id=request.video_id,
+            status="completed",
+            progress=100.0,
+            start_seconds=request.start_seconds,
+            duration_seconds=request.duration_seconds,
+            modes=",".join(request.modes or []),
+            selected_format=(request.modes or ["third_person"])[0],
+        )
+        db.add(job)
+        db.commit()
+
+        class Rendered:
+            job_id = job.id
+
+        return Rendered()
+
+    monkeypatch.setattr(
+        RenderService, "create_render", staticmethod(fake_create_render)
+    )
+    monkeypatch.setattr(
+        LLMMetadataService,
+        "generate_clip_metadata",
+        staticmethod(
+            lambda **kwargs: {
+                "title": "Auto Staged Clip",
+                "description": "Auto copy",
+                "tags": ["Gaming"],
+                "preferred_format": "third_person",
+                "privacy": "public",
+                "metadata_source": "llm",
+            }
+        ),
+    )
+
+    result = AutoStageService.stage_top_candidates(
+        db_session,
+        video.id,
+        top_n=1,
+        min_score=0.6,
+        clipping_mode="third_person",
+        schedule=False,
+    )
+
+    assert result["staged_count"] == 1
+    # 90 - 3.2 = 86.8, not 60 and not 120.
+    assert captured["duration"] == pytest.approx(86.8)
+    job = db_session.query(RenderJob).filter_by(clip_id=f"auto_{candidate.id}").one()
+    assert job.duration_seconds == pytest.approx(86.8)
+
+
 def test_auto_stage_creates_staggered_jobs(client, db_session, monkeypatch):
     video = _video(db_session)
     low = _candidate(db_session, video, "cand_low", 0.55)

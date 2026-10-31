@@ -53,6 +53,18 @@ class ChannelProfile(Base):
     branding_text_color = Column(String(16), nullable=True)
     branding_font_path = Column(String(1024), nullable=True)
 
+    # Upload ceiling for clip + branded bookends
+    max_clip_seconds = Column(Float, nullable=True)
+
+    # CTA voiceover (TTS + bell chime) played over the outro.
+    cta_enabled = Column(Boolean, nullable=True)
+    cta_style = Column(String(16), nullable=True)
+    cta_seconds = Column(Float, nullable=True)
+    cta_headline = Column(String(255), nullable=True)
+    cta_subtitle = Column(String(255), nullable=True)
+    cta_speech_text = Column(Text, nullable=True)
+    cta_voice = Column(String(64), nullable=True)
+
     # Publishing defaults
     title_template = Column(String(255), nullable=True)
     pinned_hashtags = Column(Text, nullable=True)  # JSON-encoded list[str]

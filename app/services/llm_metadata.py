@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.rendering.config import DEFAULT_MAX_CLIP_SECONDS
 from app.services.channel_profile import ChannelProfileService
 from app.services.upload_metadata import apply_title_template, generate_upload_metadata
 
@@ -605,7 +606,11 @@ class LLMMetadataService:
             duration = float(job.duration_seconds) if job.duration_seconds else 15.0
         except (TypeError, ValueError):
             duration = 15.0
-        is_short = preferred_format != "landscape" and duration <= 60.0
+        # Short-form covers everything up to the upload ceiling (90s by default),
+        # not the legacy 60s marker.
+        is_short = (
+            preferred_format != "landscape" and duration <= DEFAULT_MAX_CLIP_SECONDS
+        )
 
         force_source = None if use_llm is None else ("llm" if use_llm else "fallback")
         metadata = cls.generate_clip_metadata(

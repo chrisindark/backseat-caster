@@ -186,6 +186,8 @@ function StudioWorkspace() {
 
   // 6 Clipping modes multi-select (initialised from the channel profile)
   const [defaultFraming, setDefaultFraming] = useState<ClippingMode>("third_person");
+  const [maxClipSeconds, setMaxClipSeconds] = useState<number>(90);
+  const [bookendSeconds, setBookendSeconds] = useState<number>(0);
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
     "third_person",
   ]);
@@ -445,6 +447,15 @@ function StudioWorkspace() {
           setSelectedModes([preset]);
           setRightCompareMode(preset);
         }
+        setMaxClipSeconds(profile.max_clip_seconds ?? 90);
+        setBookendSeconds(
+          (profile.branding_enabled
+            ? (profile.branding_intro ? profile.branding_intro_seconds : 0)
+            : 0) +
+          (profile.branding_enabled
+            ? (profile.branding_outro ? profile.branding_outro_seconds : 0)
+            : 0)
+        );
       })
       .catch(() => {});
 
@@ -1029,15 +1040,20 @@ function StudioWorkspace() {
                       )}
 
                       {/* YouTube Shorts duration hint / advisory */}
-                      {activeDuration > 60 ? (
+                      {activeDuration + bookendSeconds > maxClipSeconds ? (
                         <div className="mt-2.5 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-2 text-xs text-amber-200">
                           <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                           <div className="space-y-0.5">
                             <p className="font-semibold text-amber-300">
-                              Duration is {activeDuration}s (&gt; 60s) — YouTube Shorts Note
+                              {activeDuration}s + {bookendSeconds.toFixed(1)}s bookends ={" "}
+                              {(activeDuration + bookendSeconds).toFixed(1)}s — over the{" "}
+                              {maxClipSeconds}s ceiling
                             </p>
                             <p className="text-[11px] text-amber-200/80 leading-snug">
-                              YouTube Shorts requires clips ≤ 60 seconds. Longer videos will render normally and publish as standard YouTube videos.
+                              The rendered clip will not fit the short-form upload
+                              budget. Trim the window, disable a card, or raise Max Clip
+                              Length on the Brand page. The render itself will still
+                              complete.
                             </p>
                           </div>
                         </div>
@@ -1045,7 +1061,11 @@ function StudioWorkspace() {
                         <div className="mt-2.5 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-300">
                           <span className="flex items-center gap-1.5 font-medium">
                             <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>{activeDuration}s — Sized for YouTube Shorts (≤ 60s)</span>
+                            <span>
+                              {activeDuration}s + {bookendSeconds.toFixed(1)}s bookends ={" "}
+                              {(activeDuration + bookendSeconds).toFixed(1)}s — within the{" "}
+                              {maxClipSeconds}s ceiling
+                            </span>
                           </span>
                           <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200">
                             Shorts Ready

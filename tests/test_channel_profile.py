@@ -1,7 +1,9 @@
 """Tests for Tier 3 channel brand consistency."""
 
 import base64
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -250,3 +252,111 @@ def test_brand_defaults_apply_to_staged_metadata(client, db_session):
     assert selection["tags"][:2] == ["Shorts", "NightOwl"]
     assert selection["privacy"] == "unlisted"
     assert "#NightOwl" in selection["description"]
+
+
+def test_duration_budget_resolves_from_profile(client, db_session, monkeypatch):
+    """Clip ceiling lives on the profile and subtracts branded bookends."""
+    from app.rendering.config import DurationBudget
+    from app.services.channel_profile import ChannelProfileService
+
+    # Branding off by default -> no bookends, default ceiling.
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget == DurationBudget(max_seconds=90.0, bookend_seconds=0.0)
+    assert budget.clip_budget == 90.0
+
+    # Turn bookends on: the ceiling is shared by intro + outro.
+    client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={
+            "branding_enabled": True,
+            "branding_intro_seconds": 1.2,
+            "branding_outro_seconds": 2.0,
+            "max_clip_seconds": 90.0,
+        },
+    )
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget.bookend_seconds == pytest.approx(3.2)
+    assert budget.clip_budget == pytest.approx(86.8)
+    assert budget.is_uploadable(86.8) is True
+    assert budget.is_uploadable(86.9) is False
+
+    # A creator can raise the ceiling for longer-form uploads.
+    client.put(
+        f"{settings.API_PREFIX}/channel/profile", json={"max_clip_seconds": 120.0}
+    )
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget.max_seconds == 120.0
+    assert budget.clip_budget == pytest.approx(116.8)
+
+    # Legacy rows fall back to the env settings instead of 0/None.
+    monkeypatch.setattr(settings, "MAX_CLIP_SECONDS", 75.0)
+    monkeypatch.setattr(settings, "BRANDING_ENABLED", True)
+    monkeypatch.setattr(settings, "BRANDING_INTRO_SECONDS", 1.0)
+    monkeypatch.setattr(settings, "BRANDING_OUTRO_SECONDS", 1.0)
+    from app.models.channel_profile import ChannelProfile
+
+    profile = ChannelProfileService.get_or_create(db_session)
+    for column in ChannelProfile.__table__.columns:
+        if column.name.startswith("branding_") or column.name == "max_clip_seconds":
+            setattr(profile, column.name, None)
+    profile.channel_name = None
+    db_session.commit()
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget.max_seconds == 75.0
+    assert budget.bookend_seconds == pytest.approx(2.0)
+    assert budget.clip_budget == pytest.approx(73.0)
+
+
+def test_channel_profile_rejects_unknown_cta_style(client):
+    """An invalid style would make every render and preview fail downstream."""
+    res = client.put(
+        f"{settings.API_PREFIX}/channel/profile", json={"cta_style": "banner"}
+    )
+    assert res.status_code == 422
+
+    res = client.put(
+        f"{settings.API_PREFIX}/channel/profile", json={"cta_style": "overlay"}
+    )
+    assert res.status_code == 200
+    assert res.json()["response"]["cta_style"] == "overlay"
+
+
+def test_legacy_unknown_cta_style_is_coerced(db_session):
+    """Rows written before validation existed must not wedge the profile."""
+    from app.services.channel_profile import ChannelProfileService
+
+    profile = ChannelProfileService.get_or_create(db_session)
+    profile.cta_style = "banner"
+    db_session.commit()
+
+    assert ChannelProfileService.cta_config(db_session).style == "outro_card"
+    response = ChannelProfileService.to_response(db_session, profile)
+    assert response.cta_style == "outro_card"
+
+
+def test_branding_preview_cleans_up_its_temp_files(client, monkeypatch):
+    """Preview PNGs are throwaway; serving one must not leak a temp directory."""
+    created: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def spy(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        created.append(Path(path))
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", spy)
+    res = client.get(
+        f"{settings.API_PREFIX}/channel/branding/preview"
+        "?kind=overlay&orientation=vertical"
+    )
+
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    assert created and all(not path.exists() for path in created)
+
+
+def test_branding_preview_rejects_unknown_parameters(client):
+    res = client.get(
+        f"{settings.API_PREFIX}/channel/branding/preview?orientation=sideways"
+    )
+    assert res.status_code == 422

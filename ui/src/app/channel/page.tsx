@@ -8,6 +8,7 @@ import {
   getChannelWatermarkUrl,
   updateChannelProfile,
   uploadChannelWatermark,
+  getApiBase,
 } from "@/lib/api";
 import { ChannelProfile, ChannelProfileUpdate } from "@/types/video";
 import {
@@ -18,6 +19,7 @@ import {
   Hash,
   Image as ImageIcon,
   Layers,
+  Mic,
   Loader2,
   Palette,
   RefreshCw,
@@ -102,6 +104,20 @@ export default function ChannelProfilePage() {
   const [brandingBackgroundColor, setBrandingBackgroundColor] =
     useState("#0B0D13");
 
+  const [maxClipSeconds, setMaxClipSeconds] = useState(90);
+  const [previewTick, setPreviewTick] = useState(0);
+
+  // CTA voiceover (TTS + bell chime)
+  const [ctaEnabled, setCtaEnabled] = useState(false);
+  const [ctaStyle, setCtaStyle] = useState("outro_card");
+  const [ctaSeconds, setCtaSeconds] = useState(3.5);
+  const [ctaHeadline, setCtaHeadline] = useState("SUBSCRIBE & TAP THE BELL");
+  const [ctaSubtitle, setCtaSubtitle] = useState("Click the bell for more clips");
+  const [ctaSpeechText, setCtaSpeechText] = useState(
+    "Subscribe to the channel and tap the bell for more clips."
+  );
+  const [ctaVoice, setCtaVoice] = useState("en-US-ChristopherNeural");
+
   const [titleTemplate, setTitleTemplate] = useState("");
   const [pinnedHashtags, setPinnedHashtags] = useState("");
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
@@ -129,6 +145,16 @@ export default function ChannelProfilePage() {
     setBrandingOutroSubtitle(data.branding_outro_subtitle || "");
     setBrandingAccentColor(data.branding_accent_color || "#F43F5E");
     setBrandingBackgroundColor(data.branding_background_color || "#0B0D13");
+    setMaxClipSeconds(data.max_clip_seconds ?? 90);
+    setCtaEnabled(Boolean(data.cta_enabled));
+    setCtaStyle(data.cta_style || "outro_card");
+    setCtaSeconds(data.cta_seconds ?? 3.5);
+    setCtaHeadline(data.cta_headline || "SUBSCRIBE & TAP THE BELL");
+    setCtaSubtitle(data.cta_subtitle || "Click the bell for more clips");
+    setCtaSpeechText(
+      data.cta_speech_text || "Subscribe to the channel and tap the bell for more clips."
+    );
+    setCtaVoice(data.cta_voice || "en-US-ChristopherNeural");
     setTitleTemplate(data.title_template || "");
     setPinnedHashtags((data.pinned_hashtags || []).join(", "));
     setDefaultPrivacy(data.default_privacy || "public");
@@ -193,6 +219,14 @@ export default function ChannelProfilePage() {
         branding_outro_subtitle: brandingOutroSubtitle.trim() || null,
         branding_accent_color: brandingAccentColor,
         branding_background_color: brandingBackgroundColor,
+        max_clip_seconds: maxClipSeconds,
+        cta_enabled: ctaEnabled,
+        cta_style: ctaStyle,
+        cta_seconds: ctaSeconds,
+        cta_headline: ctaHeadline.trim() || null,
+        cta_subtitle: ctaSubtitle.trim() || null,
+        cta_speech_text: ctaSpeechText.trim() || null,
+        cta_voice: ctaVoice.trim() || null,
         title_template: titleTemplate.trim() || null,
         pinned_hashtags: splitList(pinnedHashtags).map((h) => h.replace(/^#/, "")),
         default_privacy: defaultPrivacy,
@@ -782,6 +816,26 @@ export default function ChannelProfilePage() {
                   </label>
                 </div>
 
+                <div className="flex items-center gap-3 border-t border-white/5 pt-3">
+                  <img
+                    src={`${getApiBase()}/channel/branding/preview?kind=intro&orientation=landscape&t=${previewTick}`}
+                    alt="Intro card preview"
+                    className="h-16 w-auto rounded border border-white/10"
+                  />
+                  <img
+                    src={`${getApiBase()}/channel/branding/preview?kind=outro&orientation=landscape&t=${previewTick}`}
+                    alt="Outro card preview"
+                    className="h-16 w-auto rounded border border-white/10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTick((t) => t + 1)}
+                    className="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 cursor-pointer"
+                  >
+                    Refresh previews
+                  </button>
+                </div>
+
                 {brandingEnabled &&
                   brandingIntroSeconds + brandingOutroSeconds > 6 && (
                     <p className="text-[11px] text-amber-300/80">
@@ -789,6 +843,214 @@ export default function ChannelProfilePage() {
                       Shorts window.
                     </p>
                   )}
+              </div>
+
+              {/* Max clip length / upload ceiling */}
+              <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+                <div>
+                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-amber-400" />
+                    Max Clip Length
+                  </h2>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Hard ceiling applied to the composed clip (source window +
+                    intro/outro cards). Anything at or below it uploads as
+                    short-form; 60 / 72 / 88 are labels, never gates.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Ceiling{" "}
+                    <span className="font-mono text-amber-300">
+                      {maxClipSeconds}s
+                    </span>
+                  </label>
+                  <input
+                    type="range"
+                    min={30}
+                    max={180}
+                    step={1}
+                    value={maxClipSeconds}
+                    onChange={(e) => setMaxClipSeconds(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <span>30</span>
+                    <span>60</span>
+                    <span>72</span>
+                    <span>88</span>
+                    <span>90</span>
+                    <span>180</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {[60, 72, 88, maxClipSeconds].map((tier, idx) => (
+                    <span
+                      key={`${tier}-${idx}`}
+                      className="text-[10px] px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-mono"
+                    >
+                      {tier}s
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* CTA voiceover (TTS + bell chime) */}
+              <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Mic className="w-4 h-4 text-amber-400" />
+                      CTA Voiceover (TTS + Bell)
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Synthesises a neural voiceover plus the bell chime. The
+                      lower-third overlay burns a banner onto the last seconds of
+                      gameplay; the outro-card style speaks over your branded
+                      outro. Works independently of the intro/outro cards. Needs
+                      network on first synthesis, falls back to silence offline
+                      and retries on the next render.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={ctaEnabled}
+                      onChange={(e) => setCtaEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
+                    <span className="ml-2.5 text-xs font-semibold text-slate-300">
+                      {ctaEnabled ? "On" : "Off"}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Style
+                    </label>
+                    <select
+                      value={ctaStyle}
+                      onChange={(e) => setCtaStyle(e.target.value)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="outro_card">Outro card</option>
+                      <option value="overlay">In-video lower-third overlay</option>
+                    </select>
+                    <span className="block text-[10px] text-slate-500 mt-1">
+                      {ctaStyle === "overlay"
+                        ? "No extra runtime; the banner sits on top of the gameplay."
+                        : "Plays over the branded outro card."}
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      {ctaStyle === "overlay" ? "Overlay window" : "Voiceover length"}{" "}
+                      <span className="font-mono text-amber-300">
+                        {ctaSeconds.toFixed(1)}s
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={2}
+                      max={10}
+                      step={0.5}
+                      value={ctaSeconds}
+                      onChange={(e) => setCtaSeconds(Number(e.target.value))}
+                      className="w-full accent-amber-500"
+                    />
+                    <span className="block text-[10px] text-slate-500 mt-1">
+                      {ctaStyle === "overlay"
+                        ? "Banner and voiceover both sit in the final seconds of the clip; longer scripts are trimmed."
+                        : brandingEnabled && brandingOutro
+                          ? `Capped to the outro card length (${brandingOutroSeconds.toFixed(1)}s).`
+                          : "Capped to the outro card length; enable an outro card to use this style as intended."}
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Headline
+                    </label>
+                    <input
+                      type="text"
+                      value={ctaHeadline}
+                      onChange={(e) => setCtaHeadline(e.target.value)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={ctaSubtitle}
+                      onChange={(e) => setCtaSubtitle(e.target.value)}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {ctaEnabled && ctaStyle === "outro_card" && !(brandingEnabled && brandingOutro) ? (
+                  <p className="text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                    No outro card is enabled, so the voiceover plays over the end
+                    of the clip instead. Enable Branded Intro &amp; Outro cards for
+                    a dedicated CTA card.
+                  </p>
+                ) : null}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Speech text
+                  </label>
+                  <textarea
+                    value={ctaSpeechText}
+                    onChange={(e) => setCtaSpeechText(e.target.value)}
+                    rows={2}
+                    className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Voice
+                  </label>
+                  <input
+                    type="text"
+                    value={ctaVoice}
+                    onChange={(e) => setCtaVoice(e.target.value)}
+                    className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    edge-tts voice name, e.g. en-US-ChristopherNeural
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 border-t border-white/5 pt-3">
+                  <audio
+                    src={`${getApiBase()}/channel/assets/bell-chime`}
+                    controls
+                    className="h-8"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Preview the bell chime asset.
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <img
+                    src={`${getApiBase()}/channel/branding/preview?kind=overlay&orientation=vertical&t=${previewTick}`}
+                    alt="CTA overlay preview"
+                    className="h-24 w-auto rounded border border-white/10"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Live preview of the in-video overlay pill.
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/60 border border-white/10">

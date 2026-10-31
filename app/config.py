@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     BRANDING_TEXT_COLOR: str = "#FFFFFF"
     BRANDING_FONT_PATH: str | None = None
 
+    # Upload ceiling: clip window + branded bookends (seeds the channel profile)
+    MAX_CLIP_SECONDS: float = 90.0
+
     # Phase 10: zero-input ingest pipeline (auto-mine on download/upload)
     AUTO_MINE_ON_INGEST: bool = False
     AUTO_MINE_GAME: str | None = None

@@ -95,10 +95,54 @@ export const ManifestModal: React.FC<ManifestModalProps> = ({ manifest, onClose 
             <div className="p-3 rounded-xl bg-slate-800/60 border border-white/5">
               <span className="text-[10px] uppercase font-bold text-slate-400">Audio Mode</span>
               <p className="text-sm font-semibold text-amber-400 mt-0.5">
-                {manifest.audio_config?.has_narration ? "Voiceover" : "Original"}
+                {manifest.cta?.voiceover ?? manifest.request?.has_narration
+                  ? "Voiceover"
+                  : "Original"}
               </p>
             </div>
           </div>
+
+          {/* Branding & CTA */}
+          {manifest.branding?.enabled || manifest.cta?.enabled ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400">
+                  Branded Cards
+                </span>
+                <p className="text-sm font-semibold text-slate-100 mt-0.5">
+                  {manifest.branding?.enabled
+                    ? `${((manifest.branding.padding_seconds ?? 0)).toFixed(1)}s`
+                    : "Off"}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400">CTA Style</span>
+                <p className="text-sm font-semibold text-slate-100 mt-0.5">
+                  {manifest.cta?.enabled
+                    ? manifest.cta.style === "overlay"
+                      ? "Lower-third"
+                      : "Outro card"
+                    : "Off"}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400">CTA Voiceover</span>
+                <p className="text-sm font-semibold text-amber-400 mt-0.5">
+                  {manifest.cta?.voiceover
+                    ? `@${manifest.cta.voiceover_start_seconds ?? 0}s`
+                    : manifest.cta?.enabled
+                      ? "Silent"
+                      : "Off"}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400">CTA Voice</span>
+                <p className="text-sm font-semibold text-slate-100 mt-0.5 truncate">
+                  {manifest.cta?.enabled ? manifest.cta.voice ?? "default" : "—"}
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           {/* Formatted Code Block */}
           <div className="rounded-xl border border-white/10 bg-slate-950 p-4 overflow-x-auto text-xs font-mono text-slate-300">

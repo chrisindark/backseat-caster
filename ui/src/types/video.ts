@@ -319,6 +319,28 @@ export interface RenderManifest {
     scale?: number;
     margin?: number;
   };
+  branding?: {
+    enabled: boolean;
+    intro?: boolean;
+    outro?: boolean;
+    intro_seconds?: number;
+    outro_seconds?: number;
+    padding_seconds?: number;
+    total_duration_seconds?: number;
+    channel_name?: string | null;
+  };
+  cta?: {
+    enabled: boolean;
+    style?: "outro_card" | "overlay" | string;
+    seconds?: number;
+    overlay?: boolean;
+    headline?: string;
+    subtitle?: string;
+    speech_text?: string;
+    voice?: string;
+    voiceover?: boolean;
+    voiceover_start_seconds?: number;
+  };
   auto_staged?: boolean;
   highlight_candidate_id?: string | null;
   youtube_upload_status?: string | null;
@@ -780,6 +802,14 @@ export interface ChannelProfile {
   branding_accent_color: string;
   branding_text_color: string;
   branding_font_path?: string | null;
+  max_clip_seconds: number;
+  cta_enabled: boolean;
+  cta_style: string;
+  cta_seconds: number;
+  cta_headline: string;
+  cta_subtitle: string;
+  cta_speech_text: string;
+  cta_voice: string;
   title_template?: string | null;
   pinned_hashtags: string[];
   default_privacy: "public" | "unlisted" | "private" | string;
@@ -810,6 +840,14 @@ export interface ChannelProfileUpdate {
   branding_accent_color?: string | null;
   branding_text_color?: string | null;
   branding_font_path?: string | null;
+  max_clip_seconds?: number;
+  cta_enabled?: boolean;
+  cta_style?: string;
+  cta_seconds?: number;
+  cta_headline?: string | null;
+  cta_subtitle?: string | null;
+  cta_speech_text?: string | null;
+  cta_voice?: string | null;
   title_template?: string | null;
   pinned_hashtags?: string[];
   default_privacy?: string;

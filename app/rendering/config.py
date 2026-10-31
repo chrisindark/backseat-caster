@@ -155,6 +155,31 @@ class BrandingConfig(BaseModel):
         }
 
 
+#: Hard ceiling for a *composed* clip (source window + intro/outro cards).
+DEFAULT_MAX_CLIP_SECONDS = 90.0
+
+#: Soft checkpoints below the ceiling. Everything up to the ceiling publishes as
+#: short-form video; these only label how long a clip ended up, so a 61s or 80s
+#: result is never rejected and never silently trimmed.
+SHORTS_DURATION_TIERS: tuple[float, ...] = (60.0, 72.0, 88.0)
+
+#: Upload labels, from the shortest tier upwards.
+DURATION_TIER_LABELS: tuple[str, ...] = ("shorts", "extended", "long", "ceiling")
+OVER_CEILING_LABEL = "over_ceiling"
+
+
+class CtaConfig(BaseModel):
+    """In-video CTA overlay / outro voiceover settings."""
+
+    enabled: bool = False
+    style: Literal["outro_card", "overlay"] = "outro_card"
+    seconds: float = Field(3.5, ge=2.0, le=10.0)
+    headline: str = "SUBSCRIBE & TAP THE BELL"
+    subtitle: str = "Click the bell for more clips"
+    speech_text: str = "Subscribe to the channel and tap the bell for more clips."
+    voice: str = "en-US-ChristopherNeural"
+
+
 def default_branding_config() -> BrandingConfig:
     """Build branding defaults from application settings (env or /setup UI)."""
     return BrandingConfig(
@@ -173,6 +198,87 @@ def default_branding_config() -> BrandingConfig:
         text_color=settings.BRANDING_TEXT_COLOR,
         font_path=settings.BRANDING_FONT_PATH,
     )
+
+
+class DurationBudget(BaseModel):
+    """How much clip fits under the upload ceiling once cards are added.
+
+    The ceiling applies to the *composed* duration (clip window + intro/outro),
+    because that is what lands on YouTube. Soft tiers inside the ceiling let a
+    creator upload a 61s or 80s clip without the pipeline complaining.
+    """
+
+    max_seconds: float = Field(
+        DEFAULT_MAX_CLIP_SECONDS, gt=0, description="Ceiling for clip + bookends"
+    )
+    bookend_seconds: float = Field(
+        0.0, ge=0.0, description="Intro + outro seconds added to every render"
+    )
+    tiers: tuple[float, ...] = Field(
+        default=SHORTS_DURATION_TIERS,
+        description="Soft upload checkpoints inside the ceiling",
+    )
+
+    @property
+    def clip_budget(self) -> float:
+        """Longest source window that still fits under the ceiling."""
+        return max(1.0, round(self.max_seconds - self.bookend_seconds, 2))
+
+    def composed_seconds(self, clip_seconds: float) -> float:
+        """Duration that will actually be uploaded for a given clip window."""
+        return round(max(0.0, clip_seconds) + self.bookend_seconds, 2)
+
+    def fits(self, clip_seconds: float, *, tolerance: float = 0.05) -> bool:
+        """True when the composed clip stays at or under the ceiling."""
+        return self.composed_seconds(clip_seconds) <= self.max_seconds + tolerance
+
+    def clamp(self, clip_seconds: float) -> float:
+        """Trim a clip window so the composed clip fits the ceiling."""
+        return round(min(max(0.0, clip_seconds), self.clip_budget), 2)
+
+    def tier_for_composed(self, composed_seconds: float) -> str:
+        """Label a composed duration: shorts, extended, long, ceiling or over."""
+        for index, checkpoint in enumerate(self.tiers):
+            if composed_seconds <= checkpoint + 0.05:
+                return DURATION_TIER_LABELS[min(index, len(DURATION_TIER_LABELS) - 1)]
+        if composed_seconds <= self.max_seconds + 0.05:
+            return DURATION_TIER_LABELS[-1]
+        return OVER_CEILING_LABEL
+
+    def tier(self, clip_seconds: float) -> str:
+        """Label the composed duration produced by ``clip_seconds``."""
+        return self.tier_for_composed(self.composed_seconds(clip_seconds))
+
+    def is_uploadable(self, clip_seconds: float) -> bool:
+        """Every tier at or below the ceiling is uploadable as short-form."""
+        return self.fits(clip_seconds)
+
+    def describe(self, clip_seconds: float) -> dict[str, Any]:
+        """Serialisable summary recorded in the render manifest."""
+        return self.describe_composed(self.composed_seconds(clip_seconds))
+
+    def describe_composed(self, composed_seconds: float) -> dict[str, Any]:
+        """Same summary, starting from the duration that was actually encoded."""
+        composed = round(max(0.0, composed_seconds), 2)
+        return {
+            "max_seconds": self.max_seconds,
+            "bookend_seconds": self.bookend_seconds,
+            "clip_budget_seconds": self.clip_budget,
+            "tiers": list(self.tiers),
+            "composed_seconds": composed,
+            "tier": self.tier_for_composed(composed),
+            "uploadable": composed <= self.max_seconds + 0.05,
+        }
+
+    def over_ceiling_message(self, clip_seconds: float) -> str:
+        """Human-readable explanation for a request that is too long."""
+        composed = self.composed_seconds(clip_seconds)
+        return (
+            f"Clip window {clip_seconds:.1f}s + {self.bookend_seconds:.1f}s of branded "
+            f"bookends = {composed:.1f}s, over the {self.max_seconds:.0f}s ceiling. "
+            f"Use a window of {self.clip_budget:.1f}s or less, disable a card, or "
+            f"raise Max clip length in your channel profile."
+        )
 
 
 class RenderConfig(BaseModel):
@@ -234,6 +340,16 @@ class RenderConfig(BaseModel):
 
     # Branded intro/outro cards (Phase 10.5)
     branding: BrandingConfig = Field(default_factory=default_branding_config)
+
+    # CTA voiceover / in-video overlay
+    cta: CtaConfig = Field(default_factory=CtaConfig)
+
+    # Upload ceiling for the composed clip (source window + bookends)
+    max_total_seconds: float = Field(
+        DEFAULT_MAX_CLIP_SECONDS,
+        gt=0,
+        description="Ceiling applied to clip window + branded bookends",
+    )
 
     # Tier 3: channel watermark/logo overlay (applied to every render)
     watermark: WatermarkConfig = Field(default_factory=WatermarkConfig)

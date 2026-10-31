@@ -8,6 +8,7 @@ import {
   getChannelWatermarkUrl,
   updateChannelProfile,
   uploadChannelWatermark,
+  getApiBase,
 } from "@/lib/api";
 import { ChannelProfile, ChannelProfileUpdate } from "@/types/video";
 import {
@@ -104,6 +105,7 @@ export default function ChannelProfilePage() {
     useState("#0B0D13");
 
   const [maxClipSeconds, setMaxClipSeconds] = useState(90);
+  const [previewTick, setPreviewTick] = useState(0);
 
   // CTA voiceover (TTS + bell chime)
   const [ctaEnabled, setCtaEnabled] = useState(false);
@@ -814,6 +816,26 @@ export default function ChannelProfilePage() {
                   </label>
                 </div>
 
+                <div className="flex items-center gap-3 border-t border-white/5 pt-3">
+                  <img
+                    src={`${getApiBase()}/channel/branding/preview?kind=intro&orientation=landscape&t=${previewTick}`}
+                    alt="Intro card preview"
+                    className="h-16 w-auto rounded border border-white/10"
+                  />
+                  <img
+                    src={`${getApiBase()}/channel/branding/preview?kind=outro&orientation=landscape&t=${previewTick}`}
+                    alt="Outro card preview"
+                    className="h-16 w-auto rounded border border-white/10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTick((t) => t + 1)}
+                    className="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 cursor-pointer"
+                  >
+                    Refresh previews
+                  </button>
+                </div>
+
                 {brandingEnabled &&
                   brandingIntroSeconds + brandingOutroSeconds > 6 && (
                     <p className="text-[11px] text-amber-300/80">
@@ -982,6 +1004,28 @@ export default function ChannelProfilePage() {
                   />
                   <span className="text-[10px] text-slate-500">
                     edge-tts voice name, e.g. en-US-ChristopherNeural
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 border-t border-white/5 pt-3">
+                  <audio
+                    src={`${getApiBase()}/channel/assets/bell-chime`}
+                    controls
+                    className="h-8"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Preview the bell chime asset.
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <img
+                    src={`${getApiBase()}/channel/branding/preview?kind=overlay&orientation=vertical&t=${previewTick}`}
+                    alt="CTA overlay preview"
+                    className="h-24 w-auto rounded border border-white/10"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Live preview of the in-video overlay pill.
                   </span>
                 </div>
               </div>

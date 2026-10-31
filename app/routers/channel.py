@@ -114,3 +114,85 @@ def get_channel_watermark(db: Session = Depends(get_db)):
         ".webp": "image/webp",
     }.get(path.suffix.lower(), "application/octet-stream")
     return FileResponse(path=path, media_type=media_type)
+
+
+@router.get("/assets/bell-chime")
+def get_bell_chime():
+    """Stream the bundled bell chime so creators can hear it before enabling CTA."""
+    from app.services.tts import _find_bell
+
+    path = _find_bell()
+    if path is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No bell chime asset found (expected data/bell_chime.wav).",
+        )
+    return FileResponse(path=path, media_type="audio/wav", filename=path.name)
+
+
+@router.get("/branding/preview")
+def preview_branding_card(
+    kind: str = "intro",
+    orientation: str = "landscape",
+    db: Session = Depends(get_db),
+):
+    """Render a sample card/overlay PNG with the current profile branding."""
+    import tempfile
+    from pathlib import Path
+
+    from app.rendering.branding import (
+        render_card_png,
+        render_cta_overlay_png,
+    )
+    from app.services.channel_profile import ChannelProfileService
+
+    branding = ChannelProfileService.branding_config(db)
+    cta = ChannelProfileService.cta_config(db)
+
+    if orientation == "vertical":
+        size = (1080, 1920)
+    else:
+        size = (1920, 1080)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="brand_preview_"))
+    out_path = tmp_dir / f"{kind}_{orientation}.png"
+
+    if kind == "intro":
+        render_card_png(
+            out_path,
+            size=size,
+            title=branding.resolved_intro_title(),
+            subtitle=branding.intro_subtitle,
+            background=branding.background_color,
+            accent=branding.accent_color,
+            text_color=branding.text_color,
+            font_path=branding.font_path,
+        )
+    elif kind == "outro":
+        render_card_png(
+            out_path,
+            size=size,
+            title=branding.outro_title or "SUBSCRIBE",
+            subtitle=branding.resolved_outro_subtitle(),
+            background=branding.background_color,
+            accent=branding.accent_color,
+            text_color=branding.text_color,
+            font_path=branding.font_path,
+        )
+    elif kind == "overlay":
+        render_cta_overlay_png(
+            out_path,
+            size=size,
+            headline=cta.headline,
+            subtitle=cta.subtitle,
+            accent=branding.accent_color,
+            text_color=branding.text_color,
+            font_path=branding.font_path,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown preview kind: {kind}",
+        )
+
+    return FileResponse(path=out_path, media_type="image/png")

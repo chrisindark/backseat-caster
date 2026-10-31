@@ -20,6 +20,7 @@ from app.rendering.branding import (
     build_branding_plan,
     build_card_video_filter,
     build_concat_filter,
+    render_cta_overlay_png,
 )
 from app.rendering.config import (
     CROP_PADDING_PRESETS,
@@ -410,6 +411,58 @@ class RenderEngine:
                 card_inputs[mode_name] = (intro_idx, outro_idx)
             progress_duration = duration_seconds + branding_plan.padding_seconds
 
+        # CTA in-video overlay (Mode A): a transparent lower-third pill shown
+        # for the last `cta_seconds` of the gameplay segment.
+        cta_overlay_active = (
+            bool(self.config.cta.enabled) and self.config.cta.style == "overlay"
+        )
+        overlay_inputs: dict[str, int] = {}
+        overlay_dir: Path | None = None
+        if cta_overlay_active:
+            _out_dir = (
+                list(targets.values())[0].parent
+                if isinstance(targets, dict) and targets
+                else None
+            )
+            if _out_dir is None:
+                _out_dir = Path(".")
+            overlay_dir = _out_dir / ".cta_overlay"
+            overlay_dir.mkdir(parents=True, exist_ok=True)
+            overlay_seconds = float(self.config.cta.seconds)
+            for mode_name in modes:
+                is_landscape = mode_name == "landscape"
+                ow = (
+                    self.config.landscape_width
+                    if is_landscape
+                    else self.config.vertical_width
+                )
+                oh = (
+                    self.config.landscape_height
+                    if is_landscape
+                    else self.config.vertical_height
+                )
+                overlay_path = render_cta_overlay_png(
+                    overlay_dir / f"{mode_name}_cta.png",
+                    size=(ow, oh),
+                    headline=self.config.cta.headline,
+                    subtitle=self.config.cta.subtitle,
+                    accent=self.config.branding.accent_color,
+                    text_color=self.config.branding.text_color,
+                    font_path=self.config.branding.font_path,
+                )
+                cmd.extend(
+                    [
+                        "-loop",
+                        "1",
+                        "-t",
+                        f"{overlay_seconds:.3f}",
+                        "-i",
+                        str(overlay_path),
+                    ]
+                )
+                overlay_inputs[mode_name] = next_input_index
+                next_input_index += 1
+
         # Tier 3: channel watermark. One still-image input per target keeps the
         # single-pass render intact and lets each output scale the logo for its
         # own orientation.
@@ -596,6 +649,20 @@ class RenderEngine:
                         fps=source_fps,
                     )
                 )
+
+            # CTA in-video overlay: composite the lower-third pill onto the
+            # gameplay segment for the last `cta_seconds` of the clip.
+            cta_overlay_idx = overlay_inputs.get(mode_name)
+            if cta_overlay_idx is not None:
+                start_time = max(0.0, duration_seconds - float(self.config.cta.seconds))
+                overlay_label = f"v_cta_overlay_{i}"
+                filter_parts.append(
+                    f"[{v_composed}][{cta_overlay_idx}:v]overlay="
+                    f"(W-w)/2:H-h-{max(8, oh // 20)}:"
+                    f"enable='between(t,{start_time:.3f},{duration_seconds:.3f})'"
+                    f"[{overlay_label}]"
+                )
+                v_composed = overlay_label
 
             # concat refuses links whose SAR differs, and the crop/blur filters
             # inherit the source's (often non-square) sample aspect ratio while
@@ -943,6 +1010,17 @@ class RenderEngine:
         finally:
             if branding_plan is not None:
                 branding_plan.cleanup()
+            _overlay_dir = locals().get("overlay_dir")
+            if _overlay_dir is not None and _overlay_dir.exists():
+                for leftover in _overlay_dir.glob("*.png"):
+                    try:
+                        leftover.unlink()
+                    except OSError:
+                        pass
+                try:
+                    _overlay_dir.rmdir()
+                except OSError:
+                    pass
 
         api_prefix = self.config.api_prefix
         outputs_meta: dict[str, dict[str, Any]] = {}

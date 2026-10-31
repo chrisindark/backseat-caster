@@ -43,6 +43,10 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1";
 
+export function getApiBase(): string {
+  return API_BASE;
+}
+
 async function parseResponse<T>(res: Response, fallbackActionName: string): Promise<T> {
   if (!res.ok) {
     let errMsg = `${res.status} ${res.statusText}`;

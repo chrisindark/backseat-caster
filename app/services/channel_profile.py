@@ -15,6 +15,7 @@ from app.rendering.config import (
     CROP_PADDING_PRESETS,
     QUALITY_PRESETS,
     BrandingConfig,
+    CtaConfig,
     DurationBudget,
     WatermarkConfig,
     default_branding_config,
@@ -339,6 +340,25 @@ class ChannelProfileService:
         return DurationBudget(
             max_seconds=round(float(ceiling), 2),
             bookend_seconds=round(float(bookends), 2),
+        )
+
+    @classmethod
+    def cta_config(cls, db: Session) -> CtaConfig:
+        """Resolve the profile's CTA (voiceover / overlay) settings."""
+        profile = cls.get_or_create(db)
+        return CtaConfig(
+            enabled=bool(profile.cta_enabled)
+            if profile.cta_enabled is not None
+            else False,
+            style=profile.cta_style or "outro_card",
+            seconds=float(profile.cta_seconds)
+            if profile.cta_seconds is not None
+            else 3.5,
+            headline=profile.cta_headline or "SUBSCRIBE & TAP THE BELL",
+            subtitle=profile.cta_subtitle or "Click the bell for more clips",
+            speech_text=profile.cta_speech_text
+            or "Subscribe to the channel and tap the bell for more clips.",
+            voice=profile.cta_voice or "en-US-ChristopherNeural",
         )
 
     @classmethod

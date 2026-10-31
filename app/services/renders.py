@@ -1247,15 +1247,20 @@ class RenderService:
                     )
                     if cta_audio is not None:
                         cta_narration_path = cta_audio
-                        cta_narration_start = float(job.duration_seconds or 0.0)
-                        outro_seconds = (
-                            branding_config.outro_seconds
-                            if branding_config.has_outro
-                            else 0.0
-                        )
-                        cta_audio_total = float(job.duration_seconds or 0.0) + float(
-                            outro_seconds
-                        )
+                        clip_seconds = float(job.duration_seconds or 0.0)
+                        if getattr(profile, "cta_style", "outro_card") == "overlay":
+                            cta_narration_start = max(
+                                0.0, clip_seconds - float(profile.cta_seconds or 3.5)
+                            )
+                            cta_audio_total = clip_seconds
+                        else:
+                            cta_narration_start = clip_seconds
+                            outro_seconds = (
+                                branding_config.outro_seconds
+                                if branding_config.has_outro
+                                else 0.0
+                            )
+                            cta_audio_total = clip_seconds + float(outro_seconds)
                         logger.info(
                             "CTA voiceover enabled for %s: %s (starts at %.1fs)",
                             job.clip_id,
@@ -1284,6 +1289,7 @@ class RenderService:
                 api_prefix=settings.API_PREFIX,
                 watermark=ChannelProfileService.watermark_config(db),
                 branding=branding_config,
+                cta=ChannelProfileService.cta_config(db),
                 max_total_seconds=duration_budget.max_seconds,
             )
             engine = RenderEngine(config=config)

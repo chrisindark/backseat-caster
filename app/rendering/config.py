@@ -168,6 +168,18 @@ DURATION_TIER_LABELS: tuple[str, ...] = ("shorts", "extended", "long", "ceiling"
 OVER_CEILING_LABEL = "over_ceiling"
 
 
+class CtaConfig(BaseModel):
+    """In-video CTA overlay / outro voiceover settings."""
+
+    enabled: bool = False
+    style: Literal["outro_card", "overlay"] = "outro_card"
+    seconds: float = Field(3.5, ge=2.0, le=10.0)
+    headline: str = "SUBSCRIBE & TAP THE BELL"
+    subtitle: str = "Click the bell for more clips"
+    speech_text: str = "Subscribe to the channel and tap the bell for more clips."
+    voice: str = "en-US-ChristopherNeural"
+
+
 def default_branding_config() -> BrandingConfig:
     """Build branding defaults from application settings (env or /setup UI)."""
     return BrandingConfig(
@@ -328,6 +340,9 @@ class RenderConfig(BaseModel):
 
     # Branded intro/outro cards (Phase 10.5)
     branding: BrandingConfig = Field(default_factory=default_branding_config)
+
+    # CTA voiceover / in-video overlay
+    cta: CtaConfig = Field(default_factory=CtaConfig)
 
     # Upload ceiling for the composed clip (source window + bookends)
     max_total_seconds: float = Field(

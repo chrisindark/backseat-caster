@@ -99,6 +99,102 @@ def _fit_font(
     return resolve_font(16, font_path)
 
 
+def render_cta_overlay_png(
+    path: Path,
+    *,
+    size: tuple[int, int],
+    headline: str,
+    subtitle: str = "",
+    accent: str = "#F43F5E",
+    text_color: str = "#FFFFFF",
+    font_path: str | None = None,
+) -> Path:
+    """Draw a transparent lower-third pill (bell + headline + subtitle)."""
+    from PIL import Image, ImageDraw
+
+    width, height = max(2, int(size[0])), max(2, int(size[1]))
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    short_edge = min(width, height)
+    pill_w = int(width * 0.78)
+    pill_h = int(short_edge * 0.16)
+    margin = int(short_edge * 0.06)
+    pill_x0 = (width - pill_w) // 2
+    pill_y0 = height - pill_h - margin
+    pill_x1 = pill_x0 + pill_w
+    pill_y1 = pill_y0 + pill_h
+
+    # Semi-transparent dark pill with accent border.
+    draw.rounded_rectangle(
+        [pill_x0, pill_y0, pill_x1, pill_y1],
+        radius=pill_h // 2,
+        fill=(11, 13, 19, 210),
+        outline=hex_to_rgb(accent, DEFAULT_ACCENT),
+        width=max(2, short_edge // 120),
+    )
+
+    accent_rgb = hex_to_rgb(accent, DEFAULT_ACCENT)
+    text_rgb = hex_to_rgb(text_color, DEFAULT_TEXT)
+
+    # Bell icon on the left.
+    bell_cx = pill_x0 + int(pill_h * 0.9)
+    bell_cy = pill_y0 + pill_h // 2
+    bell_r = int(pill_h * 0.32)
+    draw.ellipse(
+        [bell_cx - bell_r, bell_cy - bell_r, bell_cx + bell_r, bell_cy + bell_r],
+        fill=accent_rgb,
+    )
+    # Clapper
+    draw.rectangle(
+        [
+            bell_cx - bell_r // 3,
+            bell_cy + bell_r - 2,
+            bell_cx + bell_r // 3,
+            bell_cy + bell_r + bell_r // 2,
+        ],
+        fill=accent_rgb,
+    )
+
+    # Text block.
+    headline = (headline or "SUBSCRIBE").strip()
+    sub = (subtitle or "").strip()
+    title_font = _fit_font(headline, int(pill_w * 0.55), int(pill_h * 0.42), font_path)
+    title_box = draw.textbbox((0, 0), headline, font=title_font)
+    title_h = title_box[3] - title_box[1]
+
+    sub_font = None
+    sub_h = 0
+    gap = int(short_edge * 0.012) if sub else 0
+    if sub:
+        sub_font = _fit_font(sub, int(pill_w * 0.55), int(pill_h * 0.26), font_path)
+        sub_box = draw.textbbox((0, 0), sub, font=sub_font)
+        sub_h = sub_box[3] - sub_box[1]
+
+    text_block_h = title_h + (gap + sub_h if sub else 0)
+    text_x = bell_cx + bell_r + int(pill_h * 0.35)
+    text_y = pill_y0 + (pill_h - text_block_h) // 2
+    draw.text(
+        (text_x - title_box[0], text_y - title_box[1]),
+        headline,
+        font=title_font,
+        fill=text_rgb,
+    )
+    if sub and sub_font:
+        sub_y = text_y + title_h + gap
+        sub_box = draw.textbbox((0, 0), sub, font=sub_font)
+        draw.text(
+            (text_x - sub_box[0], sub_y - sub_box[1]),
+            sub,
+            font=sub_font,
+            fill=accent_rgb,
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path, "PNG")
+    return path
+
+
 def render_card_png(
     path: Path,
     *,
@@ -142,7 +238,7 @@ def render_card_png(
     if sub:
         sub_font = _fit_font(sub, int(width * 0.74), int(short_edge * 0.055), font_path)
         sub_box = draw.textbbox((0, 0), sub, font=sub_font)
-        sub_w, sub_h = sub_box[2] - sub_box[0], sub_box[3] - sub_box[1]
+        sub_h = sub_box[3] - sub_box[1]
         block_h += gap + sub_h
 
     cursor_y = (height - block_h) / 2

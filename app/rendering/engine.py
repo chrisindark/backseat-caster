@@ -24,6 +24,7 @@ from app.rendering.branding import (
 from app.rendering.config import (
     CROP_PADDING_PRESETS,
     BrandingConfig,
+    DurationBudget,
     RenderConfig,
     default_render_config,
 )
@@ -151,6 +152,13 @@ class RenderEngine:
 
     def __init__(self, config: RenderConfig | None = None):
         self.config = config or default_render_config
+
+    def _duration_budget(self, *, bookend_seconds: float = 0.0) -> DurationBudget:
+        """Upload budget for this render (ceiling minus the cards it adds)."""
+        return DurationBudget(
+            max_seconds=self.config.max_total_seconds,
+            bookend_seconds=bookend_seconds,
+        )
 
     def _render_single_target(
         self,
@@ -898,6 +906,15 @@ class RenderEngine:
             branding_plan.padding_seconds if branding_plan else 0.0
         )
 
+        duration_budget = self._duration_budget(
+            bookend_seconds=branding_plan.padding_seconds if branding_plan else 0.0
+        )
+        if branding_plan is not None and not duration_budget.fits(effective_duration):
+            logger.warning(
+                "Branded clip exceeds the upload ceiling: %s",
+                duration_budget.over_ceiling_message(effective_duration),
+            )
+
         # 5. Execute Single-Pass Multi-Target Render
         if progress_callback:
             progress_callback(
@@ -1026,6 +1043,7 @@ class RenderEngine:
                 if effective_branding is not None
                 else {"enabled": False}
             ),
+            duration_budget=duration_budget.describe_composed(total_duration),
         )
         files_created.append(str(manifest_file))
 

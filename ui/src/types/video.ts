@@ -780,6 +780,7 @@ export interface ChannelProfile {
   branding_accent_color: string;
   branding_text_color: string;
   branding_font_path?: string | null;
+  max_clip_seconds: number;
   title_template?: string | null;
   pinned_hashtags: string[];
   default_privacy: "public" | "unlisted" | "private" | string;
@@ -810,6 +811,7 @@ export interface ChannelProfileUpdate {
   branding_accent_color?: string | null;
   branding_text_color?: string | null;
   branding_font_path?: string | null;
+  max_clip_seconds?: number;
   title_template?: string | null;
   pinned_hashtags?: string[];
   default_privacy?: string;

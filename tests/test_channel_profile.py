@@ -250,3 +250,56 @@ def test_brand_defaults_apply_to_staged_metadata(client, db_session):
     assert selection["tags"][:2] == ["Shorts", "NightOwl"]
     assert selection["privacy"] == "unlisted"
     assert "#NightOwl" in selection["description"]
+
+
+def test_duration_budget_resolves_from_profile(client, db_session, monkeypatch):
+    """Clip ceiling lives on the profile and subtracts branded bookends."""
+    from app.rendering.config import DurationBudget
+    from app.services.channel_profile import ChannelProfileService
+
+    # Branding off by default -> no bookends, default ceiling.
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget == DurationBudget(max_seconds=90.0, bookend_seconds=0.0)
+    assert budget.clip_budget == 90.0
+
+    # Turn bookends on: the ceiling is shared by intro + outro.
+    client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={
+            "branding_enabled": True,
+            "branding_intro_seconds": 1.2,
+            "branding_outro_seconds": 2.0,
+            "max_clip_seconds": 90.0,
+        },
+    )
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget.bookend_seconds == pytest.approx(3.2)
+    assert budget.clip_budget == pytest.approx(86.8)
+    assert budget.is_uploadable(86.8) is True
+    assert budget.is_uploadable(86.9) is False
+
+    # A creator can raise the ceiling for longer-form uploads.
+    client.put(
+        f"{settings.API_PREFIX}/channel/profile", json={"max_clip_seconds": 120.0}
+    )
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget.max_seconds == 120.0
+    assert budget.clip_budget == pytest.approx(116.8)
+
+    # Legacy rows fall back to the env settings instead of 0/None.
+    monkeypatch.setattr(settings, "MAX_CLIP_SECONDS", 75.0)
+    monkeypatch.setattr(settings, "BRANDING_ENABLED", True)
+    monkeypatch.setattr(settings, "BRANDING_INTRO_SECONDS", 1.0)
+    monkeypatch.setattr(settings, "BRANDING_OUTRO_SECONDS", 1.0)
+    from app.models.channel_profile import ChannelProfile
+
+    profile = ChannelProfileService.get_or_create(db_session)
+    for column in ChannelProfile.__table__.columns:
+        if column.name.startswith("branding_") or column.name == "max_clip_seconds":
+            setattr(profile, column.name, None)
+    profile.channel_name = None
+    db_session.commit()
+    budget = ChannelProfileService.duration_budget(db_session)
+    assert budget.max_seconds == 75.0
+    assert budget.bookend_seconds == pytest.approx(2.0)
+    assert budget.clip_budget == pytest.approx(73.0)

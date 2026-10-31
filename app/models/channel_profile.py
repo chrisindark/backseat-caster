@@ -53,6 +53,9 @@ class ChannelProfile(Base):
     branding_text_color = Column(String(16), nullable=True)
     branding_font_path = Column(String(1024), nullable=True)
 
+    # Upload ceiling for clip + branded bookends
+    max_clip_seconds = Column(Float, nullable=True)
+
     # Publishing defaults
     title_template = Column(String(255), nullable=True)
     pinned_hashtags = Column(Text, nullable=True)  # JSON-encoded list[str]

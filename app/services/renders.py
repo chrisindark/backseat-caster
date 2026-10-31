@@ -161,6 +161,13 @@ class RenderService:
         if resolved_quality not in QUALITY_PRESETS:
             resolved_quality = "high"
 
+        # The upload ceiling covers clip + branded bookends, so validate the
+        # composed duration here instead of letting a too-long clip render.
+        budget = ChannelProfileService.duration_budget(db)
+        requested_duration = float(request.duration_seconds)
+        if not budget.fits(requested_duration):
+            raise RuntimeError(budget.over_ceiling_message(requested_duration))
+
         clip_id = (
             request.clip_id
             or f"clip_{request.video_id}_{int(request.start_seconds)}s_{int(request.duration_seconds)}s"
@@ -1223,6 +1230,7 @@ class RenderService:
                 resolved_quality = "high"
 
             branding_config = ChannelProfileService.branding_config(db)
+            duration_budget = ChannelProfileService.duration_budget(db)
 
             config = RenderConfig(
                 preferred_encoder=job.encoder,
@@ -1241,6 +1249,7 @@ class RenderService:
                 api_prefix=settings.API_PREFIX,
                 watermark=ChannelProfileService.watermark_config(db),
                 branding=branding_config,
+                max_total_seconds=duration_budget.max_seconds,
             )
             engine = RenderEngine(config=config)
 
@@ -1290,13 +1299,25 @@ class RenderService:
                     result.branding_outro_seconds,
                     result.total_duration_seconds,
                 )
-                if result.total_duration_seconds > 60.5:
-                    logger.warning(
-                        "Clip %s is %.1fs after branding, which exceeds the 60s "
-                        "Shorts limit; shorten the clip window or the bookends",
-                        job.clip_id,
-                        result.total_duration_seconds,
-                    )
+            composed = result.total_duration_seconds
+            tier = duration_budget.tier_for_composed(composed)
+            if composed > duration_budget.max_seconds + 0.05:
+                logger.warning(
+                    "Clip %s is %.1fs, over the %.0fs ceiling; shorten the clip "
+                    "window or the bookends before publishing",
+                    job.clip_id,
+                    composed,
+                    duration_budget.max_seconds,
+                )
+            else:
+                logger.info(
+                    "Clip %s is %.1fs composed (tier: %s, budget: %.1fs of %.0fs)",
+                    job.clip_id,
+                    composed,
+                    tier,
+                    duration_budget.bookend_seconds,
+                    duration_budget.max_seconds,
+                )
 
             prefix = settings.API_PREFIX
             if result.clamped and result.effective_duration_seconds > 0:

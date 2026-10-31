@@ -21,6 +21,7 @@ from app.config import settings
 from app.database import get_task_db_session
 from app.models.render_job import RenderJob
 from app.models.video import Video
+from app.rendering.config import DEFAULT_MAX_CLIP_SECONDS
 from app.schemas.youtube import (
     YouTubeAuthStatusResponse,
     YouTubeAuthUrlResponse,
@@ -591,12 +592,16 @@ class YouTubeUploaderService:
             )
 
             # Determine whether this is a YouTube Short
-            # YouTube Shorts criteria: vertical / square aspect ratio and <= 60 seconds (or <= 3 mins).
+            # Short-form criteria: vertical/square aspect ratio and within the
+            # upload ceiling (clip + branded bookends), 90s by default.
+            budget_meta = manifest_data.get("duration_budget") or {}
+            composed_duration = budget_meta.get("composed_seconds")
             duration = (
-                job.duration_seconds
-                if job
-                else (
-                    manifest_data.get("request", {}).get("duration_seconds")
+                float(composed_duration)
+                if composed_duration
+                else float(
+                    (job.duration_seconds if job else None)
+                    or manifest_data.get("request", {}).get("duration_seconds")
                     or manifest_data.get("clip", {}).get("duration_seconds")
                     or 15.0
                 )
@@ -612,7 +617,8 @@ class YouTubeUploaderService:
 
             target_is_short = is_short
             if target_is_short is None:
-                target_is_short = is_vertical and (duration <= 60.0)
+                # Short-form covers the whole upload ceiling, not just 60s.
+                target_is_short = is_vertical and (duration <= DEFAULT_MAX_CLIP_SECONDS)
 
             # Prepare title
             parent_video = (

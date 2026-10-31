@@ -102,6 +102,8 @@ export default function ChannelProfilePage() {
   const [brandingBackgroundColor, setBrandingBackgroundColor] =
     useState("#0B0D13");
 
+  const [maxClipSeconds, setMaxClipSeconds] = useState(90);
+
   const [titleTemplate, setTitleTemplate] = useState("");
   const [pinnedHashtags, setPinnedHashtags] = useState("");
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
@@ -129,6 +131,7 @@ export default function ChannelProfilePage() {
     setBrandingOutroSubtitle(data.branding_outro_subtitle || "");
     setBrandingAccentColor(data.branding_accent_color || "#F43F5E");
     setBrandingBackgroundColor(data.branding_background_color || "#0B0D13");
+    setMaxClipSeconds(data.max_clip_seconds ?? 90);
     setTitleTemplate(data.title_template || "");
     setPinnedHashtags((data.pinned_hashtags || []).join(", "));
     setDefaultPrivacy(data.default_privacy || "public");
@@ -193,6 +196,7 @@ export default function ChannelProfilePage() {
         branding_outro_subtitle: brandingOutroSubtitle.trim() || null,
         branding_accent_color: brandingAccentColor,
         branding_background_color: brandingBackgroundColor,
+        max_clip_seconds: maxClipSeconds,
         title_template: titleTemplate.trim() || null,
         pinned_hashtags: splitList(pinnedHashtags).map((h) => h.replace(/^#/, "")),
         default_privacy: defaultPrivacy,
@@ -789,6 +793,58 @@ export default function ChannelProfilePage() {
                       Shorts window.
                     </p>
                   )}
+              </div>
+
+              {/* Max clip length / upload ceiling */}
+              <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+                <div>
+                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-amber-400" />
+                    Max Clip Length
+                  </h2>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Hard ceiling applied to the composed clip (source window +
+                    intro/outro cards). Anything at or below it uploads as
+                    short-form; 60 / 72 / 88 are labels, never gates.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Ceiling{" "}
+                    <span className="font-mono text-amber-300">
+                      {maxClipSeconds}s
+                    </span>
+                  </label>
+                  <input
+                    type="range"
+                    min={30}
+                    max={180}
+                    step={1}
+                    value={maxClipSeconds}
+                    onChange={(e) => setMaxClipSeconds(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <span>30</span>
+                    <span>60</span>
+                    <span>72</span>
+                    <span>88</span>
+                    <span>90</span>
+                    <span>180</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {[60, 72, 88, maxClipSeconds].map((tier, idx) => (
+                    <span
+                      key={`${tier}-${idx}`}
+                      className="text-[10px] px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 font-mono"
+                    >
+                      {tier}s
+                    </span>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/60 border border-white/10">

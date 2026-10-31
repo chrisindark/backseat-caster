@@ -57,6 +57,7 @@ class ChannelProfileResponse(BaseModel):
     branding_accent_color: str = "#F43F5E"
     branding_text_color: str = "#FFFFFF"
     branding_font_path: str | None = None
+    max_clip_seconds: float = 90.0
 
     title_template: str | None = None
     pinned_hashtags: list[str] = Field(default_factory=list)
@@ -97,6 +98,7 @@ class ChannelProfileUpdate(BaseModel):
     branding_accent_color: str | None = Field(None, max_length=16)
     branding_text_color: str | None = Field(None, max_length=16)
     branding_font_path: str | None = Field(None, max_length=1024)
+    max_clip_seconds: float | None = Field(None, ge=15.0, le=300.0)
 
     title_template: str | None = Field(None, max_length=255)
     pinned_hashtags: list[str] | None = None

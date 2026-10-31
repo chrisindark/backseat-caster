@@ -15,6 +15,7 @@ from app.rendering.config import (
     CROP_PADDING_PRESETS,
     QUALITY_PRESETS,
     BrandingConfig,
+    DurationBudget,
     WatermarkConfig,
     default_branding_config,
 )
@@ -115,6 +116,7 @@ class ChannelProfileService:
             default_privacy="public",
             upload_slots=json.dumps(_default_slots()),
             upload_timezone=(settings.AUTO_STAGE_TIMEZONE or "UTC").strip() or "UTC",
+            max_clip_seconds=float(settings.MAX_CLIP_SECONDS),
             **cls._branding_seed_values(),
         )
         db.add(profile)
@@ -189,6 +191,7 @@ class ChannelProfileService:
             branding_accent_color=branding.accent_color,
             branding_text_color=branding.text_color,
             branding_font_path=branding.font_path,
+            max_clip_seconds=cls.duration_budget(db).max_seconds,
             title_template=profile.title_template,
             pinned_hashtags=normalize_hashtags(_json_list(profile.pinned_hashtags)),
             default_privacy=profile.default_privacy or "public",
@@ -293,6 +296,26 @@ class ChannelProfileService:
             accent_color=str(pick("accent_color", env.accent_color)),
             text_color=str(pick("text_color", env.text_color)),
             font_path=pick("font_path", env.font_path) or None,
+        )
+
+    @classmethod
+    def duration_budget(cls, db: Session) -> DurationBudget:
+        """Resolve how long a clip may be once branded bookends are added.
+
+        ``max_clip_seconds`` is nullable so profiles created before the ceiling
+        existed fall back to ``MAX_CLIP_SECONDS`` (90s by default).
+        """
+        profile = cls.get_or_create(db)
+        branding = cls.branding_config(db)
+        bookends = (branding.intro_seconds if branding.has_intro else 0.0) + (
+            branding.outro_seconds if branding.has_outro else 0.0
+        )
+        ceiling = profile.max_clip_seconds
+        if ceiling is None:
+            ceiling = settings.MAX_CLIP_SECONDS
+        return DurationBudget(
+            max_seconds=round(float(ceiling), 2),
+            bookend_seconds=round(float(bookends), 2),
         )
 
     @classmethod

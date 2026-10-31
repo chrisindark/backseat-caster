@@ -359,7 +359,7 @@ class TestBrandedRender:
 def test_execute_render_job_applies_configured_branding(
     monkeypatch, brand_assets, tmp_path
 ):
-    """Branding is read from settings inside the job, not passed per request."""
+    """Branding comes from the channel profile inside the job, not per request."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -368,6 +368,8 @@ def test_execute_render_job_applies_configured_branding(
     from app.database import Base
     from app.models.render_job import RenderJob
     from app.models.video import Video
+    from app.schemas.channel import ChannelProfileUpdate
+    from app.services.channel_profile import ChannelProfileService
     from app.services.renders import RenderService
 
     engine = create_engine(
@@ -379,10 +381,17 @@ def test_execute_render_job_applies_configured_branding(
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
         monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path / "renders"))
-        monkeypatch.setattr(settings, "BRANDING_ENABLED", True)
-        monkeypatch.setattr(settings, "BRANDING_CHANNEL_NAME", "@BackseatCaster")
-        monkeypatch.setattr(settings, "BRANDING_INTRO_SECONDS", 1.0)
-        monkeypatch.setattr(settings, "BRANDING_OUTRO_SECONDS", 2.0)
+
+        # The creator turns bookends on in the channel profile.
+        ChannelProfileService.update(
+            session,
+            ChannelProfileUpdate(
+                channel_name="@BackseatCaster",
+                branding_enabled=True,
+                branding_intro_seconds=1.0,
+                branding_outro_seconds=2.0,
+            ),
+        )
 
         video = Video(
             id="brand_vod",

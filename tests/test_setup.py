@@ -78,55 +78,27 @@ def test_get_and_patch_runtime_settings(tmp_path, monkeypatch):
     assert test_settings_file.exists()
 
 
-def test_branding_settings_round_trip(tmp_path, monkeypatch):
-    """Branded bookends are editable at runtime and feed the render defaults."""
-    from app.config import settings
-    from app.rendering.config import default_branding_config
+def test_setup_settings_do_not_own_branding(tmp_path, monkeypatch):
+    """Branded bookends live in the channel profile, not the setup settings."""
+    import json as jsonlib
 
     test_settings_file = tmp_path / "settings.json"
     monkeypatch.setattr(
         SettingsManager, "get_persisted_settings_path", lambda: test_settings_file
     )
-    # Keep the shared settings object clean for any test that runs afterwards.
-    for attr in (
-        "BRANDING_ENABLED",
-        "BRANDING_CHANNEL_NAME",
-        "BRANDING_INTRO_ENABLED",
-        "BRANDING_OUTRO_ENABLED",
-        "BRANDING_INTRO_SECONDS",
-        "BRANDING_OUTRO_SECONDS",
-        "BRANDING_ACCENT_COLOR",
-    ):
-        monkeypatch.setattr(settings, attr, getattr(settings, attr))
 
     initial = client.get("/api/v1/setup/settings").json()["response"]
-    assert initial["branding_enabled"] is False
-    assert initial["branding_outro_title"] == "SUBSCRIBE"
+    assert not any(key.startswith("branding_") for key in initial)
 
-    patch_res = client.patch(
-        "/api/v1/setup/settings",
-        json={
-            "branding_enabled": True,
-            "branding_channel_name": "@BackseatCaster",
-            "branding_intro_enabled": False,
-            "branding_outro_seconds": 2.5,
-            "branding_accent_color": "#22D3EE",
-        },
+    # Even if a stale settings.json still carries branding keys, the setup API
+    # must not expose them as writable configuration.
+    test_settings_file.write_text(
+        jsonlib.dumps({"branding_enabled": True}), encoding="utf-8"
     )
-    assert patch_res.status_code == 200
-    updated = patch_res.json()["response"]
-    assert updated["branding_enabled"] is True
-    assert updated["branding_channel_name"] == "@BackseatCaster"
-    assert updated["branding_intro_enabled"] is False
-    assert updated["branding_outro_seconds"] == 2.5
-
-    branding = default_branding_config()
-    assert branding.enabled is True
-    assert branding.has_intro is False
-    assert branding.has_outro is True
-    assert branding.outro_seconds == 2.5
-    assert branding.accent_color == "#22D3EE"
-    assert branding.resolved_outro_subtitle() == "@BackseatCaster"
+    assert not any(
+        key.startswith("branding_")
+        for key in client.get("/api/v1/setup/settings").json()["response"]
+    )
 
 
 def test_load_sample_demo_project_creates_video_and_candidates(monkeypatch, tmp_path):

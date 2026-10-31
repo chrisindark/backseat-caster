@@ -43,6 +43,21 @@ class ChannelProfileResponse(BaseModel):
     default_framing_preset: FramingPreset = "third_person"
     default_quality_preset: QualityPreset = "high"
 
+    # Branded intro/outro cards (effective values, including env fallbacks)
+    branding_enabled: bool = False
+    branding_intro: bool = True
+    branding_outro: bool = True
+    branding_intro_seconds: float = 1.2
+    branding_outro_seconds: float = 2.0
+    branding_intro_title: str | None = None
+    branding_intro_subtitle: str | None = None
+    branding_outro_title: str = "SUBSCRIBE"
+    branding_outro_subtitle: str | None = None
+    branding_background_color: str = "#0B0D13"
+    branding_accent_color: str = "#F43F5E"
+    branding_text_color: str = "#FFFFFF"
+    branding_font_path: str | None = None
+
     title_template: str | None = None
     pinned_hashtags: list[str] = Field(default_factory=list)
     default_privacy: PrivacyStatus = "public"
@@ -68,6 +83,20 @@ class ChannelProfileUpdate(BaseModel):
 
     default_framing_preset: FramingPreset | None = None
     default_quality_preset: QualityPreset | None = None
+
+    branding_enabled: bool | None = None
+    branding_intro: bool | None = None
+    branding_outro: bool | None = None
+    branding_intro_seconds: float | None = Field(None, ge=0.2, le=5.0)
+    branding_outro_seconds: float | None = Field(None, ge=0.2, le=10.0)
+    branding_intro_title: str | None = Field(None, max_length=255)
+    branding_intro_subtitle: str | None = Field(None, max_length=255)
+    branding_outro_title: str | None = Field(None, max_length=255)
+    branding_outro_subtitle: str | None = Field(None, max_length=255)
+    branding_background_color: str | None = Field(None, max_length=16)
+    branding_accent_color: str | None = Field(None, max_length=16)
+    branding_text_color: str | None = Field(None, max_length=16)
+    branding_font_path: str | None = Field(None, max_length=1024)
 
     title_template: str | None = Field(None, max_length=255)
     pinned_hashtags: list[str] | None = None

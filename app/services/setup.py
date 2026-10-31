@@ -252,19 +252,6 @@ class SetupService:
             watch_dir=settings.WATCH_DIR,
             watch_poll_interval_minutes=int(settings.WATCH_POLL_INTERVAL_MINUTES),
             watch_delete_after_ingest=bool(settings.WATCH_DELETE_AFTER_INGEST),
-            branding_enabled=bool(settings.BRANDING_ENABLED),
-            branding_channel_name=settings.branding_channel_name or None,
-            branding_intro_enabled=bool(settings.BRANDING_INTRO_ENABLED),
-            branding_outro_enabled=bool(settings.BRANDING_OUTRO_ENABLED),
-            branding_intro_seconds=float(settings.BRANDING_INTRO_SECONDS),
-            branding_outro_seconds=float(settings.BRANDING_OUTRO_SECONDS),
-            branding_intro_title=settings.BRANDING_INTRO_TITLE or None,
-            branding_intro_subtitle=settings.BRANDING_INTRO_SUBTITLE or None,
-            branding_outro_title=settings.BRANDING_OUTRO_TITLE,
-            branding_outro_subtitle=settings.BRANDING_OUTRO_SUBTITLE or None,
-            branding_background_color=settings.BRANDING_BACKGROUND_COLOR,
-            branding_accent_color=settings.BRANDING_ACCENT_COLOR,
-            branding_text_color=settings.BRANDING_TEXT_COLOR,
         )
 
     @classmethod

@@ -147,7 +147,12 @@ Record, stop, and the recording is picked up within five minutes, mined, and its
 
 ### 6.4 Branded Intro & Outro Cards
 
-Every render can start with a channel card and end with a `SUBSCRIBE` card. Both are also editable from the setup wizard (`/setup`) and persist to `data/settings.json`.
+Every render can start with a channel card and end with a `SUBSCRIBE` card.
+
+**Where it lives.** The live value is the singleton channel profile row (`channel_profiles`, page `/channel` → *Intro & Outro Cards*, `GET/PUT /api/v1/channel/profile`). Everything below is the seed/fallback layer: the `BRANDING_*` values a fresh install starts with, and the value used for any profile column that is still unset:
+
+- On first read the profile is created and every branding column is seeded from these settings, so `BRANDING_ENABLED=True` in `.env` behaves exactly as before for headless/Docker installs.
+- After that the profile (and therefore the UI) is authoritative. Profiles created before branding existed have `NULL` columns and keep falling back to these settings until a value is saved.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -180,6 +185,8 @@ BRANDING_CHANNEL_NAME=@YourChannel
 BRANDING_INTRO_SECONDS=1.2
 BRANDING_OUTRO_SECONDS=2.0
 ```
+
+The equivalent profile payload (`PUT /api/v1/channel/profile`) uses the `branding_*` field names — `branding_enabled`, `branding_intro`, `branding_outro`, `branding_intro_seconds`, `branding_outro_seconds`, `branding_intro_title`, `branding_intro_subtitle`, `branding_outro_title`, `branding_outro_subtitle`, `branding_background_color`, `branding_accent_color`, `branding_text_color`, `branding_font_path`. The card headline uses the profile's `channel_name`.
 
 ---
 

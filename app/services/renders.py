@@ -15,12 +15,7 @@ from app.config import settings
 from app.database import get_task_db_session
 from app.models.render_job import RenderJob
 from app.models.video import Video
-from app.rendering.config import (
-    CROP_PADDING_PRESETS,
-    QUALITY_PRESETS,
-    RenderConfig,
-    default_branding_config,
-)
+from app.rendering.config import CROP_PADDING_PRESETS, QUALITY_PRESETS, RenderConfig
 from app.rendering.engine import RenderEngine
 from app.schemas.render import (
     RenderClipRequest,
@@ -1227,7 +1222,7 @@ class RenderService:
             if resolved_quality not in QUALITY_PRESETS:
                 resolved_quality = "high"
 
-            branding_config = default_branding_config()
+            branding_config = ChannelProfileService.branding_config(db)
 
             config = RenderConfig(
                 preferred_encoder=job.encoder,

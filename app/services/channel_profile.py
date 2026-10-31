@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.channel_profile import ChannelProfile
-from app.rendering.config import CROP_PADDING_PRESETS, QUALITY_PRESETS, WatermarkConfig
+from app.rendering.config import (
+    CROP_PADDING_PRESETS,
+    QUALITY_PRESETS,
+    BrandingConfig,
+    WatermarkConfig,
+    default_branding_config,
+)
 from app.schemas.channel import (
     ChannelProfileResponse,
     ChannelProfileUpdate,
@@ -23,6 +29,23 @@ logger = logging.getLogger(__name__)
 PROFILE_ID = 1
 WATERMARK_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_WATERMARK_BYTES = 15 * 1024 * 1024
+
+#: Free-text columns that are stored as ``NULL`` when blank, so the render
+#: engine falls back to the ``BRANDING_*`` defaults instead of showing "  ".
+TEXT_FIELDS = frozenset(
+    {
+        "title_template",
+        "channel_name",
+        "branding_intro_title",
+        "branding_intro_subtitle",
+        "branding_outro_title",
+        "branding_outro_subtitle",
+        "branding_font_path",
+        "branding_background_color",
+        "branding_accent_color",
+        "branding_text_color",
+    }
+)
 
 
 def _json_list(raw: str | None) -> list[str]:
@@ -92,6 +115,7 @@ class ChannelProfileService:
             default_privacy="public",
             upload_slots=json.dumps(_default_slots()),
             upload_timezone=(settings.AUTO_STAGE_TIMEZONE or "UTC").strip() or "UTC",
+            **cls._branding_seed_values(),
         )
         db.add(profile)
         try:
@@ -127,6 +151,8 @@ class ChannelProfileService:
         if quality not in QUALITY_PRESETS:
             quality = "high"
 
+        branding = cls.branding_config(db)
+
         return ChannelProfileResponse(
             channel_name=profile.channel_name,
             watermark_enabled=bool(profile.watermark_enabled),
@@ -150,6 +176,19 @@ class ChannelProfileService:
             ),
             default_framing_preset=profile.default_framing_preset or "third_person",
             default_quality_preset=quality,
+            branding_enabled=branding.enabled,
+            branding_intro=branding.intro,
+            branding_outro=branding.outro,
+            branding_intro_seconds=branding.intro_seconds,
+            branding_outro_seconds=branding.outro_seconds,
+            branding_intro_title=branding.intro_title or None,
+            branding_intro_subtitle=branding.intro_subtitle or None,
+            branding_outro_title=branding.outro_title,
+            branding_outro_subtitle=branding.outro_subtitle or None,
+            branding_background_color=branding.background_color,
+            branding_accent_color=branding.accent_color,
+            branding_text_color=branding.text_color,
+            branding_font_path=branding.font_path,
             title_template=profile.title_template,
             pinned_hashtags=normalize_hashtags(_json_list(profile.pinned_hashtags)),
             default_privacy=profile.default_privacy or "public",
@@ -174,7 +213,7 @@ class ChannelProfileService:
                 profile.pinned_hashtags = json.dumps(normalize_hashtags(value or []))
             elif field == "upload_slots":
                 profile.upload_slots = json.dumps(value or [])
-            elif field in ("title_template", "channel_name"):
+            elif field in TEXT_FIELDS:
                 cleaned = (value or "").strip() if value is not None else None
                 setattr(profile, field, cleaned or None)
             else:
@@ -203,6 +242,58 @@ class ChannelProfileService:
             profile.upload_timezone or settings.AUTO_STAGE_TIMEZONE or "UTC"
         ).strip() or "UTC"
         return slots, timezone
+
+    @staticmethod
+    def _branding_seed_values() -> dict[str, object]:
+        """Column values seeded from the ``BRANDING_*`` env/settings defaults."""
+        env = default_branding_config()
+        return {
+            "branding_enabled": env.enabled,
+            "branding_intro": env.intro,
+            "branding_outro": env.outro,
+            "branding_intro_seconds": env.intro_seconds,
+            "branding_outro_seconds": env.outro_seconds,
+            "branding_intro_title": env.intro_title or None,
+            "branding_intro_subtitle": env.intro_subtitle or None,
+            "branding_outro_title": env.outro_title or None,
+            "branding_outro_subtitle": env.outro_subtitle or None,
+            "branding_background_color": env.background_color,
+            "branding_accent_color": env.accent_color,
+            "branding_text_color": env.text_color,
+            "branding_font_path": env.font_path or None,
+        }
+
+    @classmethod
+    def branding_config(cls, db: Session) -> BrandingConfig:
+        """Resolve the profile's branded intro/outro settings for a render.
+
+        Columns are ``None`` on rows created before branding moved into the
+        profile, so unset columns fall back to the current ``BRANDING_*``
+        settings instead of forcing the creator to re-enter them.
+        """
+        profile = cls.get_or_create(db)
+        env = default_branding_config()
+
+        def pick(attr: str, fallback: object) -> object:
+            value = getattr(profile, f"branding_{attr}", None)
+            return fallback if value is None else value
+
+        return BrandingConfig(
+            enabled=bool(pick("enabled", env.enabled)),
+            intro=bool(pick("intro", env.intro)),
+            outro=bool(pick("outro", env.outro)),
+            intro_seconds=float(pick("intro_seconds", env.intro_seconds)),
+            outro_seconds=float(pick("outro_seconds", env.outro_seconds)),
+            intro_title=str(pick("intro_title", env.intro_title) or ""),
+            intro_subtitle=str(pick("intro_subtitle", env.intro_subtitle) or ""),
+            outro_title=str(pick("outro_title", env.outro_title) or ""),
+            outro_subtitle=str(pick("outro_subtitle", env.outro_subtitle) or ""),
+            channel_name=(profile.channel_name or "").strip() or env.channel_name,
+            background_color=str(pick("background_color", env.background_color)),
+            accent_color=str(pick("accent_color", env.accent_color)),
+            text_color=str(pick("text_color", env.text_color)),
+            font_path=pick("font_path", env.font_path) or None,
+        )
 
     @classmethod
     def watermark_config(cls, db: Session) -> WatermarkConfig:

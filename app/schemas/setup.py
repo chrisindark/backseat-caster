@@ -57,20 +57,6 @@ class SetupSettingsResponse(BaseModel):
     watch_dir: str | None = None
     watch_poll_interval_minutes: int = 0
     watch_delete_after_ingest: bool = False
-    # Phase 10.5: branded intro/outro cards
-    branding_enabled: bool = False
-    branding_channel_name: str | None = None
-    branding_intro_enabled: bool = True
-    branding_outro_enabled: bool = True
-    branding_intro_seconds: float = 1.2
-    branding_outro_seconds: float = 2.0
-    branding_intro_title: str | None = None
-    branding_intro_subtitle: str | None = None
-    branding_outro_title: str = "SUBSCRIBE"
-    branding_outro_subtitle: str | None = None
-    branding_background_color: str = "#0B0D13"
-    branding_accent_color: str = "#F43F5E"
-    branding_text_color: str = "#FFFFFF"
 
 
 class UpdateSetupSettingsRequest(BaseModel):
@@ -90,20 +76,6 @@ class UpdateSetupSettingsRequest(BaseModel):
     watch_dir: str | None = None
     watch_poll_interval_minutes: int | None = None
     watch_delete_after_ingest: bool | None = None
-    # Phase 10.5: branded intro/outro cards
-    branding_enabled: bool | None = None
-    branding_channel_name: str | None = None
-    branding_intro_enabled: bool | None = None
-    branding_outro_enabled: bool | None = None
-    branding_intro_seconds: float | None = Field(None, ge=0.2, le=5.0)
-    branding_outro_seconds: float | None = Field(None, ge=0.2, le=10.0)
-    branding_intro_title: str | None = None
-    branding_intro_subtitle: str | None = None
-    branding_outro_title: str | None = None
-    branding_outro_subtitle: str | None = None
-    branding_background_color: str | None = None
-    branding_accent_color: str | None = None
-    branding_text_color: str | None = None
 
 
 class DemoProjectRequest(BaseModel):

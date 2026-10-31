@@ -34,6 +34,7 @@ The logo is saved under `data/channel/` and served for preview at
 | Default | Applied where |
 |---|---|
 | Watermark position/opacity/size/margin | Every new render, in all requested formats, composited before optional intro/outro cards |
+| Intro/outro card toggle, copy, colours, lengths | Every new render: a channel card is prepended and a `SUBSCRIBE` card appended inside the same FFmpeg pass (edit at `/channel` → *Intro & Outro Cards*) |
 | Framing preset | Render requests that omit a preset, auto-stage, Studio/batch-staging preselects |
 | Quality preset | Encoder bitrate/CRF selection for new render jobs |
 | Title template | Auto-generated and regenerated titles. Tokens: `{title}`, `{channel}`, `{hero}`, `{game}`, `{event}`, `{date}`, `{clip_id}` |

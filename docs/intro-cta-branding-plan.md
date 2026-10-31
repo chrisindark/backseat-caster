@@ -191,6 +191,8 @@ To enable clean parallel or staged development across autonomous agents, the wor
 ### Milestone 0: Data Models, Schemas & Duration Budgeting
 *Estimated scope: Backend model & config*
 
+> **Already shipped (2026-10-31):** the intro/outro half of this milestone is live under different names — `channel_profiles.branding_enabled`, `branding_intro`, `branding_outro`, `branding_intro_seconds`, `branding_outro_seconds`, `branding_intro_title`, `branding_intro_subtitle`, `branding_outro_title`, `branding_outro_subtitle`, `branding_background_color`, `branding_accent_color`, `branding_text_color`, `branding_font_path` (Alembic revision `b4d8e2f6a1c3`), resolved by `ChannelProfileService.branding_config()` and edited at `/channel` → *Intro & Outro Cards*. What this milestone still owes is the **overlay/CTA branch**: `cta_style`, `cta_speech_text`, `cta_voice`, the lower-third overlay window, and the duration budget. Reuse the existing columns instead of adding parallel ones.
+
 - **Target Files:**
   - `app/models/channel_profile.py`
   - `alembic/versions/<hash>_add_intro_cta_branding.py`

@@ -88,6 +88,82 @@ def test_channel_profile_defaults_and_update(client):
     assert body["upload_timezone"] == "Asia/Kolkata"
 
 
+def test_branding_round_trips_through_the_profile(client, db_session):
+    """Bookends are stored on the channel profile and feed the render config."""
+    from app.rendering.config import BrandingConfig
+    from app.services.channel_profile import ChannelProfileService
+
+    initial = client.get(f"{settings.API_PREFIX}/channel/profile").json()["response"]
+    assert initial["branding_enabled"] is False
+    assert initial["branding_intro"] is True
+    assert initial["branding_outro_title"] == "SUBSCRIBE"
+
+    updated = client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={
+            "channel_name": "@NightOwl",
+            "branding_enabled": True,
+            "branding_intro": False,
+            "branding_outro_seconds": 2.5,
+            "branding_outro_title": "SUBSCRIBE & TAP THE BELL",
+            "branding_outro_subtitle": "Daily clips",
+            "branding_accent_color": "#22D3EE",
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()["response"]
+    assert body["branding_enabled"] is True
+    assert body["branding_intro"] is False
+    assert body["branding_outro"] is True
+    assert body["branding_outro_seconds"] == 2.5
+    assert body["branding_outro_title"] == "SUBSCRIBE & TAP THE BELL"
+    assert body["branding_background_color"] == "#0B0D13"
+
+    resolved: BrandingConfig = ChannelProfileService.branding_config(db_session)
+    assert resolved.enabled is True
+    assert resolved.has_intro is False
+    assert resolved.has_outro is True
+    assert resolved.outro_seconds == 2.5
+    assert resolved.accent_color == "#22D3EE"
+    assert resolved.channel_name == "@NightOwl"
+    assert resolved.resolved_outro_subtitle() == "Daily clips"
+
+    # Clearing a text field falls back to the configured default.
+    cleared = client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={"branding_outro_title": ""},
+    )
+    assert cleared.json()["response"]["branding_outro_title"] == "SUBSCRIBE"
+
+
+def test_branding_falls_back_to_env_defaults_for_unset_columns(
+    client, db_session, monkeypatch
+):
+    """Rows created before branding columns existed must keep rendering."""
+    from app.models.channel_profile import ChannelProfile
+    from app.services.channel_profile import ChannelProfileService
+
+    monkeypatch.setattr(settings, "BRANDING_ENABLED", True)
+    monkeypatch.setattr(settings, "BRANDING_OUTRO_SECONDS", 3.0)
+    monkeypatch.setattr(settings, "BRANDING_CHANNEL_NAME", "@EnvChannel")
+
+    # Simulate a legacy row: every branding column is NULL and no channel name.
+    profile = ChannelProfileService.get_or_create(db_session)
+    for column in ChannelProfile.__table__.columns:
+        if column.name.startswith("branding_") or column.name == "channel_name":
+            setattr(profile, column.name, None)
+    db_session.commit()
+
+    resolved = ChannelProfileService.branding_config(db_session)
+    assert resolved.enabled is True
+    assert resolved.outro_seconds == 3.0
+    assert resolved.channel_name == "@EnvChannel"
+
+    body = client.get(f"{settings.API_PREFIX}/channel/profile").json()["response"]
+    assert body["branding_enabled"] is True
+    assert body["branding_outro_seconds"] == 3.0
+
+
 def test_watermark_upload_preview_and_delete(client):
     res = client.post(
         f"{settings.API_PREFIX}/channel/watermark",

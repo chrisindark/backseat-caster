@@ -23,7 +23,6 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
-  Clapperboard,
   Copy,
   Cpu,
   ExternalLink,
@@ -81,17 +80,6 @@ export default function SetupWizardPage() {
   const [formWatchDelete, setFormWatchDelete] = useState<boolean>(false);
   const [isScanningWatch, setIsScanningWatch] = useState<boolean>(false);
 
-  // Branded intro/outro cards (Phase 10.5)
-  const [formBrandingEnabled, setFormBrandingEnabled] = useState<boolean>(false);
-  const [formBrandingChannel, setFormBrandingChannel] = useState<string>("");
-  const [formBrandingIntro, setFormBrandingIntro] = useState<boolean>(true);
-  const [formBrandingOutro, setFormBrandingOutro] = useState<boolean>(true);
-  const [formBrandingIntroSeconds, setFormBrandingIntroSeconds] =
-    useState<number>(1.2);
-  const [formBrandingOutroSeconds, setFormBrandingOutroSeconds] =
-    useState<number>(2.0);
-  const [formBrandingAccent, setFormBrandingAccent] = useState<string>("#F43F5E");
-
   // Load initial status & settings
   const loadData = useCallback(async () => {
     try {
@@ -116,13 +104,6 @@ export default function SetupWizardPage() {
       setFormWatchDir(settingsRes.watch_dir || "");
       setFormWatchPoll(settingsRes.watch_poll_interval_minutes ?? 0);
       setFormWatchDelete(settingsRes.watch_delete_after_ingest ?? false);
-      setFormBrandingEnabled(settingsRes.branding_enabled ?? false);
-      setFormBrandingChannel(settingsRes.branding_channel_name || "");
-      setFormBrandingIntro(settingsRes.branding_intro_enabled ?? true);
-      setFormBrandingOutro(settingsRes.branding_outro_enabled ?? true);
-      setFormBrandingIntroSeconds(settingsRes.branding_intro_seconds ?? 1.2);
-      setFormBrandingOutroSeconds(settingsRes.branding_outro_seconds ?? 2.0);
-      setFormBrandingAccent(settingsRes.branding_accent_color || "#F43F5E");
 
       setErrorMsg(null);
     } catch (err) {
@@ -242,13 +223,6 @@ export default function SetupWizardPage() {
         watch_dir: formWatchDir.trim() || null,
         watch_poll_interval_minutes: formWatchPoll,
         watch_delete_after_ingest: formWatchDelete,
-        branding_enabled: formBrandingEnabled,
-        branding_channel_name: formBrandingChannel.trim() || null,
-        branding_intro_enabled: formBrandingIntro,
-        branding_outro_enabled: formBrandingOutro,
-        branding_intro_seconds: formBrandingIntroSeconds,
-        branding_outro_seconds: formBrandingOutroSeconds,
-        branding_accent_color: formBrandingAccent,
       });
       setSettings(updated);
       setSuccessMsg("Settings updated and saved to data/settings.json!");
@@ -1053,131 +1027,18 @@ export default function SetupWizardPage() {
               </div>
             </div>
 
-            {/* Branded bookends (Phase 10.5) */}
-            <div className="space-y-4 pt-4 border-t border-white/5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                    <Clapperboard className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Branded Intro &amp; Outro</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Adds a channel card before the clip and a &ldquo;subscribe&rdquo;
-                    card after it, baked into every render
-                  </p>
-                </div>
-
-                <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={formBrandingEnabled}
-                    onChange={(e) => setFormBrandingEnabled(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
-                  <span className="ml-2.5 text-xs font-semibold text-slate-300">
-                    {formBrandingEnabled ? "Bookends On" : "Off"}
-                  </span>
-                </label>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="text-xs font-semibold text-slate-300">
-                    Channel Name / Handle
-                  </label>
-                  <input
-                    type="text"
-                    value={formBrandingChannel}
-                    onChange={(e) => setFormBrandingChannel(e.target.value)}
-                    placeholder="@YourChannel"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-amber-500 focus:outline-none text-slate-200 text-xs"
-                  />
-                  <span className="text-[10px] text-slate-500">
-                    Shown on the intro card and under &ldquo;SUBSCRIBE&rdquo;.
-                    Defaults to your configured YouTube channel.
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300">
-                    Intro Length (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    min={0.2}
-                    max={5}
-                    step={0.1}
-                    value={formBrandingIntroSeconds}
-                    onChange={(e) =>
-                      setFormBrandingIntroSeconds(
-                        parseFloat(e.target.value) || 1.2
-                      )
-                    }
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-amber-500 focus:outline-none text-slate-200 text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300">
-                    Outro Length (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    min={0.2}
-                    max={10}
-                    step={0.1}
-                    value={formBrandingOutroSeconds}
-                    onChange={(e) =>
-                      setFormBrandingOutroSeconds(
-                        parseFloat(e.target.value) || 2.0
-                      )
-                    }
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-amber-500 focus:outline-none text-slate-200 text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-5">
-                <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={formBrandingIntro}
-                    onChange={(e) => setFormBrandingIntro(e.target.checked)}
-                    className="rounded accent-amber-500"
-                  />
-                  <span>Include intro card</span>
-                </label>
-
-                <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={formBrandingOutro}
-                    onChange={(e) => setFormBrandingOutro(e.target.checked)}
-                    className="rounded accent-amber-500"
-                  />
-                  <span>Include outro card</span>
-                </label>
-
-                <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-                  <span>Accent colour</span>
-                  <input
-                    type="color"
-                    value={formBrandingAccent}
-                    onChange={(e) => setFormBrandingAccent(e.target.value)}
-                    className="w-8 h-6 rounded border border-white/10 bg-slate-950 cursor-pointer"
-                  />
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {formBrandingAccent.toUpperCase()}
-                  </span>
-                </label>
-
-                <span className="text-[10px] text-slate-500">
-                  Bookends add{" "}
-                  {(formBrandingIntroSeconds + formBrandingOutroSeconds).toFixed(1)}s
-                  to each clip — watch the 60s limit for Shorts.
-                </span>
-              </div>
+            <div className="pt-4 border-t border-white/5">
+              <p className="text-[11px] text-slate-400">
+                Branded intro and &ldquo;subscribe&rdquo; outro cards moved to your
+                channel profile —{" "}
+                <Link
+                  href="/channel"
+                  className="text-rose-300 hover:text-rose-200 underline underline-offset-2"
+                >
+                  Brand → Intro &amp; Outro Cards
+                </Link>
+                .
+              </p>
             </div>
 
             <div className="pt-4 border-t border-white/5 flex items-center justify-end gap-3">

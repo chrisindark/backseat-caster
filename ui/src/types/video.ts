@@ -695,19 +695,6 @@ export interface SetupSettings {
   watch_dir?: string | null;
   watch_poll_interval_minutes: number;
   watch_delete_after_ingest: boolean;
-  branding_enabled: boolean;
-  branding_channel_name?: string | null;
-  branding_intro_enabled: boolean;
-  branding_outro_enabled: boolean;
-  branding_intro_seconds: number;
-  branding_outro_seconds: number;
-  branding_intro_title?: string | null;
-  branding_intro_subtitle?: string | null;
-  branding_outro_title: string;
-  branding_outro_subtitle?: string | null;
-  branding_background_color: string;
-  branding_accent_color: string;
-  branding_text_color: string;
 }
 
 export interface UpdateSetupSettingsPayload {
@@ -725,19 +712,6 @@ export interface UpdateSetupSettingsPayload {
   watch_dir?: string | null;
   watch_poll_interval_minutes?: number | null;
   watch_delete_after_ingest?: boolean | null;
-  branding_enabled?: boolean | null;
-  branding_channel_name?: string | null;
-  branding_intro_enabled?: boolean | null;
-  branding_outro_enabled?: boolean | null;
-  branding_intro_seconds?: number | null;
-  branding_outro_seconds?: number | null;
-  branding_intro_title?: string | null;
-  branding_intro_subtitle?: string | null;
-  branding_outro_title?: string | null;
-  branding_outro_subtitle?: string | null;
-  branding_background_color?: string | null;
-  branding_accent_color?: string | null;
-  branding_text_color?: string | null;
 }
 
 export interface WatchIngestItem {
@@ -793,6 +767,19 @@ export interface ChannelProfile {
   watermark_margin: number;
   default_framing_preset: "third_person" | "cinematic" | "direct_crop" | "vertical_blur" | "custom" | string;
   default_quality_preset: "high" | "compact" | "archive" | string;
+  branding_enabled: boolean;
+  branding_intro: boolean;
+  branding_outro: boolean;
+  branding_intro_seconds: number;
+  branding_outro_seconds: number;
+  branding_intro_title?: string | null;
+  branding_intro_subtitle?: string | null;
+  branding_outro_title: string;
+  branding_outro_subtitle?: string | null;
+  branding_background_color: string;
+  branding_accent_color: string;
+  branding_text_color: string;
+  branding_font_path?: string | null;
   title_template?: string | null;
   pinned_hashtags: string[];
   default_privacy: "public" | "unlisted" | "private" | string;
@@ -810,6 +797,19 @@ export interface ChannelProfileUpdate {
   watermark_margin?: number;
   default_framing_preset?: string;
   default_quality_preset?: string;
+  branding_enabled?: boolean;
+  branding_intro?: boolean;
+  branding_outro?: boolean;
+  branding_intro_seconds?: number;
+  branding_outro_seconds?: number;
+  branding_intro_title?: string | null;
+  branding_intro_subtitle?: string | null;
+  branding_outro_title?: string | null;
+  branding_outro_subtitle?: string | null;
+  branding_background_color?: string | null;
+  branding_accent_color?: string | null;
+  branding_text_color?: string | null;
+  branding_font_path?: string | null;
   title_template?: string | null;
   pinned_hashtags?: string[];
   default_privacy?: string;

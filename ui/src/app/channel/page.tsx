@@ -13,6 +13,7 @@ import { ChannelProfile, ChannelProfileUpdate } from "@/types/video";
 import {
   AlertCircle,
   CheckCircle2,
+  Clapperboard,
   Clock,
   Hash,
   Image as ImageIcon,
@@ -25,7 +26,6 @@ import {
   Trash2,
   UploadCloud,
 } from "lucide-react";
-import Link from "next/link";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 const FRAMING_PRESETS = [
@@ -87,6 +87,21 @@ export default function ChannelProfilePage() {
   const [watermarkMargin, setWatermarkMargin] = useState(0.03);
   const [framingPreset, setFramingPreset] = useState("third_person");
   const [qualityPreset, setQualityPreset] = useState("high");
+
+  // Branded intro/outro cards
+  const [brandingEnabled, setBrandingEnabled] = useState(false);
+  const [brandingIntro, setBrandingIntro] = useState(true);
+  const [brandingOutro, setBrandingOutro] = useState(true);
+  const [brandingIntroSeconds, setBrandingIntroSeconds] = useState(1.2);
+  const [brandingOutroSeconds, setBrandingOutroSeconds] = useState(2.0);
+  const [brandingIntroTitle, setBrandingIntroTitle] = useState("");
+  const [brandingIntroSubtitle, setBrandingIntroSubtitle] = useState("");
+  const [brandingOutroTitle, setBrandingOutroTitle] = useState("SUBSCRIBE");
+  const [brandingOutroSubtitle, setBrandingOutroSubtitle] = useState("");
+  const [brandingAccentColor, setBrandingAccentColor] = useState("#F43F5E");
+  const [brandingBackgroundColor, setBrandingBackgroundColor] =
+    useState("#0B0D13");
+
   const [titleTemplate, setTitleTemplate] = useState("");
   const [pinnedHashtags, setPinnedHashtags] = useState("");
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
@@ -103,6 +118,17 @@ export default function ChannelProfilePage() {
     setWatermarkMargin(data.watermark_margin ?? 0.03);
     setFramingPreset(data.default_framing_preset || "third_person");
     setQualityPreset(data.default_quality_preset || "high");
+    setBrandingEnabled(Boolean(data.branding_enabled));
+    setBrandingIntro(data.branding_intro ?? true);
+    setBrandingOutro(data.branding_outro ?? true);
+    setBrandingIntroSeconds(data.branding_intro_seconds ?? 1.2);
+    setBrandingOutroSeconds(data.branding_outro_seconds ?? 2.0);
+    setBrandingIntroTitle(data.branding_intro_title || "");
+    setBrandingIntroSubtitle(data.branding_intro_subtitle || "");
+    setBrandingOutroTitle(data.branding_outro_title || "SUBSCRIBE");
+    setBrandingOutroSubtitle(data.branding_outro_subtitle || "");
+    setBrandingAccentColor(data.branding_accent_color || "#F43F5E");
+    setBrandingBackgroundColor(data.branding_background_color || "#0B0D13");
     setTitleTemplate(data.title_template || "");
     setPinnedHashtags((data.pinned_hashtags || []).join(", "));
     setDefaultPrivacy(data.default_privacy || "public");
@@ -156,6 +182,17 @@ export default function ChannelProfilePage() {
         watermark_margin: watermarkMargin,
         default_framing_preset: framingPreset,
         default_quality_preset: qualityPreset,
+        branding_enabled: brandingEnabled,
+        branding_intro: brandingIntro,
+        branding_outro: brandingOutro,
+        branding_intro_seconds: brandingIntroSeconds,
+        branding_outro_seconds: brandingOutroSeconds,
+        branding_intro_title: brandingIntroTitle.trim() || null,
+        branding_intro_subtitle: brandingIntroSubtitle.trim() || null,
+        branding_outro_title: brandingOutroTitle.trim() || "SUBSCRIBE",
+        branding_outro_subtitle: brandingOutroSubtitle.trim() || null,
+        branding_accent_color: brandingAccentColor,
+        branding_background_color: brandingBackgroundColor,
         title_template: titleTemplate.trim() || null,
         pinned_hashtags: splitList(pinnedHashtags).map((h) => h.replace(/^#/, "")),
         default_privacy: defaultPrivacy,
@@ -413,18 +450,6 @@ export default function ChannelProfilePage() {
                     />
                   </div>
                 </div>
-
-                <p className="text-[11px] text-slate-500 border-t border-white/5 pt-3">
-                  Branded intro and &ldquo;subscribe&rdquo; outro cards are
-                  configured in{" "}
-                  <Link
-                    href="/setup"
-                    className="text-rose-300 hover:text-rose-200 underline underline-offset-2"
-                  >
-                    Setup → Branded Intro &amp; Outro
-                  </Link>
-                  .
-                </p>
               </div>
             </section>
 
@@ -576,6 +601,194 @@ export default function ChannelProfilePage() {
                     </datalist>
                   </div>
                 </div>
+              </div>
+
+              {/* Branded intro & outro cards */}
+              <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Clapperboard className="w-4 h-4 text-amber-400" />
+                      Intro &amp; Outro Cards
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Baked into every render: a channel card before the clip and
+                      a &ldquo;subscribe&rdquo; card after it. Cards add{" "}
+                      {(brandingIntroSeconds + brandingOutroSeconds).toFixed(1)}s
+                      to each clip.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={brandingEnabled}
+                      onChange={(e) => setBrandingEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
+                    <span className="ml-2.5 text-xs font-semibold text-slate-300">
+                      {brandingEnabled ? "On" : "Off"}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Intro headline
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingIntroTitle}
+                      onChange={(e) => setBrandingIntroTitle(e.target.value)}
+                      placeholder={channelName || "@YourChannel"}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      Blank uses the channel name
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Intro subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingIntroSubtitle}
+                      onChange={(e) => setBrandingIntroSubtitle(e.target.value)}
+                      placeholder="Highlight clips"
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Outro headline
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingOutroTitle}
+                      onChange={(e) => setBrandingOutroTitle(e.target.value)}
+                      placeholder="SUBSCRIBE"
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Outro subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingOutroSubtitle}
+                      onChange={(e) => setBrandingOutroSubtitle(e.target.value)}
+                      placeholder={channelName || "for more clips"}
+                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Intro length{" "}
+                      <span className="font-mono text-amber-300">
+                        {brandingIntroSeconds.toFixed(1)}s
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.2}
+                      max={5}
+                      step={0.1}
+                      value={brandingIntroSeconds}
+                      onChange={(e) =>
+                        setBrandingIntroSeconds(Number(e.target.value))
+                      }
+                      className="w-full accent-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Outro length{" "}
+                      <span className="font-mono text-amber-300">
+                        {brandingOutroSeconds.toFixed(1)}s
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.2}
+                      max={10}
+                      step={0.1}
+                      value={brandingOutroSeconds}
+                      onChange={(e) =>
+                        setBrandingOutroSeconds(Number(e.target.value))
+                      }
+                      className="w-full accent-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Accent colour
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={brandingAccentColor}
+                        onChange={(e) => setBrandingAccentColor(e.target.value)}
+                        className="w-9 h-8 rounded border border-white/10 bg-black/40 cursor-pointer"
+                      />
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {brandingAccentColor.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Card background
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={brandingBackgroundColor}
+                        onChange={(e) =>
+                          setBrandingBackgroundColor(e.target.value)
+                        }
+                        className="w-9 h-8 rounded border border-white/10 bg-black/40 cursor-pointer"
+                      />
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {brandingBackgroundColor.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={brandingIntro}
+                      onChange={(e) => setBrandingIntro(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500"
+                    />
+                    <span>Include intro card</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={brandingOutro}
+                      onChange={(e) => setBrandingOutro(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500"
+                    />
+                    <span>Include outro card</span>
+                  </label>
+                </div>
+
+                {brandingEnabled &&
+                  brandingIntroSeconds + brandingOutroSeconds > 6 && (
+                    <p className="text-[11px] text-amber-300/80">
+                      Long bookends — a 60s highlight will no longer fit the 60s
+                      Shorts window.
+                    </p>
+                  )}
               </div>
 
               <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/60 border border-white/10">

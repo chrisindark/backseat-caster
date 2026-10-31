@@ -5,6 +5,7 @@ import { Navbar } from "@/components/Navbar";
 import {
   checkBackendHealth,
   createRender,
+  fetchChannelProfile,
   fetchHighlightCandidates,
   fetchRenders,
   fetchVideo,
@@ -183,7 +184,8 @@ function StudioWorkspace() {
   const [normalizeAudio, setNormalizeAudio] = useState<boolean>(true);
   const [targetLufs, setTargetLufs] = useState<number>(-14.0);
 
-  // 6 Clipping modes multi-select (preselected default: Third-Person Wide Crop)
+  // 6 Clipping modes multi-select (initialised from the channel profile)
+  const [defaultFraming, setDefaultFraming] = useState<ClippingMode>("third_person");
   const [selectedModes, setSelectedModes] = useState<ClippingMode[]>([
     "third_person",
   ]);
@@ -321,7 +323,7 @@ function StudioWorkspace() {
   };
 
   const handlePresetYouTubeShort = () => {
-    setSelectedModes(["third_person"]);
+    setSelectedModes([defaultFraming]);
   };
 
   const handlePresetVerticalCrop = () => {
@@ -429,6 +431,22 @@ function StudioWorkspace() {
     checkBackendHealth().then((h) => {
       if (mounted) setBackendHealthy(h);
     });
+
+    fetchChannelProfile()
+      .then((profile) => {
+        if (!mounted) return;
+        const preset = profile.default_framing_preset as ClippingMode;
+        if (
+          ["third_person", "cinematic", "direct_crop", "vertical_blur", "custom"].includes(
+            preset
+          )
+        ) {
+          setDefaultFraming(preset);
+          setSelectedModes([preset]);
+          setRightCompareMode(preset);
+        }
+      })
+      .catch(() => {});
 
     if (!videoId) return;
 
@@ -539,11 +557,11 @@ function StudioWorkspace() {
 
   const handleQuickRenderHighlight = (candidate: HighlightCandidateItem) => {
     handleApplyHighlight(candidate);
-    setSelectedModes(["third_person"]);
+    setSelectedModes([defaultFraming]);
     setIsHighlightDrawerOpen(false);
-    // Smooth scroll down to render controls and start quick render of single third_person mode
+    // Smooth scroll down to render controls and quick-render the channel's default framing
     setTimeout(() => {
-      handleStartRender(["third_person"]);
+      handleStartRender([defaultFraming]);
     }, 300);
   };
 

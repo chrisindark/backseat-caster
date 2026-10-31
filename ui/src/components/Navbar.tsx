@@ -6,6 +6,7 @@ import {
   Compass,
   Film,
   Layers,
+  Palette,
   Radio,
   RefreshCw,
   Scissors,
@@ -222,9 +223,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </Link>
 
             <Link
+              href="/channel"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                pathname?.startsWith("/channel")
+                  ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+              }`}
+            >
+              <Palette className="w-3.5 h-3.5" />
+              <span>Brand</span>
+            </Link>
+
+            <Link
               href="/youtube"
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                pathname?.startsWith("/youtube") || pathname?.startsWith("/channel")
+                pathname?.startsWith("/youtube")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
               }`}

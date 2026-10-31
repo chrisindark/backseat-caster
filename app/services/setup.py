@@ -159,6 +159,47 @@ class SetupService:
             )
         )
 
+        # 5. Zero-click ingest pipeline (Optional)
+        watch_path = settings.watch_path
+        if watch_path is None:
+            watch_status_str = "ok"
+            watch_msg = (
+                "Watch folder off — ingest via drag-and-drop or YouTube download"
+            )
+        elif not watch_path.exists():
+            watch_status_str = "warning"
+            watch_msg = f"Watch folder configured but not found: {watch_path}"
+        else:
+            watch_status_str = "ok"
+            watch_msg = f"Watching {watch_path}"
+            if settings.AUTO_MINE_ON_INGEST:
+                mine_n = settings.auto_mine_top_n
+                watch_msg += (
+                    f" · auto-mine on ingest ({mine_n} clip(s) auto-staged)"
+                    if mine_n
+                    else " · auto-mine on ingest (review before staging)"
+                )
+
+        checks.append(
+            SetupCheckItem(
+                name="watch_folder",
+                title="Zero-Click Ingest (Optional)",
+                status=watch_status_str,
+                required=False,
+                message=watch_msg,
+                remedy=(
+                    "Point the watch folder at your OBS recording directory to ingest "
+                    "recordings automatically, then enable auto-mine to clip them without touching anything."
+                ),
+                details={
+                    "watch_dir": str(watch_path) if watch_path else None,
+                    "poll_interval_minutes": settings.WATCH_POLL_INTERVAL_MINUTES,
+                    "auto_mine_on_ingest": bool(settings.AUTO_MINE_ON_INGEST),
+                    "auto_stage_clips_per_ingest": settings.auto_mine_top_n,
+                },
+            )
+        )
+
         # Sample project status
         demo_vid = db.query(Video).filter(Video.id == DEMO_VIDEO_ID).first()
         demo_renders = (
@@ -207,6 +248,10 @@ class SetupService:
             ),
             auto_cleanup_vod=getattr(settings, "AUTO_CLEANUP_VOD", False),
             youtube_redirect_uri=settings.YOUTUBE_REDIRECT_URI,
+            auto_mine_on_ingest=bool(settings.AUTO_MINE_ON_INGEST),
+            watch_dir=settings.WATCH_DIR,
+            watch_poll_interval_minutes=int(settings.WATCH_POLL_INTERVAL_MINUTES),
+            watch_delete_after_ingest=bool(settings.WATCH_DELETE_AFTER_INGEST),
         )
 
     @classmethod

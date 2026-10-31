@@ -52,6 +52,11 @@ class SetupSettingsResponse(BaseModel):
     auto_cleanup_uploaded_renders: bool = True
     auto_cleanup_vod: bool = False
     youtube_redirect_uri: str = "http://localhost:3001/api/v1/youtube/auth/callback"
+    # Tier 2: zero-input ingest pipeline
+    auto_mine_on_ingest: bool = False
+    watch_dir: str | None = None
+    watch_poll_interval_minutes: int = 0
+    watch_delete_after_ingest: bool = False
 
 
 class UpdateSetupSettingsRequest(BaseModel):
@@ -67,6 +72,10 @@ class UpdateSetupSettingsRequest(BaseModel):
     auto_cleanup_uploaded_renders: bool | None = None
     auto_cleanup_vod: bool | None = None
     youtube_redirect_uri: str | None = None
+    auto_mine_on_ingest: bool | None = None
+    watch_dir: str | None = None
+    watch_poll_interval_minutes: int | None = None
+    watch_delete_after_ingest: bool | None = None
 
 
 class DemoProjectRequest(BaseModel):

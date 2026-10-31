@@ -6,47 +6,39 @@ import {
   configureYouTubeCredentials,
   fetchSetupSettings,
   fetchSetupStatus,
+  fetchWatchStatus,
   getYouTubeAuthUrl,
   loadDemoProject,
   revokeYouTubeCredentials,
+  scanWatchFolder,
   updateSetupSettings,
 } from "@/lib/api";
 import {
-  DemoProjectResponse,
-  SetupCheckItem,
   SetupSettings,
   SetupStatusResponse,
+  WatchStatusResponse,
 } from "@/types/video";
 import {
   AlertCircle,
   ArrowRight,
-  Bot,
   Check,
   CheckCircle2,
-  ChevronRight,
   Copy,
   Cpu,
   ExternalLink,
-  Film,
+  FolderOpen,
   HardDrive,
-  HelpCircle,
-  Key,
   Layers,
   Loader2,
   LogOut,
   Play,
-  Radio,
   RefreshCw,
   Save,
   Scissors,
-  Settings as SettingsIcon,
   Sliders,
   Sparkles,
-  Tv,
   UploadCloud,
   Video,
-  Wand2,
-  XCircle,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
@@ -62,7 +54,6 @@ export default function SetupWizardPage() {
 
   // Demo Project state
   const [isLaunchingDemo, setIsLaunchingDemo] = useState<boolean>(false);
-  const [demoResult, setDemoResult] = useState<DemoProjectResponse | null>(null);
 
   // Guided YouTube Connect state
   const [clientSecretsInput, setClientSecretsInput] = useState<string>("");
@@ -81,15 +72,25 @@ export default function SetupWizardPage() {
   const [formCleanupVod, setFormCleanupVod] = useState<boolean>(false);
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
 
+  // Zero-input ingest (Tier 2)
+  const [watch, setWatch] = useState<WatchStatusResponse | null>(null);
+  const [formAutoMine, setFormAutoMine] = useState<boolean>(false);
+  const [formWatchDir, setFormWatchDir] = useState<string>("");
+  const [formWatchPoll, setFormWatchPoll] = useState<number>(0);
+  const [formWatchDelete, setFormWatchDelete] = useState<boolean>(false);
+  const [isScanningWatch, setIsScanningWatch] = useState<boolean>(false);
+
   // Load initial status & settings
   const loadData = useCallback(async () => {
     try {
-      const [statusRes, settingsRes] = await Promise.all([
+      const [statusRes, settingsRes, watchRes] = await Promise.all([
         fetchSetupStatus(),
         fetchSetupSettings(),
+        fetchWatchStatus().catch(() => null),
       ]);
       setStatus(statusRes);
       setSettings(settingsRes);
+      setWatch(watchRes);
 
       // Populate settings form
       setFormLlmEnabled(settingsRes.llm_enabled);
@@ -99,6 +100,10 @@ export default function SetupWizardPage() {
       setFormTopN(settingsRes.auto_stage_top_n ?? 3);
       setFormCleanupRenders(settingsRes.auto_cleanup_uploaded_renders ?? true);
       setFormCleanupVod(settingsRes.auto_cleanup_vod ?? false);
+      setFormAutoMine(settingsRes.auto_mine_on_ingest ?? false);
+      setFormWatchDir(settingsRes.watch_dir || "");
+      setFormWatchPoll(settingsRes.watch_poll_interval_minutes ?? 0);
+      setFormWatchDelete(settingsRes.watch_delete_after_ingest ?? false);
 
       setErrorMsg(null);
     } catch (err) {
@@ -110,6 +115,10 @@ export default function SetupWizardPage() {
   }, []);
 
   useEffect(() => {
+    // loadData awaits its fetches before it touches any state, so this effect
+    // does not trigger a synchronous cascading render. The react-hooks lint rule
+    // can't see through the async boundary and flags the call anyway.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -124,7 +133,6 @@ export default function SetupWizardPage() {
     setErrorMsg(null);
     try {
       const res = await loadDemoProject({ auto_render: true, sync: true });
-      setDemoResult(res);
       setSuccessMsg(res.message);
       await loadData();
     } catch (err) {
@@ -150,7 +158,7 @@ export default function SetupWizardPage() {
     setIsSavingCreds(true);
     setErrorMsg(null);
     try {
-      const res = await configureYouTubeCredentials({
+      await configureYouTubeCredentials({
         client_secrets_json: clientSecretsInput.trim(),
       });
       setSuccessMsg("OAuth client credentials saved! You can now authorize your channel.");
@@ -211,6 +219,10 @@ export default function SetupWizardPage() {
         auto_stage_top_n: formTopN,
         auto_cleanup_uploaded_renders: formCleanupRenders,
         auto_cleanup_vod: formCleanupVod,
+        auto_mine_on_ingest: formAutoMine,
+        watch_dir: formWatchDir.trim() || null,
+        watch_poll_interval_minutes: formWatchPoll,
+        watch_delete_after_ingest: formWatchDelete,
       });
       setSettings(updated);
       setSuccessMsg("Settings updated and saved to data/settings.json!");
@@ -224,9 +236,26 @@ export default function SetupWizardPage() {
     }
   };
 
+  // Pull the watch folder immediately instead of waiting for the next poll
+  const handleScanWatch = async () => {
+    setIsScanningWatch(true);
+    setErrorMsg(null);
+    try {
+      const result = await scanWatchFolder(false);
+      setSuccessMsg(result.message);
+      setTimeout(() => setSuccessMsg(null), 4000);
+      await loadData();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Failed to scan watch folder"
+      );
+    } finally {
+      setIsScanningWatch(false);
+    }
+  };
+
   const redirectUri =
     settings?.youtube_redirect_uri || "http://localhost:3001/api/v1/youtube/auth/callback";
-
   return (
     <div className="min-h-screen bg-[#0b0d13] text-slate-100 flex flex-col font-sans selection:bg-rose-500/30 selection:text-white">
       <Navbar />
@@ -895,6 +924,121 @@ export default function SetupWizardPage() {
                   </span>
                 </div>
               </div>
+            </div>
+
+            {/* Zero-Input Ingest (Tier 2) */}
+            <div className="space-y-4 pt-4 border-t border-white/5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <FolderOpen className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Zero-Input Ingest</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Drop a recording in a folder and have clips staged without
+                    touching the app
+                  </p>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={formAutoMine}
+                    onChange={(e) => setFormAutoMine(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600" />
+                  <span className="ml-2.5 text-xs font-semibold text-slate-300">
+                    {formAutoMine ? "Auto-Mine On" : "Auto-Mine Off"}
+                  </span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-300">
+                    OBS Watch Folder
+                  </label>
+                  <input
+                    type="text"
+                    value={formWatchDir}
+                    onChange={(e) => setFormWatchDir(e.target.value)}
+                    placeholder="/Users/you/Movies/OBS"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-emerald-500 focus:outline-none text-slate-200 text-xs font-mono"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    New recordings are ingested automatically once OBS stops
+                    writing them. Leave blank to disable.
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300">
+                    Poll Every (minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1440}
+                    value={formWatchPoll}
+                    onChange={(e) =>
+                      setFormWatchPoll(parseInt(e.target.value, 10) || 0)
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-emerald-500 focus:outline-none text-slate-200 text-xs"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    0 = manual only (Scan Now)
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={formWatchDelete}
+                    onChange={(e) => setFormWatchDelete(e.target.checked)}
+                    className="rounded accent-emerald-500"
+                  />
+                  <span>Move recordings out of the watch folder</span>
+                </label>
+
+                {watch?.enabled && (
+                  <span className="text-[11px] text-slate-400">
+                    {watch.exists
+                      ? `${watch.pending_files} recording(s) waiting`
+                      : "Watch folder not found"}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleScanWatch}
+                  disabled={isScanningWatch || !watch?.enabled}
+                  className="ml-auto px-3.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 font-semibold text-[11px] transition-colors disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isScanningWatch ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3" />
+                  )}
+                  <span>Scan Now</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-white/5">
+              <p className="text-[11px] text-slate-400">
+                Branded intro and &ldquo;subscribe&rdquo; outro cards moved to your
+                channel profile —{" "}
+                <Link
+                  href="/channel"
+                  className="text-rose-300 hover:text-rose-200 underline underline-offset-2"
+                >
+                  Brand → Intro &amp; Outro Cards
+                </Link>
+                .
+              </p>
             </div>
 
             <div className="pt-4 border-t border-white/5 flex items-center justify-end gap-3">

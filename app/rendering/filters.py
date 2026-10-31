@@ -1,5 +1,7 @@
 """Video filtergraph builders for Landscape and Vertical compositions."""
 
+from typing import Literal
+
 
 def build_landscape_filter(
     width: int = 1920,
@@ -42,6 +44,50 @@ def build_vertical_blur_filter(
         f"crop={width}:{height},boxblur={blur_sigma}:5[{p}_bg];"
         f"[{p}_fg_in]scale={width}:-2:flags=lanczos[{p}_fg];"
         f"[{p}_bg][{p}_fg]overlay=(W-w)/2:(H-h)/2{out_pad}"
+    )
+
+
+def build_watermark_filter(
+    watermark_input: str,
+    main_input: str,
+    output_label: str,
+    width: int,
+    height: int,
+    position: Literal[
+        "top_left", "top_right", "bottom_left", "bottom_right", "center"
+    ] = "bottom_right",
+    opacity: float = 0.85,
+    scale: float = 0.14,
+    margin: float = 0.03,
+    prefix: str = "wm",
+) -> str:
+    """Overlay a scaled, semi-transparent logo onto a composed target frame.
+
+    The logo is scaled relative to the output width, so the same source asset
+    looks identical on 16:9 landscape and 9:16 vertical exports. ``overlay``
+    repeats the still image for the life of the clip.
+    """
+    wm_w = max(2, int(width * max(0.02, min(0.6, scale))))
+    margin_px = max(0, int(min(width, height) * max(0.0, min(0.2, margin))))
+    alpha = max(0.05, min(1.0, float(opacity)))
+
+    if position == "top_left":
+        x_expr, y_expr = str(margin_px), str(margin_px)
+    elif position == "top_right":
+        x_expr, y_expr = f"W-w-{margin_px}", str(margin_px)
+    elif position == "bottom_left":
+        x_expr, y_expr = str(margin_px), f"H-h-{margin_px}"
+    elif position == "center":
+        x_expr, y_expr = "(W-w)/2", "(H-h)/2"
+    else:  # bottom_right (default)
+        x_expr, y_expr = f"W-w-{margin_px}", f"H-h-{margin_px}"
+
+    scaled = f"{prefix}_logo"
+    return (
+        f"[{watermark_input.strip('[]')}]scale={wm_w}:-2:flags=lanczos,"
+        f"format=rgba,colorchannelmixer=aa={alpha:.3f}[{scaled}];"
+        f"[{main_input.strip('[]')}][{scaled}]overlay={x_expr}:{y_expr}:"
+        f"format=auto[{output_label.strip('[]')}]"
     )
 
 

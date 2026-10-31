@@ -33,6 +33,10 @@ class RenderClipRequest(BaseModel):
         le=0.6,
         description="Custom top/bottom blur padding ratio (0.0 to 0.6). If omitted, uses crop_preset value.",
     )
+    quality_preset: str | None = Field(
+        None,
+        description="Encoder quality preset ('high', 'compact', 'archive'). Defaults to the channel profile.",
+    )
     modes: list[str] | None = Field(
         None,
         description="List of modes to render: 'landscape', 'vertical_blur', 'third_person', 'direct_crop', 'cinematic', 'custom'. Defaults to [crop_preset or 'third_person'].",
@@ -92,6 +96,7 @@ class RenderJobResponse(BaseModel):
     encoder: str = "auto"
     crop_preset: str = "third_person"
     crop_blur_padding: float | None = None
+    quality_preset: str = "high"
     normalize_audio: bool = True
     target_lufs: float = -14.0
     output_dir: str | None = None
@@ -136,7 +141,8 @@ class UploadSelectionRequest(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     privacy: str | None = Field(
-        "public", description="'private', 'unlisted', or 'public'"
+        None,
+        description="'private', 'unlisted', or 'public'. Defaults to the channel profile.",
     )
     hero_name: str | None = Field(
         None,

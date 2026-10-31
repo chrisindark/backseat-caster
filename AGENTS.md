@@ -63,7 +63,9 @@ backseat-caster/
 │   │   ├── renders.py           # RenderService: render jobs, manifests, deletions
 │   │   ├── auto_stage.py        # AutoStageService: top-N rendering, metadata staging, publish slots
 │   │   ├── auto_pipeline.py     # AutoPipelineService: uploaded-render cleanup + batched stage sweep
-│   │   ├── setup.py             # SetupService: 4-check diagnostics, demo highlight seeding
+│   │   ├── auto_mine.py         # AutoMineService: chain a finished ingest into highlight mining
+│   │   ├── watch_folder.py      # WatchFolderService: OBS watch folder scan, dedupe ledger, ingest
+│   │   ├── setup.py             # SetupService: diagnostics, in-app settings, demo highlight seeding
 │   │   ├── settings_manager.py  # SettingsManager: runtime in-app settings persistence (data/settings.json)
 │   │   ├── llm_metadata.py      # LLMMetadataService: OpenAI-compatible LLM copy + deterministic fallback
 │   │   ├── upload_metadata.py   # Deterministic YouTube title/description/tag builder
@@ -82,6 +84,7 @@ backseat-caster/
 │   │   ├── engine.py            # RenderEngine: orchestration, progress tracking, manifest output
 │   │   ├── config.py            # RenderConfig, quality presets, padding presets, clipping modes
 │   │   ├── filters.py           # FFmpeg video filter graphs (blur padding, crop layouts)
+│   │   ├── branding.py          # Pillow intro/outro cards + concat/audio bookend filters
 │   │   ├── audio.py             # FFmpeg audio filter graphs (ducking, sidechain, limiting)
 │   │   ├── probe.py             # Media probing via ffprobe
 │   │   ├── validator.py         # Render parameter validation

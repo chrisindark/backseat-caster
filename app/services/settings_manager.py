@@ -76,6 +76,10 @@ class SettingsManager:
             "auto_cleanup_uploaded_renders": "AUTO_CLEANUP_UPLOADED_RENDERS",
             "auto_cleanup_vod": "AUTO_CLEANUP_VOD",
             "youtube_redirect_uri": "YOUTUBE_REDIRECT_URI",
+            "auto_mine_on_ingest": "AUTO_MINE_ON_INGEST",
+            "watch_dir": "WATCH_DIR",
+            "watch_poll_interval_minutes": "WATCH_POLL_INTERVAL_MINUTES",
+            "watch_delete_after_ingest": "WATCH_DELETE_AFTER_INGEST",
         }
 
         for api_key, attr_name in mapping.items():

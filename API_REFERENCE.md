@@ -30,10 +30,20 @@ Error responses use the same envelope shape with `success: false` and a populate
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/setup/status` | 4-point setup health status: FFmpeg, Disk Space, AI Key (optional), YouTube connected (optional) |
-| `GET` | `/api/v1/setup/settings` | Active in-app settings (AI model/url, clipping defaults, auto-stage, cleanup) |
+| `GET` | `/api/v1/setup/status` | Setup health status: FFmpeg, Disk Space, AI Key (optional), YouTube connected (optional), Zero-Click Ingest (optional) |
+| `GET` | `/api/v1/setup/settings` | Active in-app settings (AI model/url, clipping defaults, auto-stage, cleanup, auto-mine, watch folder) |
 | `PATCH` | `/api/v1/setup/settings` | Update in-app settings without editing `.env` (persisted to `data/settings.json`) |
 | `POST` | `/api/v1/setup/demo` | Seed 60-second Marvel Rivals highlight demo project and render 3 vertical Shorts |
+
+## Channel Brand Profile — `app/routers/channel.py`
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/channel/profile` | Channel defaults: watermark settings, branded intro/outro cards, framing/quality presets, title template, pinned hashtags, privacy, upload slots and timezone |
+| `PUT` / `PATCH` | `/api/v1/channel/profile` | Update any subset of channel defaults (including `branding_*`); omitted fields are untouched, blank text clears back to the default |
+| `POST` | `/api/v1/channel/watermark` | Upload/replace the watermark logo (multipart `file`: PNG, JPG or WEBP, max 15 MB); stored under `data/channel/` |
+| `DELETE` | `/api/v1/channel/watermark` | Remove the logo and disable the overlay |
+| `GET` | `/api/v1/channel/watermark` | Raw image stream for UI preview (not enveloped) |
 
 ## Videos — `app/routers/videos.py`
 
@@ -52,7 +62,9 @@ Error responses use the same envelope shape with `success: false` and a populate
 | `POST` | `/api/v1/videos/{video_id}/cleanup` | Reclaim storage: delete the source VOD and/or render folders already uploaded to YouTube (`clean_vod`, `clean_uploaded_renders`, `clean_all_renders`); catalog and upload records are kept |
 | `GET` | `/api/v1/videos/{video_id}/stream` | Stream local video file *(file stream — no envelope)* |
 | `GET` | `/api/v1/videos/{video_id}/thumbnail` | Serve/extract thumbnail *(file stream — no envelope)* |
-| `POST` | `/api/v1/videos/upload` | Direct upload of local/OBS recording (multipart: `file`, optional `title`, `channel_name`) → creates + probes video, generates thumbnail (`201`) |
+| `POST` | `/api/v1/videos/upload` | Direct upload of local/OBS recording (multipart: `file`, optional `title`, `channel_name`) → creates + probes video, generates thumbnail (`201`); chains into auto-mine when `AUTO_MINE_ON_INGEST` is on |
+| `GET` | `/api/v1/videos/watch/status` | Watch folder config, whether it exists, how many recordings are waiting, and recent ingest ledger rows (`recent_limit`) |
+| `POST` | `/api/v1/videos/watch/scan` | Scan the OBS watch folder once and ingest finished recordings (`dry_run=true` reports without copying) |
 
 ## Renders — `app/routers/renders.py`
 
@@ -116,7 +128,7 @@ Candidate `details` include Phase 3 signals when available: `hero_name`, `multi_
 | `POST` | `/api/v1/youtube/staging/{clip_id}/publish-now` | Clear the schedule and upload the staged clip immediately |
 | `POST` | `/api/v1/youtube/auto-stage` | Render, enrich and schedule the top N highlight candidates for a video |
 
-Unauthenticated upload attempts return `401` until `GET /auth/url` → consent is complete. Daily quota usage is advisory: an exhausted budget never rejects uploads locally — the UI shows a warning confirmation before dispatching, and an over-budget upload surfaces YouTube's own `quotaExceeded` error on the upload job instead. See [docs/youtube-authentication.md](docs/youtube-authentication.md) and [docs/publishing.md](docs/publishing.md).
+Unauthenticated upload attempts return `401` until `GET /auth/url` → consent is complete. Quota accounting is advisory: the local counter only charges the 1,600-unit upload cost after YouTube accepts the upload, and `GET /youtube/quota` reports `failed_uploads`, `blocked_reason`, `blocked_until`, `api_quota_exhausted` and `upload_limit_exceeded`. YouTube's `quotaExceeded` (project Data API budget) and `uploadLimitExceeded` (channel video upload limit) are parsed separately, persisted on the upload job, and returned with a human-readable message plus `error_code`/`retry_at` instead of a raw `HttpError`. Sync uploads return `429` for either limit. See [docs/youtube-authentication.md](docs/youtube-authentication.md) and [docs/publishing.md](docs/publishing.md).
 
 ---
 

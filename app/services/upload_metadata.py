@@ -93,6 +93,91 @@ def _extract_candidate_tags(candidate: Any) -> list[str]:
     return []
 
 
+def apply_title_template(
+    template: str | None,
+    base_title: str,
+    *,
+    channel_name: str | None = None,
+    hero_name: str | None = None,
+    game: str | None = None,
+    event_type: str | None = None,
+    clip_id: str = "",
+    publish_date: str | None = None,
+) -> str:
+    """Render a channel title template around an auto-generated base title.
+
+    Supported tokens: ``{title}`` (the generated title), ``{channel}``,
+    ``{hero}``, ``{game}``, ``{event}``, ``{clip_id}`` and ``{date}``.
+    Unknown tokens are removed rather than leaked into the published title.
+    """
+    if not template or not str(template).strip():
+        return _truncate_title(base_title)
+
+    values = {
+        "title": (base_title or "").strip(),
+        "channel": (channel_name or "").strip(),
+        "hero": (hero_name or "").strip(),
+        "game": (game or "").strip(),
+        "event": (event_type or "").replace("_", " ").title(),
+        "clip_id": clip_id or "",
+        "date": publish_date or datetime.now(UTC).strftime("%Y-%m-%d"),
+    }
+    rendered = re.sub(
+        r"\{(\w+)\}", lambda m: str(values.get(m.group(1), "")), str(template)
+    )
+    rendered = re.sub(r"\s+", " ", rendered).strip(" -|:")
+    return _truncate_title(rendered or base_title)
+
+
+def normalize_hashtag_list(values: list[str] | None) -> list[str]:
+    """Strip leading '#' and de-dupe case-insensitively while preserving order."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        token = str(value).strip().lstrip("#").strip()
+        if token and token.lower() not in seen:
+            seen.add(token.lower())
+            result.append(token)
+    return result
+
+
+def merge_pinned_hashtags(
+    tags: list[str] | None, pinned: list[str] | None
+) -> list[str]:
+    """Put the channel's pinned hashtags first, then the generated tags."""
+    merged = normalize_hashtag_list(pinned) + normalize_hashtag_list(tags)
+    result: list[str] = []
+    seen: set[str] = set()
+    total_chars = 0
+    for tag in merged:
+        lower = tag.lower()
+        if lower in seen:
+            continue
+        if len(result) >= 30 or total_chars + len(tag) + 1 > 480:
+            break
+        seen.add(lower)
+        result.append(tag)
+        total_chars += len(tag) + 1
+    return result
+
+
+def append_pinned_hashtags(description: str | None, pinned: list[str] | None) -> str:
+    """Ensure every pinned hashtag appears in the description exactly once."""
+    text = description or ""
+    hashtags = normalize_hashtag_list(pinned)
+    if not hashtags:
+        return text
+    existing = {h.lower() for h in re.findall(r"#[\w]+", text)}
+    missing = [
+        f"#{tag.replace(' ', '')}"
+        for tag in hashtags
+        if f"#{tag.replace(' ', '')}".lower() not in existing
+    ]
+    if not missing:
+        return text
+    return f"{text.rstrip()}\n\n{' '.join(missing)}".strip()
+
+
 def _truncate_title(title: str, max_len: int = 95) -> str:
     clean = re.sub(r"\s+", " ", title).strip("\"' ")
     if len(clean) <= max_len:

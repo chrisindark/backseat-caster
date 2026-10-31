@@ -316,14 +316,31 @@ export default function StagingPage() {
     }
   };
 
-  /** Warning message when the daily YouTube API budget is already exhausted. */
+  /** Warning message when YouTube has rejected uploads for this quota day. */
   const buildQuotaWarning = (): string | null => {
     if (!quota || quota.can_upload) return null;
+    if (quota.upload_limit_exceeded) {
+      const retryAt = quota.blocked_until
+        ? new Date(quota.blocked_until).toLocaleString()
+        : "later";
+      return (
+        `YouTube says this channel has reached its video upload limit (uploadLimitExceeded). ` +
+        "This is separate from the Data API unit quota and usually clears within 24 hours. " +
+        `Retry after ${retryAt}.`
+      );
+    }
+    if (quota.blocked_reason === "api_quota_exceeded") {
+      return (
+        "YouTube Data API quota is exhausted for this project. " +
+        `It resets at ${new Date(quota.resets_at).toLocaleString()}. ` +
+        "Uploads will fail until then."
+      );
+    }
     return (
-      `Daily YouTube API quota is exhausted today ` +
+      `YouTube upload headroom is exhausted locally ` +
       `(${quota.units_used.toLocaleString()} / ${quota.daily_limit_units.toLocaleString()} units, ` +
       `~${quota.max_uploads_per_day} uploads used). You can still attempt the upload — ` +
-      "it will likely fail with a quotaExceeded error on YouTube's side until the quota resets at Pacific midnight."
+      "YouTube will reject it if the project quota is used up."
     );
   };
 
@@ -355,13 +372,16 @@ export default function StagingPage() {
           clip_context: meta.clip_context,
         });
       }
-      const res = await uploadClipToYouTube(clipId);
+      // Sync so YouTube's actual rejection (API quota vs channel upload limit)
+      // is returned to this page instead of disappearing into a background task.
+      const res = await uploadClipToYouTube(clipId, { sync: true });
       setUploadedClips((prev) => ({ ...prev, [clipId]: res }));
       setSuccessMessage(`Successfully uploaded "${res.title}" to YouTube!`);
       // Refresh quota after upload
       fetchYouTubeQuota().then(setQuota).catch(() => {});
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : `Failed uploading ${clipId}`);
+      fetchYouTubeQuota().then(setQuota).catch(() => {});
     } finally {
       setUploadingClipIds((prev) => {
         const next = new Set(prev);
@@ -420,9 +440,17 @@ export default function StagingPage() {
         resultMap[r.clip_id] = r;
       });
       setUploadedClips((prev) => ({ ...prev, ...resultMap }));
-      setSuccessMessage(
-        `Batch upload complete: ${res.total_succeeded} succeeded, ${res.total_failed} failed.`
-      );
+      const firstFailure = res.results.find((r) => r.status === "failed");
+      if (firstFailure) {
+        setErrorMessage(
+          `${res.total_failed} upload${res.total_failed === 1 ? "" : "s"} failed. ` +
+            (firstFailure.error_message || "Check the clip details for the YouTube error.")
+        );
+      } else {
+        setSuccessMessage(
+          `Batch upload complete: ${res.total_succeeded} succeeded.`
+        );
+      }
       fetchYouTubeQuota().then(setQuota).catch(() => {});
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : "Batch upload failed");
@@ -600,9 +628,22 @@ export default function StagingPage() {
                   />
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
-                  <span>~{quota.uploads_remaining} uploads remaining today</span>
+                  <span>
+                    {quota.upload_limit_exceeded
+                      ? `Channel upload limit reached${quota.blocked_until ? ` — retry ${new Date(quota.blocked_until).toLocaleString()}` : ""}`
+                      : quota.api_quota_exhausted
+                        ? "YouTube API quota exhausted"
+                        : `~${quota.uploads_remaining} uploads remaining today`}
+                  </span>
                   <span>Resets at Pacific Midnight</span>
                 </div>
+                {(quota.failed_uploads > 0 || quota.last_error_message) && (
+                  <p className="text-[10px] text-amber-400/80 line-clamp-2">
+                    {quota.failed_uploads > 0
+                      ? `${quota.failed_uploads} failed upload${quota.failed_uploads === 1 ? "" : "s"} today`
+                      : quota.last_error_message}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -719,7 +760,13 @@ export default function StagingPage() {
               const isShort = chosenFormat === "vertical_blur" || chosenFormat === "vertical_crop" || chosenFormat === "third_person" || chosenFormat === "direct_crop" || chosenFormat === "cinematic";
               const isUploading = uploadingClipIds.has(render.clip_id);
               const uploadResult = uploadedClips[render.clip_id];
-              const isAlreadyUploaded = Boolean(uploadResult || render.youtube_upload);
+              const uploadFailed =
+                uploadResult?.status === "failed" ||
+                (!uploadResult && render.youtube_upload_status === "failed");
+              const uploadError =
+                uploadResult?.error_message || render.youtube_upload_error;
+              const isAlreadyUploaded =
+                uploadResult?.status === "completed" || Boolean(render.youtube_upload);
 
               return (
                 <div
@@ -740,6 +787,12 @@ export default function StagingPage() {
                           <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3" />
                             Published
+                          </span>
+                        )}
+                        {uploadFailed && (
+                          <span className="text-[10px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            Upload failed
                           </span>
                         )}
                       </div>
@@ -799,6 +852,13 @@ export default function StagingPage() {
                       </button>
                     </div>
                   </div>
+
+                  {uploadFailed && uploadError && (
+                    <div className="flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-950/30 px-3 py-2.5 text-[11px] text-rose-200">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
 
                   {/* 2-Column Main Section: Video Viewer (Left) + Metadata & AI Editor (Right) */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -1011,7 +1071,7 @@ export default function StagingPage() {
                         ) : (
                           <YoutubeIcon className="w-3.5 h-3.5" />
                         )}
-                        <span>{isUploading ? "Uploading..." : isAlreadyUploaded ? "Re-Upload" : "Upload to YouTube"}</span>
+                        <span>{isUploading ? "Uploading..." : uploadFailed ? "Retry Upload" : isAlreadyUploaded ? "Re-Upload" : "Upload to YouTube"}</span>
                       </button>
                     </div>
                   </div>

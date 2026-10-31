@@ -14,8 +14,16 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.rendering.audio import build_audio_filter_graph
+from app.rendering.branding import (
+    BrandingPlan,
+    build_branding_audio_filter,
+    build_branding_plan,
+    build_card_video_filter,
+    build_concat_filter,
+)
 from app.rendering.config import (
     CROP_PADDING_PRESETS,
+    BrandingConfig,
     RenderConfig,
     default_render_config,
 )
@@ -23,6 +31,7 @@ from app.rendering.filters import (
     build_landscape_filter,
     build_vertical_blur_filter,
     build_vertical_crop_filter,
+    build_watermark_filter,
 )
 from app.rendering.manifest import write_manifest
 from app.rendering.probe import probe_media
@@ -53,6 +62,13 @@ class RenderResult(BaseModel):
     effective_duration_seconds: float = 0.0
     requested_duration_seconds: float = 0.0
     clamped: bool = False
+    quality_preset: str | None = None
+    watermark_applied: bool = False
+    # Branded bookends (Phase 10.5)
+    total_duration_seconds: float = 0.0
+    branding_applied: bool = False
+    branding_intro_seconds: float = 0.0
+    branding_outro_seconds: float = 0.0
 
 
 @functools.lru_cache(maxsize=1)
@@ -256,6 +272,8 @@ class RenderEngine:
         encoder_flags: list[str] | None = None,
         narration_path: Path | None = None,
         progress_callback: Callable[[float, str], None] | None = None,
+        branding_plan: BrandingPlan | None = None,
+        source_fps: float = 30.0,
         *args,
         **kwargs,
     ):
@@ -343,6 +361,72 @@ class RenderEngine:
         modes = list(target_dict.keys())
         n_targets = len(modes)
 
+        # Branded bookends: each card is a still image looped for its duration and
+        # appended as an extra input, so one pass still renders every target.
+        branding_active = bool(branding_plan and branding_plan.active)
+        card_inputs: dict[str, tuple[int | None, int | None]] = {}
+        progress_duration = duration_seconds
+        next_input_index = 1 + (1 if narration_path else 0)
+        if branding_active and branding_plan is not None:
+            for mode_name in modes:
+                intro_card = branding_plan.intro_card(mode_name)
+                outro_card = branding_plan.outro_card(mode_name)
+                intro_idx: int | None = None
+                outro_idx: int | None = None
+                if intro_card:
+                    cmd.extend(
+                        [
+                            "-loop",
+                            "1",
+                            "-t",
+                            f"{branding_plan.intro_seconds:.3f}",
+                            "-i",
+                            str(intro_card),
+                        ]
+                    )
+                    intro_idx = next_input_index
+                    next_input_index += 1
+                if outro_card:
+                    cmd.extend(
+                        [
+                            "-loop",
+                            "1",
+                            "-t",
+                            f"{branding_plan.outro_seconds:.3f}",
+                            "-i",
+                            str(outro_card),
+                        ]
+                    )
+                    outro_idx = next_input_index
+                    next_input_index += 1
+                card_inputs[mode_name] = (intro_idx, outro_idx)
+            progress_duration = duration_seconds + branding_plan.padding_seconds
+
+        # Tier 3: channel watermark. One still-image input per target keeps the
+        # single-pass render intact and lets each output scale the logo for its
+        # own orientation.
+        watermark_active = bool(self.config.watermark.active)
+        watermark_inputs: dict[str, int] = {}
+        if watermark_active and self.config.watermark.path:
+            # The logo only covers the gameplay segment (not the branded cards),
+            # so its input length stays tied to the clip window. Looping it for
+            # the composed length instead would make `overlay` extend the main
+            # stream and silently lengthen every output.
+            logo_duration = max(0.1, duration_seconds)
+            for mode_name in modes:
+                cmd.extend(
+                    [
+                        "-loop",
+                        "1",
+                        "-t",
+                        f"{logo_duration:.3f}",
+                        "-i",
+                        str(self.config.watermark.path),
+                    ]
+                )
+                watermark_inputs[mode_name] = next_input_index
+                next_input_index += 1
+
         # Build filtergraph:
         filter_parts = []
 
@@ -429,10 +513,117 @@ class RenderEngine:
                     )
                 )
 
+        # 1b. Apply the channel watermark, then wrap each target in its
+        # branded cards when enabled.
+        video_map_labels: list[str] = []
+        for i, mode_name in enumerate(modes):
+            v_out = f"v_out_{i}"
+            v_composed = v_out
+            if watermark_active and mode_name in watermark_inputs:
+                is_landscape_mode = mode_name == "landscape"
+                wm_width = (
+                    self.config.landscape_width
+                    if is_landscape_mode
+                    else self.config.vertical_width
+                )
+                wm_height = (
+                    self.config.landscape_height
+                    if is_landscape_mode
+                    else self.config.vertical_height
+                )
+                v_composed = f"v_wm_{i}"
+                filter_parts.append(
+                    build_watermark_filter(
+                        watermark_input=f"{watermark_inputs[mode_name]}:v",
+                        main_input=v_out,
+                        output_label=v_composed,
+                        width=wm_width,
+                        height=wm_height,
+                        position=self.config.watermark.position,
+                        opacity=self.config.watermark.opacity,
+                        scale=self.config.watermark.scale,
+                        margin=self.config.watermark.margin,
+                        prefix=f"wm_{i}",
+                    )
+                )
+
+            if not branding_active:
+                video_map_labels.append(v_composed)
+                continue
+
+            intro_idx, outro_idx = card_inputs.get(mode_name, (None, None))
+            is_landscape = mode_name == "landscape"
+            card_w = (
+                self.config.landscape_width
+                if is_landscape
+                else self.config.vertical_width
+            )
+            card_h = (
+                self.config.landscape_height
+                if is_landscape
+                else self.config.vertical_height
+            )
+
+            intro_label: str | None = None
+            outro_label: str | None = None
+            if intro_idx is not None:
+                intro_label = f"brand_intro_{i}"
+                filter_parts.append(
+                    build_card_video_filter(
+                        input_label=f"{intro_idx}:v",
+                        output_label=intro_label,
+                        width=card_w,
+                        height=card_h,
+                        fps=source_fps,
+                    )
+                )
+            if outro_idx is not None:
+                outro_label = f"brand_outro_{i}"
+                filter_parts.append(
+                    build_card_video_filter(
+                        input_label=f"{outro_idx}:v",
+                        output_label=outro_label,
+                        width=card_w,
+                        height=card_h,
+                        fps=source_fps,
+                    )
+                )
+
+            # concat refuses links whose SAR differs, and the crop/blur filters
+            # inherit the source's (often non-square) sample aspect ratio while
+            # the cards are forced to 1:1. Normalise the clip segment to match.
+            main_label = f"v_brand_main_{i}"
+            filter_parts.append(f"[{v_composed}]setsar=1[{main_label}]")
+
+            final_label = f"v_final_{i}"
+            filter_parts.append(
+                build_concat_filter(
+                    intro_label=intro_label,
+                    main_label=main_label,
+                    outro_label=outro_label,
+                    output_label=final_label,
+                )
+            )
+            video_map_labels.append(final_label)
+
         # 2. Audio mixing & splitting into n_targets streams
         clean_audio_label = audio_label.strip("[]") if audio_filter else "0:a"
         if audio_filter:
             filter_parts.append(audio_filter)
+
+        # Branded cards carry no audio, so pad the clip audio with silence to keep
+        # lip-sync aligned behind the intro and the outro.
+        if branding_active and branding_plan is not None and audio_filter:
+            filter_parts.append(
+                build_branding_audio_filter(
+                    input_label=clean_audio_label,
+                    output_label="a_branded",
+                    intro_seconds=branding_plan.intro_seconds,
+                    main_seconds=duration_seconds,
+                    outro_seconds=branding_plan.outro_seconds,
+                )
+            )
+            clean_audio_label = "a_branded"
 
         if n_targets > 1:
             asplit_labels = "".join(f"[a_out_{i}]" for i in range(n_targets))
@@ -460,7 +651,7 @@ class RenderEngine:
             cmd.extend(
                 [
                     "-map",
-                    f"[v_out_{i}]",
+                    f"[{video_map_labels[i]}]",
                     "-map",
                     f"[a_out_{i}]",
                 ]
@@ -499,12 +690,12 @@ class RenderEngine:
                     if (
                         line.startswith("out_time_us=")
                         and progress_callback
-                        and duration_seconds > 0
+                        and progress_duration > 0
                     ):
                         val = line.split("=", 1)[1].strip()
                         if val.lstrip("-").isdigit():
                             elapsed_s = int(val) / 1_000_000.0
-                            fraction = min(1.0, max(0.0, elapsed_s / duration_seconds))
+                            fraction = min(1.0, max(0.0, elapsed_s / progress_duration))
                             current_pct = round(20.0 + (fraction * 65.0), 1)
                             if (
                                 current_pct - last_reported_pct >= 5.0
@@ -565,6 +756,7 @@ class RenderEngine:
         normalize_audio: bool | None = None,
         target_lufs: float | None = None,
         clamp_to_duration: bool | None = None,
+        branding: BrandingConfig | None = None,
     ) -> RenderResult:
         """
         Render a gameplay video window into selected high-fidelity exports in a single pass.
@@ -678,24 +870,58 @@ class RenderEngine:
             m: out_directory / f"{m}.mp4" for m in normalized_modes
         }
 
+        # 4b. Rasterise branded intro/outro cards for every target size
+        effective_branding = branding if branding is not None else self.config.branding
+        card_sizes: dict[str, tuple[int, int]] = {}
+        for m in normalized_modes:
+            is_landscape_mode = m == "landscape"
+            card_sizes[m] = (
+                self.config.landscape_width
+                if is_landscape_mode
+                else self.config.vertical_width,
+                self.config.landscape_height
+                if is_landscape_mode
+                else self.config.vertical_height,
+            )
+
+        branding_plan = (
+            build_branding_plan(
+                config=effective_branding,
+                sizes=card_sizes,
+                card_dir=out_directory / ".branding_cards",
+            )
+            if effective_branding is not None
+            else None
+        )
+
+        total_duration = effective_duration + (
+            branding_plan.padding_seconds if branding_plan else 0.0
+        )
+
         # 5. Execute Single-Pass Multi-Target Render
         if progress_callback:
             progress_callback(
                 20.0, f"Rendering {len(normalized_modes)} format(s) (single-pass)"
             )
 
-        self._render_all_targets_single_pass(
-            source_path=source_file,
-            start_seconds=start_seconds,
-            duration_seconds=effective_duration,
-            targets=targets,
-            crop_blur_padding=effective_crop_padding,
-            audio_filter=audio_filter,
-            audio_label=audio_label,
-            encoder_flags=encoder_flags,
-            narration_path=narr_file,
-            progress_callback=progress_callback,
-        )
+        try:
+            self._render_all_targets_single_pass(
+                source_path=source_file,
+                start_seconds=start_seconds,
+                duration_seconds=effective_duration,
+                targets=targets,
+                crop_blur_padding=effective_crop_padding,
+                audio_filter=audio_filter,
+                audio_label=audio_label,
+                encoder_flags=encoder_flags,
+                narration_path=narr_file,
+                progress_callback=progress_callback,
+                branding_plan=branding_plan,
+                source_fps=probe.fps or 30.0,
+            )
+        finally:
+            if branding_plan is not None:
+                branding_plan.cleanup()
 
         api_prefix = self.config.api_prefix
         outputs_meta: dict[str, dict[str, Any]] = {}
@@ -720,7 +946,7 @@ class RenderEngine:
                 "file_path": str(target_out),
                 "width": w,
                 "height": h,
-                "duration": effective_duration,
+                "duration": total_duration,
                 "size_bytes": target_out.stat().st_size,
                 "encoder": encoder_name,
             }
@@ -791,6 +1017,15 @@ class RenderEngine:
             target_lufs=effective_target_lufs,
             requested_duration_seconds=duration_seconds,
             clamped=is_clamped,
+            quality_preset=self.config.quality_preset,
+            watermark=self.config.watermark.describe(),
+            branding=(
+                branding_plan.describe(total_duration)
+                if branding_plan is not None
+                else effective_branding.describe()
+                if effective_branding is not None
+                else {"enabled": False}
+            ),
         )
         files_created.append(str(manifest_file))
 
@@ -851,4 +1086,14 @@ class RenderEngine:
             effective_duration_seconds=effective_duration,
             requested_duration_seconds=duration_seconds,
             clamped=is_clamped,
+            quality_preset=self.config.quality_preset,
+            watermark_applied=self.config.watermark.active,
+            total_duration_seconds=total_duration,
+            branding_applied=branding_plan is not None,
+            branding_intro_seconds=branding_plan.intro_seconds
+            if branding_plan
+            else 0.0,
+            branding_outro_seconds=branding_plan.outro_seconds
+            if branding_plan
+            else 0.0,
         )

@@ -1,6 +1,8 @@
 import {
   BatchStageHighlightsRequest,
   BatchStageHighlightsResponse,
+  ChannelProfile,
+  ChannelProfileUpdate,
   DeleteHighlightsResponse,
   DemoProjectResponse,
   DetectHighlightsRequest,
@@ -27,6 +29,9 @@ import {
   VideoListResponse,
   VideoStorageCleanupOptions,
   VideoStorageCleanupResult,
+  WatchScanResponse,
+  WatchStatusResponse,
+  WatermarkUploadResponse,
   YouTubeAuthStatus,
   YouTubeBatchUploadResponse,
   YouTubeChannelResponse,
@@ -666,6 +671,49 @@ export function getHighlightThumbnailUrl(
 }
 
 // -----------------------------------------------------------------------------
+// Channel Brand Profile Helpers
+// -----------------------------------------------------------------------------
+
+export async function fetchChannelProfile(): Promise<ChannelProfile> {
+  const res = await fetch(`${API_BASE}/channel/profile`, { cache: "no-store" });
+  return parseResponse<ChannelProfile>(res, "fetch channel profile");
+}
+
+export async function updateChannelProfile(
+  payload: ChannelProfileUpdate
+): Promise<ChannelProfile> {
+  const res = await fetch(`${API_BASE}/channel/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ChannelProfile>(res, "update channel profile");
+}
+
+export async function uploadChannelWatermark(
+  file: File
+): Promise<WatermarkUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/channel/watermark`, {
+    method: "POST",
+    body: formData,
+  });
+  return parseResponse<WatermarkUploadResponse>(res, "upload watermark");
+}
+
+export async function deleteChannelWatermark(): Promise<ChannelProfile> {
+  const res = await fetch(`${API_BASE}/channel/watermark`, {
+    method: "DELETE",
+  });
+  return parseResponse<ChannelProfile>(res, "delete watermark");
+}
+
+export function getChannelWatermarkUrl(version?: string | null): string {
+  return `${API_BASE}/channel/watermark${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+}
+
+// -----------------------------------------------------------------------------
 // Setup Wizard, In-App Settings, and Demo Helpers
 // -----------------------------------------------------------------------------
 
@@ -692,6 +740,23 @@ export async function updateSetupSettings(
     body: JSON.stringify(payload),
   });
   return parseResponse<SetupSettings>(res, "update runtime settings");
+}
+
+export async function fetchWatchStatus(): Promise<WatchStatusResponse> {
+  const res = await fetch(`${API_BASE}/videos/watch/status`, {
+    cache: "no-store",
+  });
+  return parseResponse<WatchStatusResponse>(res, "fetch watch folder status");
+}
+
+export async function scanWatchFolder(
+  dryRun = false
+): Promise<WatchScanResponse> {
+  const res = await fetch(
+    `${API_BASE}/videos/watch/scan${dryRun ? "?dry_run=true" : ""}`,
+    { method: "POST" }
+  );
+  return parseResponse<WatchScanResponse>(res, "scan watch folder");
 }
 
 export async function loadDemoProject(options: {

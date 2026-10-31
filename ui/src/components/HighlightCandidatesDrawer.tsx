@@ -4,6 +4,7 @@ import {
   batchStageHighlights,
   deleteHighlightCandidates,
   detectHighlights,
+  fetchChannelProfile,
   fetchHighlightCandidates,
   getHighlightStatus,
   getHighlightThumbnailUrl,
@@ -106,6 +107,16 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
   );
   const [batchMode, setBatchMode] = useState<string>("third_person");
   const [batchSchedule, setBatchSchedule] = useState<boolean>(true);
+
+  useEffect(() => {
+    fetchChannelProfile()
+      .then((profile) => {
+        if (profile.default_framing_preset) {
+          setBatchMode(profile.default_framing_preset);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Interaction feedback states
   const [copiedTitleId, setCopiedTitleId] = useState<string | null>(null);

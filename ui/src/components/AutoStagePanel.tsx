@@ -77,6 +77,11 @@ export const QuotaBar: React.FC<{ quota: YouTubeQuota; showDetails?: boolean }> 
     : usedPercent >= 80
       ? "bg-amber-400"
       : "bg-emerald-500";
+  const blockedMessage = quota.upload_limit_exceeded
+    ? `YouTube channel upload limit reached — retry after ${formatSchedule(quota.blocked_until)}`
+    : quota.blocked_reason === "api_quota_exceeded"
+      ? `YouTube API quota exhausted — resets ${formatSchedule(quota.blocked_until || quota.resets_at)}`
+      : null;
 
   return (
     <div className="space-y-1.5">
@@ -96,12 +101,22 @@ export const QuotaBar: React.FC<{ quota: YouTubeQuota; showDetails?: boolean }> 
         />
       </div>
       {showDetails && (
-        <div className="flex items-center justify-between text-[10px] text-slate-500">
-          <span>
-            {quota.uploads_remaining} of {quota.max_uploads_per_day} uploads left today
-            {!quota.can_upload ? " — quota exhausted" : ""}
-          </span>
-          <span>Resets {formatSchedule(quota.resets_at)}</span>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[10px] text-slate-500">
+            <span>
+              {quota.uploads_remaining} of {quota.max_uploads_per_day} uploads left today
+              {!quota.can_upload && !blockedMessage ? " — API quota exhausted" : ""}
+            </span>
+            <span>Resets {formatSchedule(quota.resets_at)}</span>
+          </div>
+          {blockedMessage && (
+            <p className="text-[10px] font-medium text-rose-300">{blockedMessage}</p>
+          )}
+          {quota.failed_uploads > 0 && (
+            <p className="text-[10px] text-amber-400/80">
+              {quota.failed_uploads} failed upload{quota.failed_uploads === 1 ? "" : "s"} today
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -232,20 +247,28 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
   const handlePublishNow = async (clipId: string) => {
     const quotaSummary = staged?.quota;
     if (quotaSummary && !quotaSummary.can_upload) {
-      const warning =
-        `Daily YouTube API quota is exhausted today ` +
-        `(${quotaSummary.units_used.toLocaleString()} / ${quotaSummary.daily_limit_units.toLocaleString()} units, ` +
-        `~${quotaSummary.max_uploads_per_day} uploads used). You can still attempt the upload — ` +
-        "it will likely fail with a quotaExceeded error on YouTube's side until the quota resets at Pacific midnight.\n\n" +
-        "Publish now anyway?";
+      const warning = quotaSummary.upload_limit_exceeded
+        ? `YouTube says this channel has reached its video upload limit ` +
+          `(uploadLimitExceeded). This is separate from the Data API quota and usually ` +
+          `clears within 24 hours.\n\nPublish now anyway?`
+        : quotaSummary.blocked_reason === "api_quota_exceeded"
+          ? `YouTube Data API quota is exhausted for this project. ` +
+            `It resets at ${formatSchedule(quotaSummary.resets_at)}.\n\nPublish now anyway?`
+          : `YouTube upload headroom is exhausted locally ` +
+            `(${quotaSummary.units_used.toLocaleString()} / ${quotaSummary.daily_limit_units.toLocaleString()} units). ` +
+            `You can still attempt the upload, but YouTube may reject it.\n\nPublish now anyway?`;
       if (!confirm(warning)) return;
     }
     setBusyClipId(clipId);
     setError(null);
     try {
-      await publishStagedClipNow(clipId);
+      const result = await publishStagedClipNow(clipId);
       await loadStaged();
-      setNotice("Upload started — track progress in the upload queue.");
+      setNotice(
+        result.status === "completed"
+          ? "Uploaded to YouTube."
+          : "Upload started — track progress in the upload queue."
+      );
       onStagedChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to publish clip");
@@ -380,6 +403,9 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                 const busy = busyClipId === job.clip_id;
                 const prevCopy = previousCopies[job.clip_id];
                 const isComparing = Boolean(comparing[job.clip_id] && prevCopy);
+                const uploadFailed =
+                  job.youtube_upload_status === "failed" ||
+                  Boolean(job.youtube_upload_error);
                 return (
                   <article
                     key={job.clip_id}
@@ -419,7 +445,19 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                       <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
                         {job.status}
                       </span>
+                      {uploadFailed && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 font-semibold">
+                          Upload failed
+                        </span>
+                      )}
                     </div>
+
+                    {uploadFailed && job.youtube_upload_error && (
+                      <div className="flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-950/30 px-3 py-2.5 text-[11px] text-rose-200">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>{job.youtube_upload_error}</span>
+                      </div>
+                    )}
 
                     {/* Regenerate metadata: AI vs deterministic copy */}
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/5 bg-slate-950/50 px-3 py-2">

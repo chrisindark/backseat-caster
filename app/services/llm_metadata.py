@@ -18,7 +18,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.services.upload_metadata import generate_upload_metadata
+from app.services.channel_profile import ChannelProfileService
+from app.services.upload_metadata import apply_title_template, generate_upload_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -620,6 +621,18 @@ class LLMMetadataService:
             clip_context=resolved_context,
             game=resolved_game,
         )
+
+        profile = ChannelProfileService.get_or_create(db)
+        if profile.title_template:
+            metadata["title"] = apply_title_template(
+                profile.title_template,
+                metadata.get("title") or "",
+                channel_name=profile.channel_name,
+                hero_name=metadata.get("hero_name") or resolved_hero,
+                game=metadata.get("game") or resolved_game,
+                event_type=getattr(candidate, "event_type", None),
+                clip_id=job.clip_id,
+            )
 
         RenderService.update_upload_selection(
             db,

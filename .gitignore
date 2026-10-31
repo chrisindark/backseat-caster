@@ -53,6 +53,10 @@ data/*.db-shm
 *.sqlite
 *.sqlite3
 
+# Runtime in-app settings (may contain a plaintext LLM API key)
+data/settings.json
+data/celerybeat-schedule
+
 # Environment files
 .env
 .env.local

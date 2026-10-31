@@ -69,10 +69,14 @@ def build_audio_filter_graph(
             f"[1:a]atrim=start=0,volume={narration_gain:.2f},"
             f"asetpts=PTS-STARTPTS{delay_filter},"
             f"apad=whole_dur={total_duration:.3f},"
-            f"atrim=duration={total_duration:.3f}[a_narr];"
-            f"[a_game][a_narr]sidechaincompress=threshold=0.1:ratio=4:attack=20:release=250,"
+            f"atrim=duration={total_duration:.3f},"
+            # The narration feeds both the sidechain key and the final mix, and
+            # FFmpeg links can only be consumed once; without the split the
+            # second consumer gets no audio and the voiceover is inaudible.
+            f"asplit=2[a_narr_key][a_narr_mix];"
+            f"[a_game][a_narr_key]sidechaincompress=threshold=0.1:ratio=4:attack=20:release=250,"
             f"volume={ducked_game_gain:.2f}[a_ducked];"
-            f"[a_ducked][a_narr]amix=inputs=2:duration=first:dropout_transition=2,"
+            f"[a_ducked][a_narr_mix]amix=inputs=2:duration=first:dropout_transition=2,"
             f"atrim=duration={total_duration:.3f}"
             f"{limiter_suffix}{norm_suffix}[a_out]"
         )

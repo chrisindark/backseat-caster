@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.core.responses import BaseResponse
 from app.database import get_db
@@ -132,27 +137,20 @@ def get_bell_chime():
 
 @router.get("/branding/preview")
 def preview_branding_card(
-    kind: str = "intro",
-    orientation: str = "landscape",
+    kind: Literal["intro", "outro", "overlay"] = "intro",
+    orientation: Literal["landscape", "vertical"] = "landscape",
     db: Session = Depends(get_db),
 ):
     """Render a sample card/overlay PNG with the current profile branding."""
-    import tempfile
-    from pathlib import Path
-
     from app.rendering.branding import (
         render_card_png,
         render_cta_overlay_png,
     )
-    from app.services.channel_profile import ChannelProfileService
 
     branding = ChannelProfileService.branding_config(db)
     cta = ChannelProfileService.cta_config(db)
 
-    if orientation == "vertical":
-        size = (1080, 1920)
-    else:
-        size = (1920, 1080)
+    size = (1080, 1920) if orientation == "vertical" else (1920, 1080)
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="brand_preview_"))
     out_path = tmp_dir / f"{kind}_{orientation}.png"
@@ -179,7 +177,7 @@ def preview_branding_card(
             text_color=branding.text_color,
             font_path=branding.font_path,
         )
-    elif kind == "overlay":
+    else:
         render_cta_overlay_png(
             out_path,
             size=size,
@@ -189,10 +187,10 @@ def preview_branding_card(
             text_color=branding.text_color,
             font_path=branding.font_path,
         )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown preview kind: {kind}",
-        )
 
-    return FileResponse(path=out_path, media_type="image/png")
+    return FileResponse(
+        path=out_path,
+        media_type="image/png",
+        # The preview is a throwaway file; clean up once it has been streamed.
+        background=BackgroundTask(shutil.rmtree, tmp_dir, ignore_errors=True),
+    )

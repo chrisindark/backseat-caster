@@ -15,6 +15,7 @@ FramingPreset = Literal[
 ]
 QualityPreset = Literal["high", "compact", "archive"]
 PrivacyStatus = Literal["public", "unlisted", "private"]
+CtaStyle = Literal["outro_card", "overlay"]
 
 
 def normalize_hashtags(values: list[str] | None) -> list[str]:
@@ -61,7 +62,7 @@ class ChannelProfileResponse(BaseModel):
 
     # CTA voiceover (TTS + bell chime)
     cta_enabled: bool = False
-    cta_style: str = "outro_card"
+    cta_style: CtaStyle = "outro_card"
     cta_seconds: float = 3.5
     cta_headline: str = "SUBSCRIBE & TAP THE BELL"
     cta_subtitle: str = "Click the bell for more clips"
@@ -110,7 +111,7 @@ class ChannelProfileUpdate(BaseModel):
     max_clip_seconds: float | None = Field(None, ge=15.0, le=300.0)
 
     cta_enabled: bool | None = None
-    cta_style: str | None = Field(None, max_length=16)
+    cta_style: CtaStyle | None = None
     cta_seconds: float | None = Field(None, ge=2.0, le=10.0)
     cta_headline: str | None = Field(None, max_length=255)
     cta_subtitle: str | None = Field(None, max_length=255)
@@ -180,6 +181,7 @@ class WatermarkUploadResponse(BaseModel):
 __all__ = [
     "ChannelProfileResponse",
     "ChannelProfileUpdate",
+    "CtaStyle",
     "FramingPreset",
     "PrivacyStatus",
     "QualityPreset",

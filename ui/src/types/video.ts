@@ -319,6 +319,28 @@ export interface RenderManifest {
     scale?: number;
     margin?: number;
   };
+  branding?: {
+    enabled: boolean;
+    intro?: boolean;
+    outro?: boolean;
+    intro_seconds?: number;
+    outro_seconds?: number;
+    padding_seconds?: number;
+    total_duration_seconds?: number;
+    channel_name?: string | null;
+  };
+  cta?: {
+    enabled: boolean;
+    style?: "outro_card" | "overlay" | string;
+    seconds?: number;
+    overlay?: boolean;
+    headline?: string;
+    subtitle?: string;
+    speech_text?: string;
+    voice?: string;
+    voiceover?: boolean;
+    voiceover_start_seconds?: number;
+  };
   auto_staged?: boolean;
   highlight_candidate_id?: string | null;
   youtube_upload_status?: string | null;

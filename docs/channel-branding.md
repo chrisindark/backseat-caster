@@ -36,7 +36,7 @@ The logo is saved under `data/channel/` and served for preview at
 | Watermark position/opacity/size/margin | Every new render, in all requested formats, composited before optional intro/outro cards |
 | Intro/outro card toggle, copy, colours, lengths | Every new render: a channel card is prepended and a `SUBSCRIBE` card appended inside the same FFmpeg pass (edit at `/channel` → *Intro & Outro Cards*) |
 | Max clip length (upload ceiling) | Enforced on the composed duration (clip + bookends); 60 / 72 / 88 are soft labels inside it, never gates. Default 90 s, editable at `/channel` → *Max Clip Length* or via `MAX_CLIP_SECONDS` |
-| CTA voiceover (TTS + bell) | Optional neural voiceover + bell chime mixed into the outro of every render when enabled (edited at `/channel` → *CTA Voiceover*). Synthesised with edge-tts, cached by text + voice, degrades to silence offline. |
+| CTA voiceover (TTS + bell) | Optional neural voiceover + bell chime, independent of the intro/outro cards (edited at `/channel` → *CTA Voiceover*). `overlay` burns a lower-third banner onto the last `cta_seconds` of gameplay with the voiceover over it; `outro_card` speaks over the branded outro card, or over the tail of the clip when no outro card is enabled. Synthesised with edge-tts, cached by text + voice, retries after an offline render instead of caching silence. |
 | Framing preset | Render requests that omit a preset, auto-stage, Studio/batch-staging preselects |
 | Quality preset | Encoder bitrate/CRF selection for new render jobs |
 | Title template | Auto-generated and regenerated titles. Tokens: `{title}`, `{channel}`, `{hero}`, `{game}`, `{event}`, `{date}`, `{clip_id}` |
@@ -57,9 +57,16 @@ watermark settings.
 If the watermark file is removed from disk, rendering degrades gracefully: the
 overlay is skipped and the clip renders unbranded.
 
+CTA overlays are rasterised to a transparent full-frame PNG per output format
+and composited for the last `cta_seconds` of the gameplay segment, so the pill
+sits exactly where `GET /api/v1/channel/branding/preview` draws it. The generated
+PNG directory is deleted after the render. `manifest.json` records the resolved
+CTA settings (`cta` block: style, window, copy, voice, whether the voiceover was
+applied and when it starts).
+
 ---
 
-## Planned Extensions
+## CTA Pipeline Reference
 
-- **Intro & "Subscribe & Bell" CTA Pipeline:** Complete specification and multi-agent milestones for animated lower-third overlay banners, end card screens, edge-tts audio synthesis, and bell chime mixing are documented in [intro-cta-branding-plan.md](intro-cta-branding-plan.md).
+- **Intro & "Subscribe & Bell" CTA Pipeline:** The specification and multi-agent milestones for the lower-third overlay banner, end card screen, edge-tts synthesis and bell chime mixing live in [intro-cta-branding-plan.md](intro-cta-branding-plan.md). Both CTA styles, the overlay window, the TTS cache, and the 90 s composed-duration ceiling are implemented.
 

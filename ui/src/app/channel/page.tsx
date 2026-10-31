@@ -906,9 +906,12 @@ export default function ChannelProfilePage() {
                       CTA Voiceover (TTS + Bell)
                     </h2>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Synthesises a neural voiceover plus the bell chime and mixes
-                      it into the outro of every render. Requires network on first
-                      use; results are cached by text + voice.
+                      Synthesises a neural voiceover plus the bell chime. The
+                      lower-third overlay burns a banner onto the last seconds of
+                      gameplay; the outro-card style speaks over your branded
+                      outro. Works independently of the intro/outro cards. Needs
+                      network on first synthesis, falls back to silence offline
+                      and retries on the next render.
                     </p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
@@ -936,12 +939,17 @@ export default function ChannelProfilePage() {
                       className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
                     >
                       <option value="outro_card">Outro card</option>
-                      <option value="overlay">In-video overlay (planned)</option>
+                      <option value="overlay">In-video lower-third overlay</option>
                     </select>
+                    <span className="block text-[10px] text-slate-500 mt-1">
+                      {ctaStyle === "overlay"
+                        ? "No extra runtime; the banner sits on top of the gameplay."
+                        : "Plays over the branded outro card."}
+                    </span>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Voiceover length{" "}
+                      {ctaStyle === "overlay" ? "Overlay window" : "Voiceover length"}{" "}
                       <span className="font-mono text-amber-300">
                         {ctaSeconds.toFixed(1)}s
                       </span>
@@ -955,6 +963,13 @@ export default function ChannelProfilePage() {
                       onChange={(e) => setCtaSeconds(Number(e.target.value))}
                       className="w-full accent-amber-500"
                     />
+                    <span className="block text-[10px] text-slate-500 mt-1">
+                      {ctaStyle === "overlay"
+                        ? "Banner and voiceover both sit in the final seconds of the clip; longer scripts are trimmed."
+                        : brandingEnabled && brandingOutro
+                          ? `Capped to the outro card length (${brandingOutroSeconds.toFixed(1)}s).`
+                          : "Capped to the outro card length; enable an outro card to use this style as intended."}
+                    </span>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
@@ -979,6 +994,14 @@ export default function ChannelProfilePage() {
                     />
                   </div>
                 </div>
+
+                {ctaEnabled && ctaStyle === "outro_card" && !(brandingEnabled && brandingOutro) ? (
+                  <p className="text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                    No outro card is enabled, so the voiceover plays over the end
+                    of the clip instead. Enable Branded Intro &amp; Outro cards for
+                    a dedicated CTA card.
+                  </p>
+                ) : null}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">

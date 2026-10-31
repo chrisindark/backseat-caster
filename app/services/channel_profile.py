@@ -29,7 +29,13 @@ from app.schemas.channel import (
 logger = logging.getLogger(__name__)
 
 PROFILE_ID = 1
+CTA_STYLES = ("outro_card", "overlay")
 WATERMARK_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _cta_style(raw: str | None) -> str:
+    """Coerce a stored CTA style, so a legacy/unknown value cannot break renders."""
+    return raw if raw in CTA_STYLES else "outro_card"
 MAX_WATERMARK_BYTES = 15 * 1024 * 1024
 
 #: Free-text columns that are stored as ``NULL`` when blank, so the render
@@ -207,7 +213,7 @@ class ChannelProfileService:
             cta_enabled=bool(profile.cta_enabled)
             if profile.cta_enabled is not None
             else False,
-            cta_style=profile.cta_style or "outro_card",
+            cta_style=_cta_style(profile.cta_style),
             cta_seconds=float(profile.cta_seconds)
             if profile.cta_seconds is not None
             else 3.5,
@@ -350,7 +356,7 @@ class ChannelProfileService:
             enabled=bool(profile.cta_enabled)
             if profile.cta_enabled is not None
             else False,
-            style=profile.cta_style or "outro_card",
+            style=_cta_style(profile.cta_style),
             seconds=float(profile.cta_seconds)
             if profile.cta_seconds is not None
             else 3.5,

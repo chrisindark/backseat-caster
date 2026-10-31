@@ -304,17 +304,22 @@ class BrandingPlan:
 
     def cleanup(self) -> None:
         """Remove generated card images once FFmpeg has consumed them."""
-        if not self.card_dir or not self.card_dir.exists():
-            return
-        for leftover in self.card_dir.glob("*.png"):
-            try:
-                leftover.unlink()
-            except OSError:  # pragma: no cover - best effort
-                pass
+        cleanup_png_dir(self.card_dir)
+
+
+def cleanup_png_dir(directory: Path | None) -> None:
+    """Delete a throwaway PNG directory (branded cards, CTA overlays)."""
+    if not directory or not directory.exists():
+        return
+    for leftover in directory.glob("*.png"):
         try:
-            self.card_dir.rmdir()
+            leftover.unlink()
         except OSError:  # pragma: no cover - best effort
             pass
+    try:
+        directory.rmdir()
+    except OSError:  # pragma: no cover - best effort
+        pass
 
 
 def build_branding_plan(

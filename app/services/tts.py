@@ -14,19 +14,19 @@ import logging
 import subprocess
 from pathlib import Path
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_VOICE = "en-US-ChristopherNeural"
 DEFAULT_SPEECH_TEXT = "Subscribe to the channel and tap the bell for more clips."
-BELL_SEARCH_PATHS = (
-    Path("data/bell_chime.wav"),
-    Path("data/audio/bell_chime.wav"),
-    Path("app/assets/audio/bell_chime.wav"),
-)
+
+#: Bell chime bundled with the app (independent of the process working directory).
+BUNDLED_BELL = Path(__file__).resolve().parent.parent / "assets" / "audio" / "bell_chime.wav"
 
 
 def _cache_dir() -> Path:
-    path = Path("data/channel/tts_cache")
+    path = settings.channel_assets_path / "tts_cache"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -36,7 +36,12 @@ def _md5_key(text: str, voice: str) -> str:
 
 
 def _find_bell() -> Path | None:
-    for candidate in BELL_SEARCH_PATHS:
+    """Prefer a creator-supplied chime, then the bundled asset."""
+    candidates = (
+        settings.channel_assets_path / "bell_chime.wav",
+        BUNDLED_BELL,
+    )
+    for candidate in candidates:
         if candidate.exists() and candidate.is_file():
             return candidate
     return None
@@ -105,6 +110,44 @@ class TTSService:
         return target
 
     @classmethod
+    def _assemble_wav(
+        cls,
+        output: Path,
+        speech_path: Path,
+        bell_path: Path | None,
+        *,
+        bell_offset_seconds: float,
+        bell_volume: float,
+        max_seconds: float | None,
+    ) -> bool:
+        """Transcode/mix speech (+bell) into ``output``; return True on success."""
+        args = ["ffmpeg", "-y", "-i", str(speech_path)]
+        if bell_path is not None:
+            args.extend(["-i", str(bell_path)])
+            delay_ms = int(round(bell_offset_seconds * 1000))
+            limit = max_seconds or 6.0
+            filter_complex = (
+                f"[1:a]adelay={delay_ms}|{delay_ms},volume={bell_volume:.2f}[bell];"
+                f"[0:a][bell]amix=inputs=2:duration=longest:dropout_transition=2,"
+                f"apad=pad_dur={limit:.3f},atrim=duration={limit:.3f},"
+                f"loudnorm=I=-14:TP=-1.5:LRA=11[a_out]"
+            )
+            args.extend(["-filter_complex", filter_complex, "-map", "[a_out]"])
+        elif max_seconds:
+            args.extend(["-t", f"{max_seconds:.3f}"])
+        args.extend(["-ar", "48000", "-ac", "2", str(output)])
+        try:
+            subprocess.run(
+                args,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return False
+        return output.exists() and output.stat().st_size > 0
+
+    @classmethod
     def generate_cta_audio(
         cls,
         speech_text: str,
@@ -112,18 +155,27 @@ class TTSService:
         include_bell: bool = True,
         bell_offset_seconds: float = 1.5,
         bell_volume: float = 0.7,
+        max_seconds: float | None = None,
     ) -> Path | None:
         """Return a ready-to-mux WAV combining speech and the bell chime.
 
-        Returns ``None`` when synthesis is unavailable; callers should then
-        skip CTA audio rather than fail the render.
+        ``max_seconds`` caps the mix to the window the video gives the CTA
+        (overlay duration or outro card length). Returns ``None`` when synthesis
+        is unavailable; callers should then skip CTA audio rather than fail the
+        render.
         """
         speech_text = (speech_text or "").strip() or DEFAULT_SPEECH_TEXT
+        limit = float(max_seconds) if max_seconds and max_seconds > 0 else None
         cache_dir = _cache_dir()
-        key = _md5_key(
-            f"{speech_text}|bell={include_bell}|{bell_offset_seconds}", voice
-        )
+        key_input = f"{speech_text}|bell={include_bell}|{bell_offset_seconds}"
+        if limit is not None:
+            key_input += f"|max={limit:.3f}"
+        key = _md5_key(key_input, voice)
         cached = cache_dir / f"{key}_cta.wav"
+        # Silent placeholders never live at a cache path, so an offline render
+        # cannot make every later render permanently silent.
+        fallback = cache_dir / f"{key}_cta.fallback.wav"
+        working = cache_dir / f"{key}_cta.partial.wav"
         if cached.exists() and cached.stat().st_size > 0:
             return cached
 
@@ -136,90 +188,50 @@ class TTSService:
             if include_bell:
                 estimated = max(estimated, bell_offset_seconds + 1.5)
             logger.warning("TTS unavailable; writing silent CTA placeholder")
-            return cls._silent_wav(estimated, cached)
+            return cls._silent_wav(min(estimated, limit) if limit else estimated, fallback)
 
-        # No bell available: just transcode the speech to WAV.
-        if bell_path is None or not include_bell:
-            try:
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        str(speech_path),
-                        "-ar",
-                        "48000",
-                        "-ac",
-                        "2",
-                        str(cached),
-                    ],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                if cached.exists() and cached.stat().st_size > 0:
-                    return cached
-            except Exception as exc:
-                logger.warning("Speech transcode failed (%s)", exc)
-            return cls._silent_wav(3.0, cached)
+        assembled = cls._assemble_wav(
+            working,
+            speech_path,
+            bell_path if include_bell else None,
+            bell_offset_seconds=bell_offset_seconds,
+            bell_volume=bell_volume,
+            max_seconds=limit,
+        )
+        if not assembled and bell_path is not None and include_bell:
+            logger.warning("CTA audio mix failed; falling back to speech only")
+            assembled = cls._assemble_wav(
+                working,
+                speech_path,
+                None,
+                bell_offset_seconds=bell_offset_seconds,
+                bell_volume=bell_volume,
+                max_seconds=limit,
+            )
+        if not assembled:
+            working.unlink(missing_ok=True)
+            return cls._silent_wav(min(3.0, limit) if limit else 3.0, fallback)
 
-        # Mix speech + bell chime (bell delayed by bell_offset_seconds).
+        working.replace(cached)
+        logger.info("Assembled CTA audio -> %s", cached)
+        cls._warn_if_window_filled(cached, limit)
+        return cached
+
+    @staticmethod
+    def _warn_if_window_filled(path: Path, limit: float | None) -> None:
+        """Flag a CTA whose speech runs into the configured window cap."""
+        if not limit:
+            return
         try:
-            delay_ms = int(round(bell_offset_seconds * 1000))
-            filter_complex = (
-                f"[1:a]adelay={delay_ms}|{delay_ms},volume={bell_volume:.2f}[bell];"
-                f"[0:a][bell]amix=inputs=2:duration=longest:dropout_transition=2,"
-                f"apad=pad_dur=6,atrim=duration=6,"
-                f"loudnorm=I=-14:TP=-1.5:LRA=11[a_out]"
-            )
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(speech_path),
-                    "-i",
-                    str(bell_path),
-                    "-filter_complex",
-                    filter_complex,
-                    "-map",
-                    "[a_out]",
-                    "-ar",
-                    "48000",
-                    "-ac",
-                    "2",
-                    str(cached),
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            if cached.exists() and cached.stat().st_size > 0:
-                logger.info("Assembled CTA audio -> %s", cached)
-                return cached
-        except Exception as exc:
+            import wave
+
+            with wave.open(str(path), "rb") as wav:
+                duration = wav.getnframes() / wav.getframerate()
+        except Exception:  # pragma: no cover - defensive
+            return
+        if duration >= limit - 0.05:
             logger.warning(
-                "CTA audio mix failed (%s); falling back to speech only", exc
+                "CTA voiceover fills its %.1fs window; lengthen the CTA/outro "
+                "duration or shorten the speech script.",
+                limit,
             )
-            try:
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        str(speech_path),
-                        "-ar",
-                        "48000",
-                        "-ac",
-                        "2",
-                        str(cached),
-                    ],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                if cached.exists() and cached.stat().st_size > 0:
-                    return cached
-            except Exception:
-                pass
-        return cls._silent_wav(3.0, cached)

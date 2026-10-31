@@ -1232,35 +1232,48 @@ class RenderService:
             branding_config = ChannelProfileService.branding_config(db)
             duration_budget = ChannelProfileService.duration_budget(db)
 
-            # Optional CTA voiceover (TTS + bell chime) played over the outro.
+            # Optional CTA voiceover (TTS + bell chime). It plays over the
+            # outro card when there is one, otherwise over the tail of the
+            # clip, so enabling the CTA does not require branded cards.
             cta_narration_path: Path | None = narr_file
             cta_narration_start = 0.0
             cta_audio_total: float | None = None
-            if profile.cta_enabled and branding_config.has_bookends:
+            if profile.cta_enabled:
                 try:
                     from app.services.tts import TTSService
 
+                    clip_seconds = float(job.duration_seconds or 0.0)
+                    outro_seconds = (
+                        branding_config.outro_seconds
+                        if branding_config.has_outro
+                        else 0.0
+                    )
+                    style = getattr(profile, "cta_style", "outro_card")
+                    plays_over_outro = style == "outro_card" and outro_seconds > 0
+                    # The audio is sized to the window the video actually gives
+                    # it, instead of a fixed length that gets cut mid-sentence.
+                    cta_window = float(profile.cta_seconds or 3.5)
+                    if plays_over_outro:
+                        cta_window = min(cta_window, outro_seconds)
+                    else:
+                        cta_window = min(cta_window, clip_seconds or cta_window)
                     cta_audio = TTSService.generate_cta_audio(
                         speech_text=profile.cta_speech_text or "",
                         voice=profile.cta_voice or "en-US-ChristopherNeural",
                         include_bell=True,
+                        max_seconds=cta_window,
                     )
                     if cta_audio is not None:
                         cta_narration_path = cta_audio
-                        clip_seconds = float(job.duration_seconds or 0.0)
-                        if getattr(profile, "cta_style", "outro_card") == "overlay":
+                        if plays_over_outro:
+                            cta_narration_start = clip_seconds
+                            cta_audio_total = clip_seconds + float(outro_seconds)
+                        else:
+                            # Overlay mode (or no outro card to speak over).
                             cta_narration_start = max(
-                                0.0, clip_seconds - float(profile.cta_seconds or 3.5)
+                                0.0, clip_seconds - cta_window
                             )
                             cta_audio_total = clip_seconds
-                        else:
-                            cta_narration_start = clip_seconds
-                            outro_seconds = (
-                                branding_config.outro_seconds
-                                if branding_config.has_outro
-                                else 0.0
-                            )
-                            cta_audio_total = clip_seconds + float(outro_seconds)
                         logger.info(
                             "CTA voiceover enabled for %s: %s (starts at %.1fs)",
                             job.clip_id,

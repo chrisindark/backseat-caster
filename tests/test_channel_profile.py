@@ -1,7 +1,9 @@
 """Tests for Tier 3 channel brand consistency."""
 
 import base64
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -303,3 +305,58 @@ def test_duration_budget_resolves_from_profile(client, db_session, monkeypatch):
     assert budget.max_seconds == 75.0
     assert budget.bookend_seconds == pytest.approx(2.0)
     assert budget.clip_budget == pytest.approx(73.0)
+
+
+def test_channel_profile_rejects_unknown_cta_style(client):
+    """An invalid style would make every render and preview fail downstream."""
+    res = client.put(
+        f"{settings.API_PREFIX}/channel/profile", json={"cta_style": "banner"}
+    )
+    assert res.status_code == 422
+
+    res = client.put(
+        f"{settings.API_PREFIX}/channel/profile", json={"cta_style": "overlay"}
+    )
+    assert res.status_code == 200
+    assert res.json()["response"]["cta_style"] == "overlay"
+
+
+def test_legacy_unknown_cta_style_is_coerced(db_session):
+    """Rows written before validation existed must not wedge the profile."""
+    from app.services.channel_profile import ChannelProfileService
+
+    profile = ChannelProfileService.get_or_create(db_session)
+    profile.cta_style = "banner"
+    db_session.commit()
+
+    assert ChannelProfileService.cta_config(db_session).style == "outro_card"
+    response = ChannelProfileService.to_response(db_session, profile)
+    assert response.cta_style == "outro_card"
+
+
+def test_branding_preview_cleans_up_its_temp_files(client, monkeypatch):
+    """Preview PNGs are throwaway; serving one must not leak a temp directory."""
+    created: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def spy(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        created.append(Path(path))
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", spy)
+    res = client.get(
+        f"{settings.API_PREFIX}/channel/branding/preview"
+        "?kind=overlay&orientation=vertical"
+    )
+
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    assert created and all(not path.exists() for path in created)
+
+
+def test_branding_preview_rejects_unknown_parameters(client):
+    res = client.get(
+        f"{settings.API_PREFIX}/channel/branding/preview?orientation=sideways"
+    )
+    assert res.status_code == 422

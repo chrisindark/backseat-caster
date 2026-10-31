@@ -20,6 +20,7 @@ from app.rendering.branding import (
     build_branding_plan,
     build_card_video_filter,
     build_concat_filter,
+    cleanup_png_dir,
     render_cta_overlay_png,
 )
 from app.rendering.config import (
@@ -160,6 +161,25 @@ class RenderEngine:
             max_seconds=self.config.max_total_seconds,
             bookend_seconds=bookend_seconds,
         )
+
+    def _cta_summary(
+        self, *, has_voiceover: bool, voiceover_start_seconds: float
+    ) -> dict[str, Any]:
+        """Manifest-friendly record of the CTA settings that produced this clip."""
+        cta = self.config.cta
+        overlay = bool(cta.enabled and cta.style == "overlay")
+        return {
+            "enabled": bool(cta.enabled),
+            "style": cta.style,
+            "seconds": cta.seconds,
+            "overlay": overlay,
+            "headline": cta.headline,
+            "subtitle": cta.subtitle,
+            "speech_text": cta.speech_text,
+            "voice": cta.voice,
+            "voiceover": has_voiceover,
+            "voiceover_start_seconds": round(max(0.0, voiceover_start_seconds), 3),
+        }
 
     def _render_single_target(
         self,
@@ -608,6 +628,24 @@ class RenderEngine:
                     )
                 )
 
+            # CTA in-video overlay: composite the lower-third pill onto the
+            # gameplay segment for the last `cta_seconds` of the clip. This is
+            # independent of the branded cards, so the CTA still shows when
+            # intro/outro cards are switched off.
+            cta_overlay_idx = overlay_inputs.get(mode_name)
+            if cta_overlay_idx is not None:
+                start_time = max(0.0, duration_seconds - float(self.config.cta.seconds))
+                overlay_label = f"v_cta_overlay_{i}"
+                filter_parts.append(
+                    # The overlay PNG is already a full-frame canvas with the
+                    # pill at its final position, so composite it at the origin.
+                    f"[{v_composed}][{cta_overlay_idx}:v]overlay="
+                    f"(W-w)/2:H-h:"
+                    f"enable='between(t,{start_time:.3f},{duration_seconds:.3f})'"
+                    f"[{overlay_label}]"
+                )
+                v_composed = overlay_label
+
             if not branding_active:
                 video_map_labels.append(v_composed)
                 continue
@@ -649,20 +687,6 @@ class RenderEngine:
                         fps=source_fps,
                     )
                 )
-
-            # CTA in-video overlay: composite the lower-third pill onto the
-            # gameplay segment for the last `cta_seconds` of the clip.
-            cta_overlay_idx = overlay_inputs.get(mode_name)
-            if cta_overlay_idx is not None:
-                start_time = max(0.0, duration_seconds - float(self.config.cta.seconds))
-                overlay_label = f"v_cta_overlay_{i}"
-                filter_parts.append(
-                    f"[{v_composed}][{cta_overlay_idx}:v]overlay="
-                    f"(W-w)/2:H-h-{max(8, oh // 20)}:"
-                    f"enable='between(t,{start_time:.3f},{duration_seconds:.3f})'"
-                    f"[{overlay_label}]"
-                )
-                v_composed = overlay_label
 
             # concat refuses links whose SAR differs, and the crop/blur filters
             # inherit the source's (often non-square) sample aspect ratio while
@@ -800,6 +824,7 @@ class RenderEngine:
                 except Exception:
                     pass
             err_thread.join(timeout=2.0)
+            cleanup_png_dir(overlay_dir)
 
         err_msg = "".join(stderr_output).strip()
 
@@ -1010,17 +1035,6 @@ class RenderEngine:
         finally:
             if branding_plan is not None:
                 branding_plan.cleanup()
-            _overlay_dir = locals().get("overlay_dir")
-            if _overlay_dir is not None and _overlay_dir.exists():
-                for leftover in _overlay_dir.glob("*.png"):
-                    try:
-                        leftover.unlink()
-                    except OSError:
-                        pass
-                try:
-                    _overlay_dir.rmdir()
-                except OSError:
-                    pass
 
         api_prefix = self.config.api_prefix
         outputs_meta: dict[str, dict[str, Any]] = {}
@@ -1124,6 +1138,10 @@ class RenderEngine:
                 else effective_branding.describe()
                 if effective_branding is not None
                 else {"enabled": False}
+            ),
+            cta=self._cta_summary(
+                has_voiceover=narr_file is not None,
+                voiceover_start_seconds=narration_start_seconds,
             ),
             duration_budget=duration_budget.describe_composed(total_duration),
         )

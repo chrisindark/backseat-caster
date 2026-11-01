@@ -34,7 +34,7 @@ The new card design and complete-CTA-audio behavior are implemented. Cards are s
 - Keep intro/outro cards optional and make their preview match the final render.
 - Keep final render duration, manifest metadata, staging, and upload selection aligned.
 
-**Current gap:** frame rate follows the source, and the standard quality presets do not yet target the plan’s 12–20 Mbps video bitrate. These are scheduled for the quality milestone rather than silently assumed to be done.
+**Resolved:** Target frame rate selection (30/60 fps) and 12–20 Mbps quality bitrates were fully delivered and verified in Milestone 6.
 
 ### Milestone 1 — Presentation presets and defaults **(implemented)**
 
@@ -256,11 +256,11 @@ not stream sync or that the payoff survives into the encoded file.
 
 Target files: `tests/test_publish_path_verification.py`.
 
-- [ ] Assert the audio and video stream durations agree within a small tolerance
+- [x] Assert the audio and video stream durations agree within a small tolerance
       for overlay-only, intro-only, outro-only, and gameplay-first renders.
-- [ ] Sample frames at the expected overlay timestamps and assert the overlay is
+- [x] Sample frames at the expected overlay timestamps and assert the overlay is
       present where intended and absent after its window ends.
-- [ ] Assert the final elimination window is still intact when kill effects are
+- [x] Assert the final elimination window is still intact when kill effects are
       enabled.
 
 **Acceptance:** the added checks fail on a deliberately offset or clipped
@@ -268,13 +268,13 @@ render and pass on the current pipeline.
 
 ### Step 7.7 — Reconcile documentation
 
-- [ ] Update `docs/channel-branding.md` with the new controls, the music upload
+- [x] Update `docs/channel-branding.md` with the new controls, the music upload
       flow, and the advanced override table.
-- [ ] Update `ROADMAP.md` so the Tier 3 branding entry lists the presets,
+- [x] Update `ROADMAP.md` so the Tier 3 branding entry lists the presets,
       overlays, tracking, audio/loop tools, and quality targets.
-- [ ] Mark this follow-up section complete, or move any deferred items into a
+- [x] Mark this follow-up section complete, or move any deferred items into a
       clearly labelled "Deferred" subsection with the reason.
-- [ ] Remove the now-resolved "Current gap" note under Milestone 0 (frame rate
+- [x] Remove the now-resolved "Current gap" note under Milestone 0 (frame rate
       and 12–20 Mbps bitrate were delivered in Milestone 6).
 
 **Acceptance:** docs match the shipped UI/API, and no milestone claims work that

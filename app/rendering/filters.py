@@ -59,13 +59,15 @@ def build_watermark_filter(
     opacity: float = 0.85,
     scale: float = 0.14,
     margin: float = 0.03,
+    start_seconds: float = 0.0,
+    end_seconds: float | None = None,
     prefix: str = "wm",
 ) -> str:
     """Overlay a scaled, semi-transparent logo onto a composed target frame.
 
     The logo is scaled relative to the output width, so the same source asset
     looks identical on 16:9 landscape and 9:16 vertical exports. ``overlay``
-    repeats the still image for the life of the clip.
+    repeats the still image for the specified time window.
     """
     wm_w = max(2, int(width * max(0.02, min(0.6, scale))))
     margin_px = max(0, int(min(width, height) * max(0.0, min(0.2, margin))))
@@ -82,12 +84,21 @@ def build_watermark_filter(
     else:  # bottom_right (default)
         x_expr, y_expr = f"W-w-{margin_px}", f"H-h-{margin_px}"
 
+    enable_clause = ""
+    start = max(0.0, float(start_seconds or 0.0))
+    if start > 0.0 and end_seconds is not None and float(end_seconds) > start:
+        enable_clause = f":enable='between(t,{start:.3f},{float(end_seconds):.3f})'"
+    elif start > 0.0:
+        enable_clause = f":enable='gte(t,{start:.3f})'"
+    elif end_seconds is not None and float(end_seconds) > 0.0:
+        enable_clause = f":enable='lte(t,{float(end_seconds):.3f})'"
+
     scaled = f"{prefix}_logo"
     return (
         f"[{watermark_input.strip('[]')}]scale={wm_w}:-2:flags=lanczos,"
         f"format=rgba,colorchannelmixer=aa={alpha:.3f}[{scaled}];"
         f"[{main_input.strip('[]')}][{scaled}]overlay={x_expr}:{y_expr}:"
-        f"format=auto[{output_label.strip('[]')}]"
+        f"format=auto{enable_clause}[{output_label.strip('[]')}]"
     )
 
 
@@ -99,6 +110,7 @@ def build_vertical_crop_filter(
     input_label: str = "",
     output_label: str = "",
     prefix: str = "v",
+    crop_x: str = "",
 ) -> str:
     """
     Construct filtergraph for 9:16 Vertical crop composition.
@@ -106,14 +118,21 @@ def build_vertical_crop_filter(
     - If blur_padding > 0: expanded center crop in middle with blurred top/bottom bars.
       Default 0.3333 allocates ~16.66% top and ~16.66% bottom as blurred background,
       allowing the center crop to be 50% wider (ideal for third-person character views).
+    - If crop_x is provided, dynamic horizontal crop trajectory expression is used.
     """
     in_pad = f"[{input_label.strip('[]')}]" if input_label else ""
     out_suffix = f"[{output_label.strip('[]')}]" if output_label else ""
+    raw_expr = crop_x if crop_x else f"(in_w-{width})/2"
+    x_pos = (
+        f"'{raw_expr}'"
+        if not (raw_expr.startswith("'") and raw_expr.endswith("'"))
+        else raw_expr
+    )
 
     if blur_padding <= 0.001:
         return (
             f"{in_pad}scale=-2:{height}:flags=lanczos,"
-            f"crop={width}:{height}:(in_w-{width})/2:0,"
+            f"crop={width}:{height}:{x_pos}:0,"
             f"setsar=1{out_suffix}"
         )
 
@@ -131,6 +150,46 @@ def build_vertical_crop_filter(
         f"[{p}_bg_in]scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{height},boxblur={blur_sigma}:5[{p}_bg];"
         f"[{p}_fg_in]scale=-2:{fg_height}:flags=lanczos,"
-        f"crop={width}:{fg_height}:(in_w-{width})/2:0[{p}_fg];"
+        f"crop={width}:{fg_height}:{x_pos}:0[{p}_fg];"
         f"[{p}_bg][{p}_fg]overlay=(W-w)/2:(H-h)/2{out_pad_padded}"
+    )
+
+
+def build_punch_in_filter(
+    input_label: str,
+    output_label: str,
+    width: int,
+    height: int,
+    event_times: list[float],
+    duration: float = 0.30,
+    scale: float = 1.06,
+    prefix: str = "punch",
+) -> str:
+    """Momentary restrained punch-in zoom centered on elimination events.
+
+    Crops and scales back to output resolution for `duration` seconds around each event timestamp.
+    """
+    in_lbl = input_label.strip("[]")
+    out_lbl = output_label.strip("[]")
+
+    valid_times = [float(t) for t in event_times if float(t) >= 0.0]
+    if not valid_times:
+        return f"[{in_lbl}]copy[{out_lbl}]"
+
+    crop_factor = 1.0 / max(1.01, min(1.20, scale))
+    cw = round(width * crop_factor)
+    ch = round(height * crop_factor)
+    if cw % 2 != 0:
+        cw -= 1
+    if ch % 2 != 0:
+        ch -= 1
+
+    windows = [f"between(t,{t:.3f},{(t + duration):.3f})" for t in valid_times]
+    enable_clause = "+".join(windows)
+
+    return (
+        f"[{in_lbl}]split=2[{prefix}_orig][{prefix}_zoom];"
+        f"[{prefix}_zoom]crop={cw}:{ch}:(in_w-{cw})/2:(in_h-{ch})/2,"
+        f"scale={width}:{height}:flags=bilinear[{prefix}_sc];"
+        f"[{prefix}_orig][{prefix}_sc]overlay=0:0:enable='{enable_clause}'[{out_lbl}]"
     )

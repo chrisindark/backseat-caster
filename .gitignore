@@ -45,6 +45,7 @@ data/highlights/*
 !data/highlights/.gitkeep
 # Uploaded channel assets + cached TTS audio are runtime files
 data/channel/
+data/calibration/
 data/*.db
 data/*.sqlite
 data/*.sqlite3

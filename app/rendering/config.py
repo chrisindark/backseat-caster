@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import settings
+from app.rendering.tracking import TrackingConfig
 
 CROP_PADDING_PRESETS: dict[str, float] = {
     "third_person": 0.3333,  # 33.33% total blur padding (~16.66% top / ~16.66% bottom)
@@ -27,23 +28,23 @@ DEFAULT_CLIPPING_MODES: list[str] = [
 ]
 
 QUALITY_PRESETS: dict[str, dict[str, Any]] = {
-    "high": {  # Balanced broadcast/studio fidelity (~35-40 MB/min, matches 1080p source)
+    "high": {  # High-quality vertical broadcast fidelity (12 Mbps target, 16 Mbps ceiling)
+        "videotoolbox_bitrate": "12M",
+        "videotoolbox_maxrate": "16M",
+        "videotoolbox_bufsize": "24M",
+        "libx264_crf": 18,
+    },
+    "compact": {  # Optimized for quick mobile sharing / web preview (~5 Mbps)
         "videotoolbox_bitrate": "5M",
         "videotoolbox_maxrate": "7M",
         "videotoolbox_bufsize": "10M",
-        "libx264_crf": 21,
+        "libx264_crf": 23,
     },
-    "compact": {  # Optimized for quick mobile sharing / web preview (~25 MB/min)
-        "videotoolbox_bitrate": "3.5M",
-        "videotoolbox_maxrate": "5M",
-        "videotoolbox_bufsize": "7M",
-        "libx264_crf": 24,
-    },
-    "archive": {  # High-bitrate studio mastering (~120 MB/min)
+    "archive": {  # High-bitrate studio mastering (20 Mbps target, 25 Mbps ceiling)
         "videotoolbox_bitrate": "20M",
         "videotoolbox_maxrate": "25M",
         "videotoolbox_bufsize": "40M",
-        "libx264_crf": 17,
+        "libx264_crf": 15,
     },
 }
 
@@ -69,10 +70,22 @@ class WatermarkConfig(BaseModel):
         le=0.2,
         description="Edge margin as a fraction of the output short edge",
     )
+    start_seconds: float | None = Field(
+        None, ge=0.0, description="Optional start time for watermark visibility"
+    )
+    end_seconds: float | None = Field(
+        None, ge=0.0, description="Optional end time for watermark visibility"
+    )
+    channel_name: str | None = Field(
+        None, description="Optional text channel name label for watermark"
+    )
 
     @property
     def active(self) -> bool:
-        return bool(self.enabled and self.path and Path(self.path).exists())
+        return bool(
+            self.enabled
+            and ((self.path and Path(self.path).exists()) or self.channel_name)
+        )
 
     def describe(self) -> dict[str, Any]:
         """Serialisable summary recorded in the render manifest."""
@@ -82,6 +95,120 @@ class WatermarkConfig(BaseModel):
             "opacity": self.opacity,
             "scale": self.scale,
             "margin": self.margin,
+            "start_seconds": self.start_seconds,
+            "end_seconds": self.end_seconds,
+            "channel_name": self.channel_name,
+        }
+
+
+class HookConfig(BaseModel):
+    """In-video hook caption overlay shown during the first 1-1.5 seconds.
+
+    Placed in the upper third to keep crosshairs and combat reticles clear.
+    """
+
+    enabled: bool = Field(False, description="Master switch for the hook overlay")
+    text: str | None = Field(None, description="Creator-entered hook caption text")
+    start_seconds: float = Field(
+        0.0, ge=0.0, description="Start offset for hook overlay"
+    )
+    duration_seconds: float = Field(
+        1.5, ge=0.5, le=5.0, description="Duration in seconds for hook overlay"
+    )
+    position: Literal["upper_third", "top", "center"] = "upper_third"
+
+    @property
+    def active(self) -> bool:
+        return bool(self.enabled and self.text and self.text.strip())
+
+    def describe(self) -> dict[str, Any]:
+        """Serialisable summary recorded in the render manifest."""
+        return {
+            "enabled": self.active,
+            "text": self.text if self.active else None,
+            "start_seconds": self.start_seconds,
+            "duration_seconds": self.duration_seconds,
+            "position": self.position,
+        }
+
+
+class KillEffectsConfig(BaseModel):
+    """Event-aware payoff and kill effects driven by deterministic timestamps (Milestone 3)."""
+
+    enabled: bool = Field(False, description="Master switch for kill effects")
+    punch_in: bool = Field(True, description="Momentary punch-in zoom on eliminations")
+    punch_in_scale: float = Field(
+        1.06, ge=1.01, le=1.15, description="Punch-in zoom scale (e.g. 1.06 = 6% zoom)"
+    )
+    punch_in_duration: float = Field(
+        0.30, ge=0.1, le=0.6, description="Punch-in duration in seconds"
+    )
+    kill_notification: bool = Field(
+        True, description="Subtle elimination / combo banner overlay"
+    )
+    kill_notification_duration: float = Field(
+        1.2, ge=0.5, le=3.0, description="Banner display duration in seconds"
+    )
+    combo_counter: bool = Field(
+        True, description="Display progressive combo multiplier (x1, x2, x3)"
+    )
+    position: Literal["lower_third", "upper_third"] = "lower_third"
+    events: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Deterministic events within the clip window (time relative to clip start)",
+    )
+
+    @property
+    def active(self) -> bool:
+        return bool(self.enabled and self.events)
+
+    def describe(self) -> dict[str, Any]:
+        """Serialisable summary recorded in the render manifest."""
+        return {
+            "enabled": self.active,
+            "punch_in": self.punch_in,
+            "punch_in_scale": self.punch_in_scale,
+            "kill_notification": self.kill_notification,
+            "combo_counter": self.combo_counter,
+            "position": self.position,
+            "event_count": len(self.events) if self.active else 0,
+            "events": self.events if self.active else [],
+        }
+
+
+class MusicConfig(BaseModel):
+    """Configuration for optional creator-supplied background music (Milestone 5)."""
+
+    enabled: bool = Field(False, description="Enable creator-supplied background music")
+    path: str | None = Field(None, description="Path to background audio file")
+    volume: float = Field(
+        0.30, ge=0.0, le=1.0, description="Music volume relative to unity"
+    )
+
+    @property
+    def active(self) -> bool:
+        return bool(self.enabled and self.path and Path(self.path).exists())
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "enabled": self.active,
+            "has_path": bool(self.path),
+            "volume": self.volume,
+        }
+
+
+class LoopConfig(BaseModel):
+    """Configuration for optional seamless loop optimization (Milestone 5)."""
+
+    enabled: bool = Field(False, description="Enable seamless loop optimization")
+    fade_seconds: float = Field(
+        0.10, ge=0.02, le=0.50, description="Audio seam fade duration in seconds"
+    )
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "fade_seconds": self.fade_seconds,
         }
 
 
@@ -173,7 +300,8 @@ class CtaConfig(BaseModel):
 
     enabled: bool = False
     style: Literal["outro_card", "overlay"] = "outro_card"
-    seconds: float = Field(3.5, ge=2.0, le=10.0)
+    seconds: float = Field(3.0, ge=1.0, le=10.0)
+    position: Literal["bottom", "upper_third"] = "bottom"
     headline: str = "SUBSCRIBE & TAP THE BELL"
     subtitle: str = "Click the bell for more clips"
     speech_text: str = "Subscribe to the channel and tap the bell for more clips."
@@ -304,11 +432,17 @@ class RenderConfig(BaseModel):
     # Video Encoding (High Quality & Bandwidth-Optimized)
     preferred_encoder: Literal["auto", "h264_videotoolbox", "libx264"] = "auto"
     quality_preset: Literal["high", "compact", "archive", "custom"] = "high"
-    videotoolbox_bitrate: str = "5M"
-    videotoolbox_maxrate: str = "7M"
-    videotoolbox_bufsize: str = "10M"
-    libx264_crf: int = 21  # Visually lossless relative to source
+    videotoolbox_bitrate: str = "12M"
+    videotoolbox_maxrate: str = "16M"
+    videotoolbox_bufsize: str = "24M"
+    libx264_crf: int = 18  # Studio broadcast quality
     libx264_preset: str = "medium"
+    target_fps: int | None = Field(
+        None,
+        ge=15,
+        le=120,
+        description="Target output frame rate (e.g. 60 or None to match source)",
+    )
 
     # Audio Mixing & Loudness Normalization
     unducked_game_gain: float = Field(
@@ -354,7 +488,21 @@ class RenderConfig(BaseModel):
     # Tier 3: channel watermark/logo overlay (applied to every render)
     watermark: WatermarkConfig = Field(default_factory=WatermarkConfig)
 
+    # In-video hook caption overlay (Milestone 2)
+    hook: HookConfig = Field(default_factory=HookConfig)
+
+    # Event-aware payoff and kill effects (Milestone 3)
+    kill_effects: KillEffectsConfig = Field(default_factory=KillEffectsConfig)
+
+    # Dynamic vertical reframing player tracking (Milestone 4)
+    tracking: TrackingConfig = Field(default_factory=TrackingConfig)
+
+    # Optional background music and loop tools (Milestone 5)
+    music: MusicConfig = Field(default_factory=MusicConfig)
+    loop: LoopConfig = Field(default_factory=LoopConfig)
+
     # Output defaults
+    modes: list[str] = Field(default_factory=lambda: ["third_person"])
     default_output_root: Path = settings.renders_path
     api_prefix: str = settings.API_PREFIX
 

@@ -1,6 +1,6 @@
 """Video filtergraph builders for Landscape and Vertical compositions."""
 
-from typing import Literal
+from typing import Any, Literal
 
 
 def build_landscape_filter(
@@ -186,6 +186,81 @@ def build_punch_in_filter(
 
     windows = [f"between(t,{t:.3f},{(t + duration):.3f})" for t in valid_times]
     enable_clause = "+".join(windows)
+
+    return (
+        f"[{in_lbl}]split=2[{prefix}_orig][{prefix}_zoom];"
+        f"[{prefix}_zoom]crop={cw}:{ch}:(in_w-{cw})/2:(in_h-{ch})/2,"
+        f"scale={width}:{height}:flags=bilinear[{prefix}_sc];"
+        f"[{prefix}_orig][{prefix}_sc]overlay=0:0:enable='{enable_clause}'[{out_lbl}]"
+    )
+
+
+def resolve_cinematic_target_time(
+    duration_seconds: float,
+    events: list[dict[str, Any]] | None = None,
+    explicit_target: float | None = None,
+    effect_duration: float = 0.50,
+) -> float:
+    """Deterministically choose cinematic payoff moment: confirmed elimination or midpoint."""
+    if explicit_target is not None and 0.0 <= explicit_target <= duration_seconds:
+        return max(0.0, min(duration_seconds - effect_duration, explicit_target))
+
+    elim_times: list[float] = []
+    if events:
+        for ev in events:
+            action = str(
+                ev.get("action")
+                or ev.get("label")
+                or ev.get("type")
+                or ev.get("event_type")
+                or ""
+            ).lower()
+            if action and not any(
+                k in action for k in ("elim", "kill", "knock", "ko", "wipe")
+            ):
+                continue
+
+            raw_t = (
+                ev.get("time") if ev.get("time") is not None else ev.get("timestamp")
+            )
+            if raw_t is not None and 0.0 <= float(raw_t) <= duration_seconds:
+                elim_times.append(float(raw_t))
+
+    if elim_times:
+        chosen = elim_times[0]
+        return max(0.0, min(duration_seconds - effect_duration, chosen))
+
+    return max(0.0, (duration_seconds / 2.0) - (effect_duration / 2.0))
+
+
+def build_cinematic_zoom_filter(
+    input_label: str,
+    output_label: str,
+    width: int,
+    height: int,
+    target_time: float,
+    duration: float = 0.50,
+    scale: float = 1.08,
+    prefix: str = "cine",
+) -> str:
+    """Restrained, bounded punch-in zoom for cinematic kill moments (Milestone 7.4)."""
+    in_lbl = input_label.strip("[]")
+    out_lbl = output_label.strip("[]")
+
+    if duration <= 0 or scale <= 1.0:
+        return f"[{in_lbl}]copy[{out_lbl}]"
+
+    crop_factor = 1.0 / max(1.01, min(1.25, scale))
+    cw = round(width * crop_factor)
+    ch = round(height * crop_factor)
+    if cw % 2 != 0:
+        cw -= 1
+    if ch % 2 != 0:
+        ch -= 1
+
+    t_start = max(0.0, target_time)
+    t_end = t_start + duration
+    enable_clause = f"between(t,{t_start:.3f},{t_end:.3f})"
 
     return (
         f"[{in_lbl}]split=2[{prefix}_orig][{prefix}_zoom];"

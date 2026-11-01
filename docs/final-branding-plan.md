@@ -222,13 +222,13 @@ effects, so it currently has no payoff treatment.
 Target files: `app/rendering/presentation.py`, `app/rendering/engine.py`,
 `app/rendering/filters.py`, `tests/test_presentation_presets.py`.
 
-- [ ] Choose the treatment deterministically: the confirmed elimination
+- [x] Choose the treatment deterministically: the confirmed elimination
       timestamp when available, otherwise the clip midpoint.
-- [ ] Implement a restrained, bounded effect (short punch-in zoom and/or a
+- [x] Implement a restrained, bounded effect (short punch-in zoom and/or a
       brief speed ramp) with a fixed maximum duration and zoom factor.
-- [ ] Keep audio in sync when time-stretching (`setpts` paired with the matching
+- [x] Keep audio in sync when time-stretching (`setpts` paired with the matching
       `atempo`), and never let the effect cover the final elimination.
-- [ ] Make the treatment opt-out via an explicit override, and leave the other
+- [x] Make the treatment opt-out via an explicit override, and leave the other
       presets unchanged.
 
 **Acceptance:** the cinematic preset applies the effect at the chosen moment,
@@ -241,10 +241,10 @@ returns a plain render.
 transitively via `rapidocr-onnxruntime`; a future dependency change would break
 Milestones 4 and 5 silently.
 
-- [ ] Add `opencv-python-headless` (or the project's chosen OpenCV build) and
+- [x] Add `opencv-python-headless` (or the project's chosen OpenCV build) and
       `numpy` to `pyproject.toml`.
-- [ ] Confirm the Docker image and a fresh `uv sync` both install them.
-- [ ] Re-run the tracking, loop, and render tests.
+- [x] Confirm the Docker image and a fresh `uv sync` both install them.
+- [x] Re-run the tracking, loop, and render tests.
 
 **Acceptance:** a clean environment installs the declared packages and the
 tracking/loop test files pass without relying on another package's tree.

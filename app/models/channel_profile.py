@@ -51,6 +51,9 @@ class ChannelProfile(Base):
     # Dynamic Reframing (Milestone 4)
     tracking_enabled = Column(Boolean, nullable=True)
 
+    # Cinematic Treatment (Milestone 7.4)
+    cinematic_treatment_enabled = Column(Boolean, nullable=True)
+
     # Audio & Looping (Milestone 5)
     bg_music_path = Column(String(1024), nullable=True)
     bg_music_volume = Column(Float, nullable=True)

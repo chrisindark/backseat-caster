@@ -54,6 +54,7 @@ class PresentationPresetResponse(BaseModel):
     hook_duration_seconds: float
     kill_effects_enabled: bool
     tracking_enabled: bool
+    cinematic_treatment_enabled: bool = False
     bg_music_volume: float
     loop_optimization: bool
 
@@ -86,6 +87,9 @@ class ChannelProfileResponse(BaseModel):
 
     # Dynamic Reframing (Milestone 4)
     tracking_enabled: bool = False
+
+    # Cinematic Treatment (Milestone 7.4)
+    cinematic_treatment_enabled: bool = False
 
     # Audio & Looping (Milestone 5)
     bg_music_path: str | None = None
@@ -165,6 +169,9 @@ class ChannelProfileUpdate(BaseModel):
 
     # Dynamic Reframing (Milestone 4)
     tracking_enabled: bool | None = None
+
+    # Cinematic Treatment (Milestone 7.4)
+    cinematic_treatment_enabled: bool | None = None
 
     # Audio & Looping (Milestone 5)
     bg_music_path: str | None = Field(None, max_length=1024)

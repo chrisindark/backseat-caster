@@ -34,11 +34,13 @@ from app.rendering.config import (
     default_render_config,
 )
 from app.rendering.filters import (
+    build_cinematic_zoom_filter,
     build_landscape_filter,
     build_punch_in_filter,
     build_vertical_blur_filter,
     build_vertical_crop_filter,
     build_watermark_filter,
+    resolve_cinematic_target_time,
 )
 from app.rendering.loop import LoopAnalysisResult, analyze_loop_continuity
 from app.rendering.manifest import write_manifest
@@ -781,6 +783,48 @@ class RenderEngine:
                     )
                     v_composed = v_punch
 
+            # Milestone 7.4: Cinematic Kill restrained zoom payoff treatment
+            cinematic_active = (
+                self.config.cinematic_treatment.enabled
+                if self.config.cinematic_treatment
+                else False
+            )
+            if cinematic_active:
+                events = self.config.cinematic_treatment.events or (
+                    self.config.kill_effects.events if self.config.kill_effects else []
+                )
+                target_t = resolve_cinematic_target_time(
+                    duration_seconds=duration_seconds,
+                    events=events,
+                    explicit_target=self.config.cinematic_treatment.target_time,
+                    effect_duration=self.config.cinematic_treatment.duration,
+                )
+                is_landscape_mode = mode_name == "landscape"
+                cw = (
+                    self.config.landscape_width
+                    if is_landscape_mode
+                    else self.config.vertical_width
+                )
+                ch = (
+                    self.config.landscape_height
+                    if is_landscape_mode
+                    else self.config.vertical_height
+                )
+                v_cine = f"v_cine_{i}"
+                filter_parts.append(
+                    build_cinematic_zoom_filter(
+                        input_label=v_composed,
+                        output_label=v_cine,
+                        width=cw,
+                        height=ch,
+                        target_time=target_t,
+                        duration=self.config.cinematic_treatment.duration,
+                        scale=self.config.cinematic_treatment.scale,
+                        prefix=f"cine_{i}",
+                    )
+                )
+                v_composed = v_cine
+
             if watermark_active and mode_name in watermark_inputs:
                 is_landscape_mode = mode_name == "landscape"
                 wm_width = (
@@ -1380,6 +1424,11 @@ class RenderEngine:
             watermark=self.config.watermark.describe(),
             hook=self.config.hook.describe(),
             kill_effects=self.config.kill_effects.describe(),
+            cinematic_treatment=(
+                self.config.cinematic_treatment.describe()
+                if self.config.cinematic_treatment
+                else {"enabled": False}
+            ),
             branding=(
                 branding_plan.describe(total_duration)
                 if branding_plan is not None

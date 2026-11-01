@@ -801,6 +801,7 @@ export interface PresentationPreset {
   hook_position: string;
   hook_duration_seconds: number;
   kill_effects_enabled: boolean;
+  cinematic_treatment_enabled: boolean;
   bg_music_volume: number;
   loop_optimization: boolean;
 }
@@ -824,6 +825,7 @@ export interface ChannelProfile {
   hook_position?: string;
   kill_effects_enabled?: boolean;
   tracking_enabled?: boolean;
+  cinematic_treatment_enabled?: boolean;
   bg_music_path?: string | null;
   has_music?: boolean;
   music_url?: string | null;
@@ -879,6 +881,7 @@ export interface ChannelProfileUpdate {
   hook_position?: string | null;
   kill_effects_enabled?: boolean | null;
   tracking_enabled?: boolean | null;
+  cinematic_treatment_enabled?: boolean | null;
   bg_music_path?: string | null;
   bg_music_volume?: number | null;
   loop_optimization?: boolean | null;

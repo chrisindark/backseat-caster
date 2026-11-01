@@ -59,6 +59,9 @@ class PresentationPresetDefinition(BaseModel):
     # Dynamic Reframing (Milestone 4)
     tracking_enabled: bool = False
 
+    # Cinematic Treatment (Milestone 7.4)
+    cinematic_treatment_enabled: bool = False
+
     # Audio & Loop
     bg_music_volume: float = 0.30
     loop_optimization: bool = False
@@ -94,6 +97,7 @@ PRESENTATION_PRESETS: dict[PresentationPresetName, PresentationPresetDefinition]
         hook_duration_seconds=1.5,
         kill_effects_enabled=False,
         tracking_enabled=False,
+        cinematic_treatment_enabled=False,
         bg_music_volume=0.30,
         loop_optimization=False,
     ),
@@ -123,6 +127,7 @@ PRESENTATION_PRESETS: dict[PresentationPresetName, PresentationPresetDefinition]
         hook_duration_seconds=1.5,
         kill_effects_enabled=False,
         tracking_enabled=True,
+        cinematic_treatment_enabled=True,
         bg_music_volume=0.20,
         loop_optimization=False,
     ),
@@ -152,6 +157,7 @@ PRESENTATION_PRESETS: dict[PresentationPresetName, PresentationPresetDefinition]
         hook_duration_seconds=1.5,
         kill_effects_enabled=True,
         tracking_enabled=False,
+        cinematic_treatment_enabled=False,
         bg_music_volume=0.30,
         loop_optimization=False,
     ),

@@ -136,6 +136,9 @@ export default function ChannelProfilePage() {
   // Dynamic tracking (Milestone 4)
   const [trackingEnabled, setTrackingEnabled] = useState(false);
 
+  // Cinematic Treatment (Milestone 7.4)
+  const [cinematicTreatmentEnabled, setCinematicTreatmentEnabled] = useState(false);
+
   // Frame rate (Milestone 6)
   const [targetFps, setTargetFps] = useState("");
 
@@ -208,6 +211,9 @@ export default function ChannelProfilePage() {
     setHookPosition(data.hook_position || "upper_third");
     setKillEffectsEnabled(Boolean(data.kill_effects_enabled));
     setTrackingEnabled(Boolean(data.tracking_enabled));
+    setCinematicTreatmentEnabled(
+      data.cinematic_treatment_enabled ?? (data.presentation_preset === "cinematic_kill")
+    );
     setTargetFps(data.target_fps != null ? String(data.target_fps) : "");
     setHasMusic(Boolean(data.has_music || data.bg_music_path));
     setMusicVolume(data.bg_music_volume ?? 0.30);
@@ -309,6 +315,7 @@ export default function ChannelProfilePage() {
         hook_position: hookPosition || "upper_third",
         kill_effects_enabled: killEffectsEnabled,
         tracking_enabled: trackingEnabled,
+        cinematic_treatment_enabled: cinematicTreatmentEnabled,
         target_fps: targetFps ? parseInt(targetFps, 10) : null,
         bg_music_volume: Number(musicVolume),
         loop_optimization: loopOptimization,
@@ -430,6 +437,7 @@ export default function ChannelProfilePage() {
       setHookPosition(p.hook_position || "upper_third");
       setHookDurationSeconds(p.hook_duration_seconds ?? 1.5);
       setKillEffectsEnabled(Boolean(p.kill_effects_enabled));
+      setCinematicTreatmentEnabled(Boolean(p.cinematic_treatment_enabled));
       setMusicVolume(p.bg_music_volume ?? 0.30);
       setLoopOptimization(Boolean(p.loop_optimization));
       setCtaEnabled(Boolean(p.cta_enabled));
@@ -946,7 +954,7 @@ export default function ChannelProfilePage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-white/5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 border-t border-white/5">
                   <label className="flex flex-col justify-between rounded-xl bg-black/30 border border-white/10 p-3 cursor-pointer hover:border-white/20 transition-colors">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <span className="text-xs font-semibold text-white flex items-center gap-1.5">
@@ -980,6 +988,24 @@ export default function ChannelProfilePage() {
                     </div>
                     <span className="text-[11px] text-slate-400 leading-normal">
                       Triggers punch-in zooms and combo badges (DOUBLE KO, etc.) on confirmed eliminations. Degrades cleanly when timestamps are missing.
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col justify-between rounded-xl bg-black/30 border border-white/10 p-3 cursor-pointer hover:border-white/20 transition-colors">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                        <Clapperboard className="w-3.5 h-3.5 text-rose-400" />
+                        Cinematic Payoff Zoom
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={cinematicTreatmentEnabled}
+                        onChange={(e) => setCinematicTreatmentEnabled(e.target.checked)}
+                        className="w-4 h-4 accent-rose-500"
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-400 leading-normal">
+                      Applies a restrained, elegant punch-in zoom (8%) on confirmed eliminations or midpoint without noisy text badges.
                     </span>
                   </label>
                 </div>

@@ -17,6 +17,7 @@ from app.rendering.config import (
     CROP_PADDING_PRESETS,
     QUALITY_PRESETS,
     BrandingConfig,
+    CinematicTreatmentConfig,
     CtaConfig,
     DurationBudget,
     HookConfig,
@@ -310,6 +311,11 @@ class ChannelProfileService:
                 bool(profile.tracking_enabled)
                 if profile.tracking_enabled is not None
                 else preset.tracking_enabled
+            ),
+            cinematic_treatment_enabled=(
+                bool(profile.cinematic_treatment_enabled)
+                if profile.cinematic_treatment_enabled is not None
+                else preset.cinematic_treatment_enabled
             ),
             bg_music_path=profile.bg_music_path,
             has_music=bool(
@@ -623,6 +629,23 @@ class ChannelProfileService:
         )
 
     @classmethod
+    def cinematic_treatment_config(
+        cls, db: Session, events: list[dict[str, Any]] | None = None
+    ) -> CinematicTreatmentConfig:
+        """Resolve cinematic kill payoff treatment configuration (Milestone 7.4)."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        enabled_val = (
+            profile.cinematic_treatment_enabled
+            if profile.cinematic_treatment_enabled is not None
+            else preset.cinematic_treatment_enabled
+        )
+        return CinematicTreatmentConfig(
+            enabled=bool(enabled_val),
+            events=events or [],
+        )
+
+    @classmethod
     def music_config(cls, db: Session) -> MusicConfig:
         """Resolve background music configuration."""
         profile = cls.get_or_create(db)
@@ -687,6 +710,7 @@ class ChannelProfileService:
                     hook_duration_seconds=preset.hook_duration_seconds,
                     kill_effects_enabled=preset.kill_effects_enabled,
                     tracking_enabled=preset.tracking_enabled,
+                    cinematic_treatment_enabled=preset.cinematic_treatment_enabled,
                     bg_music_volume=preset.bg_music_volume,
                     loop_optimization=preset.loop_optimization,
                 )

@@ -1375,6 +1375,9 @@ class RenderService:
                     db, events=candidate_events
                 ),
                 tracking=ChannelProfileService.tracking_config(db),
+                cinematic_treatment=ChannelProfileService.cinematic_treatment_config(
+                    db, events=candidate_events
+                ),
                 music=ChannelProfileService.music_config(db),
                 loop=ChannelProfileService.loop_config(db),
                 target_fps=ChannelProfileService.target_fps(db),

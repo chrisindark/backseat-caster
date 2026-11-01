@@ -176,6 +176,40 @@ class KillEffectsConfig(BaseModel):
         }
 
 
+class CinematicTreatmentConfig(BaseModel):
+    """Restrained cinematic punch-in zoom / payoff treatment on selected moment (Milestone 7.4)."""
+
+    enabled: bool = False
+    target_time: float | None = Field(
+        None,
+        description="Explicit target moment in seconds; None auto-selects elimination or midpoint",
+    )
+    duration: float = Field(
+        0.50, ge=0.20, le=2.0, description="Duration of zoom treatment in seconds"
+    )
+    scale: float = Field(
+        1.08,
+        ge=1.01,
+        le=1.25,
+        description="Restrained zoom factor (e.g. 1.08 = 8% zoom)",
+    )
+    speed_factor: float = Field(
+        1.0, ge=0.5, le=2.0, description="Speed factor (1.0 = normal playback)"
+    )
+    events: list[dict[str, Any]] = Field(
+        default_factory=list, description="Candidate elimination events"
+    )
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "target_time": self.target_time,
+            "duration": self.duration,
+            "scale": self.scale,
+            "speed_factor": self.speed_factor,
+        }
+
+
 class MusicConfig(BaseModel):
     """Configuration for optional creator-supplied background music (Milestone 5)."""
 
@@ -496,6 +530,11 @@ class RenderConfig(BaseModel):
 
     # Dynamic vertical reframing player tracking (Milestone 4)
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)
+
+    # Restrained cinematic payoff treatment (Milestone 7.4)
+    cinematic_treatment: CinematicTreatmentConfig = Field(
+        default_factory=CinematicTreatmentConfig
+    )
 
     # Optional background music and loop tools (Milestone 5)
     music: MusicConfig = Field(default_factory=MusicConfig)

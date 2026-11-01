@@ -11,6 +11,7 @@ import {
   HighlightCandidateListResponse,
   HighlightRunListResponse,
   HighlightStatusResponse,
+  PresentationPreset,
   RegenerateMetadataRequest,
   RegenerateMetadataResponse,
   RenderClipResponse,
@@ -677,6 +678,11 @@ export function getHighlightThumbnailUrl(
 // -----------------------------------------------------------------------------
 // Channel Brand Profile Helpers
 // -----------------------------------------------------------------------------
+
+export async function fetchPresentationPresets(): Promise<PresentationPreset[]> {
+  const res = await fetch(`${API_BASE}/channel/presets`, { cache: "no-store" });
+  return parseResponse<PresentationPreset[]>(res, "fetch presentation presets");
+}
 
 export async function fetchChannelProfile(): Promise<ChannelProfile> {
   const res = await fetch(`${API_BASE}/channel/profile`, { cache: "no-store" });

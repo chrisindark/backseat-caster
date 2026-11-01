@@ -5,12 +5,18 @@ import {
   checkBackendHealth,
   deleteChannelWatermark,
   fetchChannelProfile,
+  fetchPresentationPresets,
   getChannelWatermarkUrl,
   updateChannelProfile,
   uploadChannelWatermark,
   getApiBase,
 } from "@/lib/api";
-import { ChannelProfile, ChannelProfileUpdate } from "@/types/video";
+import {
+  ChannelProfile,
+  ChannelProfileUpdate,
+  PresentationPreset,
+  PresentationPresetName,
+} from "@/types/video";
 import {
   AlertCircle,
   CheckCircle2,
@@ -82,6 +88,11 @@ export default function ChannelProfilePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [channelName, setChannelName] = useState("");
+  const [presentationPreset, setPresentationPreset] =
+    useState<PresentationPresetName>("viral_kill");
+  const [availablePresets, setAvailablePresets] = useState<PresentationPreset[]>(
+    []
+  );
   const [watermarkEnabled, setWatermarkEnabled] = useState(true);
   const [watermarkPosition, setWatermarkPosition] = useState("bottom_right");
   const [watermarkOpacity, setWatermarkOpacity] = useState(0.85);
@@ -127,6 +138,7 @@ export default function ChannelProfilePage() {
   const applyProfile = useCallback((data: ChannelProfile) => {
     setProfile(data);
     setChannelName(data.channel_name || "");
+    setPresentationPreset(data.presentation_preset || "viral_kill");
     setWatermarkEnabled(Boolean(data.watermark_enabled));
     setWatermarkPosition(data.watermark_position || "bottom_right");
     setWatermarkOpacity(data.watermark_opacity ?? 0.85);
@@ -166,8 +178,14 @@ export default function ChannelProfilePage() {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const data = await fetchChannelProfile();
+      const [data, presets] = await Promise.all([
+        fetchChannelProfile(),
+        fetchPresentationPresets().catch(() => []),
+      ]);
       applyProfile(data);
+      if (presets && presets.length > 0) {
+        setAvailablePresets(presets);
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to load channel profile");
     } finally {
@@ -201,6 +219,7 @@ export default function ChannelProfilePage() {
     try {
       const payload: ChannelProfileUpdate = {
         channel_name: channelName.trim() || null,
+        presentation_preset: presentationPreset,
         watermark_enabled: watermarkEnabled,
         watermark_position: watermarkPosition,
         watermark_opacity: watermarkOpacity,
@@ -327,6 +346,101 @@ export default function ChannelProfilePage() {
           </div>
         ) : (
           <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Presentation Style & Presets (Milestone 1) */}
+            <section className="lg:col-span-12 p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-rose-400" />
+                  <h2 className="text-sm font-bold text-white">
+                    Presentation Style & Presets
+                  </h2>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Deterministic baseline · Settings configured below override preset defaults
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                {(availablePresets.length > 0
+                  ? availablePresets.map((p) => ({
+                      name: p.name,
+                      title: p.label,
+                      badge:
+                        p.name === "viral_kill"
+                          ? "Gameplay-First"
+                          : p.name === "cinematic_kill"
+                          ? "Cinematic Framing"
+                          : "Event-Aware",
+                      desc: p.description,
+                    }))
+                  : [
+                      {
+                        name: "viral_kill" as const,
+                        title: "Viral Kill (Default)",
+                        badge: "Gameplay-First",
+                        desc: "Gameplay begins immediately on frame 1. Subtle watermark, no full-screen cards, and an optional in-video subscribe overlay near the end.",
+                      },
+                      {
+                        name: "cinematic_kill" as const,
+                        title: "Cinematic Kill",
+                        badge: "Cinematic Framing",
+                        desc: "Gameplay begins immediately with minimal text and branding. Game audio is the focus, paired with cinematic balanced framing.",
+                      },
+                      {
+                        name: "multi_kill_montage" as const,
+                        title: "Multi-Kill Montage",
+                        badge: "Event-Aware",
+                        desc: "Fast-paced highlight driven by detected kill events. Features combo notifications, kill counter, and subtle subscribe overlay.",
+                      },
+                    ]
+                ).map((item) => {
+                  const active = presentationPreset === item.name;
+                  return (
+                    <div
+                      key={item.name}
+                      onClick={() => setPresentationPreset(item.name)}
+                      className={`relative p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                        active
+                          ? "bg-rose-500/10 border-rose-500/50 ring-1 ring-rose-500/30"
+                          : "bg-slate-900/60 border-white/5 hover:border-white/15 hover:bg-slate-900/90"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="text-xs font-bold text-white">
+                            {item.title}
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              active
+                                ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                                : "bg-white/5 text-slate-400"
+                            }`}
+                          >
+                            {item.badge}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          {item.desc}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+                        <input
+                          type="radio"
+                          name="presentation_preset"
+                          checked={active}
+                          onChange={() => setPresentationPreset(item.name)}
+                          className="text-rose-500 focus:ring-0 cursor-pointer"
+                        />
+                        <span>{active ? "Active Preset" : "Select Preset"}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
             {/* Identity + watermark */}
             <section className="lg:col-span-5 space-y-6">
               <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">

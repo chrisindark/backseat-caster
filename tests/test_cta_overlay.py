@@ -113,7 +113,17 @@ def _bright_rows(image_path: Path) -> list[int]:
 
 def _video_frame(video: Path, timestamp: float, target: Path) -> Path:
     subprocess.run(
-        ["ffmpeg", "-y", "-ss", str(timestamp), "-i", str(video), "-frames:v", "1", str(target)],
+        [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(timestamp),
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            str(target),
+        ],
         capture_output=True,
         check=True,
     )
@@ -160,7 +170,16 @@ def _tone_energy(
 
 def _probe_duration(path: Path) -> float:
     out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -210,7 +229,11 @@ class TestCtaOverlay:
     def test_overlay_matches_the_preview_placement(self, cta_assets, tmp_path):
         branding = BrandingConfig(enabled=False)
         cta = CtaConfig(
-            enabled=True, style="overlay", seconds=2.5, headline=HEADLINE, subtitle=SUBTITLE
+            enabled=True,
+            style="overlay",
+            seconds=2.5,
+            headline=HEADLINE,
+            subtitle=SUBTITLE,
         )
         out_dir = tmp_path / "placement"
 
@@ -350,9 +373,7 @@ class TestCtaVoiceover:
             assert captured.get("max_seconds") == pytest.approx(3.0)
             assert _tone_energy(output, 440, 0.2) > 100
 
-            rows = _bright_rows(
-                _video_frame(output, 2.6, tmp_path / "late.png")
-            )
+            rows = _bright_rows(_video_frame(output, 2.6, tmp_path / "late.png"))
             assert rows
             assert not (clip_dir / ".cta_overlay").exists()
 

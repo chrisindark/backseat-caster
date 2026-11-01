@@ -71,6 +71,43 @@ def test_generate_cta_audio_returns_a_cached_path(monkeypatch, tmp_path):
     assert calls["n"] == 1
 
 
+def test_unbounded_cta_mix_preserves_speech_longer_than_default_cap(
+    monkeypatch, tmp_path
+):
+    """Outro-card CTAs with no time cap retain the whole spoken line."""
+    from app.services import tts
+
+    monkeypatch.setattr(tts, "_cache_dir", lambda: tmp_path)
+    speech = tmp_path / "long_speech.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=8",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            str(speech),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    monkeypatch.setattr(
+        TTSService, "synthesize_speech_sync", staticmethod(lambda *args: speech)
+    )
+
+    cta = TTSService.generate_cta_audio(
+        "A longer subscribe message.", include_bell=True, max_seconds=None
+    )
+
+    assert cta is not None
+    assert TTSService.audio_duration_seconds(cta) == pytest.approx(8.0, abs=0.1)
+
+
 def test_offline_fallback_does_not_poison_the_cache(monkeypatch, tmp_path):
     """A silent placeholder must not become a permanent cache hit."""
     from app.services import tts

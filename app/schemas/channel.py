@@ -89,6 +89,8 @@ class ChannelProfileResponse(BaseModel):
 
     # Audio & Looping (Milestone 5)
     bg_music_path: str | None = None
+    has_music: bool = False
+    music_url: str | None = None
     bg_music_volume: float = 0.30
     loop_optimization: bool = False
 
@@ -259,11 +261,20 @@ class WatermarkUploadResponse(BaseModel):
     message: str
 
 
+class MusicUploadResponse(BaseModel):
+    """Result of uploading channel background music."""
+
+    profile: ChannelProfileResponse
+    filename: str
+    message: str
+
+
 __all__ = [
     "ChannelProfileResponse",
     "ChannelProfileUpdate",
     "CtaStyle",
     "FramingPreset",
+    "MusicUploadResponse",
     "PresentationPresetName",
     "PresentationPresetResponse",
     "PrivacyStatus",

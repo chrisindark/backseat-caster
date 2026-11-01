@@ -825,6 +825,8 @@ export interface ChannelProfile {
   kill_effects_enabled?: boolean;
   tracking_enabled?: boolean;
   bg_music_path?: string | null;
+  has_music?: boolean;
+  music_url?: string | null;
   bg_music_volume?: number;
   loop_optimization?: boolean;
   target_fps?: number | null;
@@ -847,6 +849,7 @@ export interface ChannelProfile {
   cta_enabled: boolean;
   cta_style: string;
   cta_seconds: number;
+  cta_position?: "bottom" | "upper_third" | string;
   cta_headline: string;
   cta_subtitle: string;
   cta_speech_text: string;
@@ -899,6 +902,7 @@ export interface ChannelProfileUpdate {
   cta_enabled?: boolean;
   cta_style?: string;
   cta_seconds?: number;
+  cta_position?: "bottom" | "upper_third" | string | null;
   cta_headline?: string | null;
   cta_subtitle?: string | null;
   cta_speech_text?: string | null;
@@ -911,6 +915,12 @@ export interface ChannelProfileUpdate {
 }
 
 export interface WatermarkUploadResponse {
+  profile: ChannelProfile;
+  filename: string;
+  message: string;
+}
+
+export interface MusicUploadResponse {
   profile: ChannelProfile;
   filename: string;
   message: string;

@@ -147,24 +147,24 @@ Milestones 0–6 are implemented and covered by tests, but the plan is not yet
 finished, creator-usable feature. Execute in order; each step is independently
 shippable and must not depend on an LLM.
 
-### Step 7.1 — Land and format the existing milestone work
+### Step 7.1 — Land and format the existing milestone work (COMPLETED)
 
 The M1–M6 implementation currently exists only as uncommitted working-tree
 changes (new rendering modules, three Alembic revisions, six test files,
 model/schema/engine/UI edits, and new docs).
 
-- [ ] Run `uv run ruff format` (currently reports 15 files) and re-run
+- [x] Run `uv run ruff format` (currently reports 15 files) and re-run
       `uv run ruff check` until clean.
-- [ ] Re-run `uv run pytest -q` and `uv run alembic heads` (must remain a
+- [x] Re-run `uv run pytest -q` and `uv run alembic heads` (must remain a
       single head) before committing.
-- [ ] Commit the milestone work in logical commits so the plan history is
+- [x] Commit the milestone work in logical commits so the plan history is
       reviewable: rendering modules → migrations → API/schema → UI → tests →
       docs.
 
 **Acceptance:** `git status` is clean, the tree is formatted, and the full
 suite passes from a clean checkout.
 
-### Step 7.2 — Expose the independent settings in the `/channel` UI
+### Step 7.2 — Expose the independent settings in the `/channel` UI (COMPLETED)
 
 The backend, schemas, and TypeScript types support every new setting, but the
 channel editor only exposes the preset selector and the pre-existing watermark,
@@ -173,25 +173,25 @@ without calling the API.
 
 Target files: `ui/src/app/channel/page.tsx`, `ui/src/types/video.ts`.
 
-- [ ] **Hook caption:** enabled toggle, text input, start time, duration, and
+- [x] **Hook caption:** enabled toggle, text input, start time, duration, and
       `upper_third` / `bottom` position.
-- [ ] **Kill effects:** enabled toggle (event badges + punch-in) with a short
+- [x] **Kill effects:** enabled toggle (event badges + punch-in) with a short
       explanation that it degrades cleanly when timestamps are missing.
-- [ ] **Dynamic tracking:** enabled toggle with a "falls back to static crop"
+- [x] **Dynamic tracking:** enabled toggle with a "falls back to static crop"
       note.
-- [ ] **Watermark timing:** optional start/end seconds alongside the existing
+- [x] **Watermark timing:** optional start/end seconds alongside the existing
       position/size/opacity controls.
-- [ ] **CTA position:** `bottom` vs `upper_third` selector beside the existing
+- [x] **CTA position:** `bottom` vs `upper_third` selector beside the existing
       style/duration controls.
-- [ ] **Output:** target frame-rate selector (Match source / 30 / 60).
-- [ ] Add every field to the `ChannelProfileUpdate` payload in `handleSave` and
+- [x] **Output:** target frame-rate selector (Match source / 30 / 60).
+- [x] Add every field to the `ChannelProfileUpdate` payload in `handleSave` and
       read it back in `applyProfile`.
 
 **Acceptance:** saving in the UI persists each value, reloading the page shows
 the saved value, and a preset selection still seeds defaults that explicit
 values override. `npx tsc --noEmit` and `npm run lint` stay clean.
 
-### Step 7.3 — Add first-class background-music upload
+### Step 7.3 — Add first-class background-music upload (COMPLETED)
 
 `bg_music_path` is a raw filesystem path with no upload flow, so
 "creator-supplied background music" is impractical. Mirror the existing
@@ -200,14 +200,14 @@ watermark upload pattern.
 Target files: `app/routers/channel.py`, `app/services/channel_profile.py`,
 `ui/src/app/channel/page.tsx`, `ui/src/lib/api.ts`.
 
-- [ ] `POST /api/v1/channel/music` (multipart) validates the file with
+- [x] `POST /api/v1/channel/music` (multipart) validates the file with
       `ffprobe`, stores it under `data/channel/music/`, and writes
       `bg_music_path`.
-- [ ] `GET` / `DELETE /api/v1/channel/music` for preview and removal, returning
+- [x] `GET` / `DELETE /api/v1/channel/music` for preview and removal, returning
       `BaseResponse[T]`.
-- [ ] Expose upload, remove, and volume controls in the `/channel` audio
+- [x] Expose upload, remove, and volume controls in the `/channel` audio
       section.
-- [ ] Rendering keeps the current behaviour: missing file or disabled music
+- [x] Rendering keeps the current behaviour: missing file or disabled music
       renders silently without music.
 
 **Acceptance:** an uploaded track is used by the next render, deleting it

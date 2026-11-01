@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from app.rendering.presentation import (
     PRESENTATION_PRESETS,
     get_presentation_preset,
 )
+from app.rendering.probe import probe_audio
 from app.schemas.channel import (
     ChannelProfileResponse,
     ChannelProfileUpdate,
@@ -43,6 +45,8 @@ logger = logging.getLogger(__name__)
 PROFILE_ID = 1
 CTA_STYLES = ("outro_card", "overlay")
 WATERMARK_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MUSIC_EXTENSIONS = {".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac"}
+MAX_MUSIC_BYTES = 50 * 1024 * 1024
 
 
 def _cta_style(raw: str | None) -> str:
@@ -308,6 +312,14 @@ class ChannelProfileService:
                 else preset.tracking_enabled
             ),
             bg_music_path=profile.bg_music_path,
+            has_music=bool(
+                profile.bg_music_path and Path(profile.bg_music_path).exists()
+            ),
+            music_url=(
+                "/api/v1/channel/music"
+                if bool(profile.bg_music_path and Path(profile.bg_music_path).exists())
+                else None
+            ),
             bg_music_volume=(
                 float(profile.bg_music_volume)
                 if profile.bg_music_volume is not None
@@ -751,3 +763,84 @@ class ChannelProfileService:
         if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
             return True
         return False
+
+    @classmethod
+    def save_music(
+        cls, db: Session, data: bytes, filename: str
+    ) -> tuple[ChannelProfileResponse, str]:
+        """Validate and store background music, updating profile."""
+        suffix = Path(filename or "").suffix.lower()
+        if suffix not in MUSIC_EXTENSIONS:
+            raise ValueError(
+                "Unsupported audio format. Use MP3, WAV, AAC, M4A, OGG, or FLAC."
+            )
+        if not data:
+            raise ValueError("Music file is empty.")
+        if len(data) > MAX_MUSIC_BYTES:
+            raise ValueError("Music file is too large (max 50 MB).")
+
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp.flush()
+            tmp_path = Path(tmp.name)
+
+        try:
+            probe = probe_audio(tmp_path)
+            if not probe.get("has_audio"):
+                raise ValueError("Uploaded file does not contain a valid audio stream.")
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError(
+                f"Uploaded file could not be verified by ffprobe: {e!s}"
+            ) from e
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+        music_dir = settings.channel_assets_path / "music"
+        music_dir.mkdir(parents=True, exist_ok=True)
+        target = music_dir / f"bg_music{suffix}"
+
+        profile = cls.get_or_create(db)
+        old_path = Path(profile.bg_music_path) if profile.bg_music_path else None
+        if old_path and old_path != target and old_path.exists():
+            try:
+                old_path.unlink()
+            except OSError as exc:
+                logger.warning("Could not remove old music track %s: %s", old_path, exc)
+
+        target.write_bytes(data)
+        profile.bg_music_path = str(target)
+        profile.updated_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(profile)
+        return cls.to_response(db, profile), target.name
+
+    @classmethod
+    def delete_music(cls, db: Session) -> ChannelProfileResponse:
+        """Remove uploaded background music track."""
+        profile = cls.get_or_create(db)
+        if profile.bg_music_path:
+            path = Path(profile.bg_music_path)
+            try:
+                if path.is_relative_to(settings.channel_assets_path) and path.exists():
+                    path.unlink()
+            except OSError as exc:
+                logger.warning("Could not remove music %s: %s", path, exc)
+        profile.bg_music_path = None
+        profile.updated_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(profile)
+        return cls.to_response(db, profile)
+
+    @classmethod
+    def music_file(cls, db: Session) -> Path | None:
+        """Return path to uploaded music file if present on disk."""
+        profile = cls.get_or_create(db)
+        if not profile.bg_music_path:
+            return None
+        path = Path(profile.bg_music_path)
+        if not path.exists():
+            return None
+        return path

@@ -360,3 +360,64 @@ def test_branding_preview_rejects_unknown_parameters(client):
         f"{settings.API_PREFIX}/channel/branding/preview?orientation=sideways"
     )
     assert res.status_code == 422
+
+
+def test_independent_settings_persistence_and_overrides(client, db_session):
+    """Verify independent settings persist in DB and explicit values override presets."""
+    res = client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={
+            "presentation_preset": "viral_kill",
+            "watermark_start_seconds": 1.5,
+            "watermark_end_seconds": 12.0,
+            "hook_enabled": True,
+            "hook_text": "WAIT FOR IT...",
+            "hook_start_seconds": 0.5,
+            "hook_duration_seconds": 2.0,
+            "hook_position": "upper_third",
+            "kill_effects_enabled": True,
+            "tracking_enabled": True,
+            "target_fps": 60,
+            "cta_position": "upper_third",
+            "bg_music_volume": 0.45,
+            "loop_optimization": True,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()["response"]
+    assert body["watermark_start_seconds"] == 1.5
+    assert body["watermark_end_seconds"] == 12.0
+    assert body["hook_enabled"] is True
+    assert body["hook_text"] == "WAIT FOR IT..."
+    assert body["hook_start_seconds"] == 0.5
+    assert body["hook_duration_seconds"] == 2.0
+    assert body["hook_position"] == "upper_third"
+    assert body["kill_effects_enabled"] is True
+    assert body["tracking_enabled"] is True
+    assert body["target_fps"] == 60
+    assert body["cta_position"] == "upper_third"
+    assert body["bg_music_volume"] == 0.45
+    assert body["loop_optimization"] is True
+
+    # 2. Reloading profile verifies values are persisted in DB
+    reloaded = client.get(f"{settings.API_PREFIX}/channel/profile").json()["response"]
+    assert reloaded["watermark_start_seconds"] == 1.5
+    assert reloaded["watermark_end_seconds"] == 12.0
+    assert reloaded["hook_enabled"] is True
+    assert reloaded["hook_text"] == "WAIT FOR IT..."
+    assert reloaded["kill_effects_enabled"] is True
+    assert reloaded["tracking_enabled"] is True
+    assert reloaded["target_fps"] == 60
+    assert reloaded["cta_position"] == "upper_third"
+
+    # 3. Switching preset retains explicit creator overrides
+    res_cinematic = client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={"presentation_preset": "cinematic_kill"},
+    )
+    assert res_cinematic.status_code == 200
+    cin_body = res_cinematic.json()["response"]
+    assert cin_body["presentation_preset"] == "cinematic_kill"
+    assert cin_body["hook_text"] == "WAIT FOR IT..."
+    assert cin_body["target_fps"] == 60
+    assert cin_body["cta_position"] == "upper_third"

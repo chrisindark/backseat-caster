@@ -11,6 +11,7 @@ import {
   HighlightCandidateListResponse,
   HighlightRunListResponse,
   HighlightStatusResponse,
+  MusicUploadResponse,
   PresentationPreset,
   RegenerateMetadataRequest,
   RegenerateMetadataResponse,
@@ -721,6 +722,29 @@ export async function deleteChannelWatermark(): Promise<ChannelProfile> {
 
 export function getChannelWatermarkUrl(version?: string | null): string {
   return `${API_BASE}/channel/watermark${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+}
+
+export async function uploadChannelMusic(
+  file: File
+): Promise<MusicUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/channel/music`, {
+    method: "POST",
+    body: formData,
+  });
+  return parseResponse<MusicUploadResponse>(res, "upload background music");
+}
+
+export async function deleteChannelMusic(): Promise<ChannelProfile> {
+  const res = await fetch(`${API_BASE}/channel/music`, {
+    method: "DELETE",
+  });
+  return parseResponse<ChannelProfile>(res, "delete background music");
+}
+
+export function getChannelMusicUrl(version?: string | null): string {
+  return `${API_BASE}/channel/music${version ? `?v=${encodeURIComponent(version)}` : ""}`;
 }
 
 // -----------------------------------------------------------------------------

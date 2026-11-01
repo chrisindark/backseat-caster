@@ -18,6 +18,7 @@ from app.database import get_db
 from app.schemas.channel import (
     ChannelProfileResponse,
     ChannelProfileUpdate,
+    MusicUploadResponse,
     PresentationPresetResponse,
     WatermarkUploadResponse,
 )
@@ -116,6 +117,68 @@ def delete_channel_watermark(db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete watermark: {e!s}",
         )
+
+
+@router.post("/music", response_model=BaseResponse[MusicUploadResponse])
+def upload_channel_music(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload (or replace) the channel background music audio track."""
+    try:
+        data = file.file.read()
+        profile, filename = ChannelProfileService.save_music(
+            db, data=data, filename=file.filename or "bg_music.mp3"
+        )
+        return BaseResponse.success_response(
+            response=MusicUploadResponse(
+                profile=profile,
+                filename=filename,
+                message="Background music uploaded and configured for renders.",
+            )
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to upload channel background music: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload music: {e!s}",
+        )
+
+
+@router.delete("/music", response_model=BaseResponse[ChannelProfileResponse])
+def delete_channel_music(db: Session = Depends(get_db)):
+    """Remove the uploaded background music track."""
+    try:
+        profile = ChannelProfileService.delete_music(db)
+        return BaseResponse.success_response(response=profile)
+    except Exception as e:
+        logger.exception("Failed to delete background music: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete background music: {e!s}",
+        )
+
+
+@router.get("/music")
+def get_channel_music(db: Session = Depends(get_db)):
+    """Stream the uploaded background music track for previews."""
+    path = ChannelProfileService.music_file(db)
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No channel background music uploaded.",
+        )
+    media_type = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".aac": "audio/aac",
+        ".m4a": "audio/mp4",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+    }.get(path.suffix.lower(), "audio/mpeg")
+    return FileResponse(path=path, media_type=media_type, filename=path.name)
 
 
 @router.get("/watermark")

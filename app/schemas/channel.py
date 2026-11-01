@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.rendering.presentation import PresentationPresetName
+
 WatermarkPosition = Literal[
     "top_left", "top_right", "bottom_left", "bottom_right", "center"
 ]
@@ -28,10 +30,39 @@ def normalize_hashtags(values: list[str] | None) -> list[str]:
     return result
 
 
+class PresentationPresetResponse(BaseModel):
+    """Specification of a deterministic presentation preset."""
+
+    name: PresentationPresetName
+    label: str
+    description: str
+    branding_enabled: bool
+    branding_intro: bool
+    branding_outro: bool
+    watermark_enabled: bool
+    watermark_position: str
+    watermark_opacity: float
+    watermark_scale: float
+    watermark_margin: float
+    cta_enabled: bool
+    cta_style: CtaStyle
+    cta_seconds: float
+    default_framing_preset: FramingPreset
+    default_quality_preset: QualityPreset
+    hook_enabled: bool
+    hook_position: str
+    hook_duration_seconds: float
+    kill_effects_enabled: bool
+    tracking_enabled: bool
+    bg_music_volume: float
+    loop_optimization: bool
+
+
 class ChannelProfileResponse(BaseModel):
     """Current channel branding, render and publishing defaults."""
 
     channel_name: str | None = None
+    presentation_preset: PresentationPresetName = "viral_kill"
 
     watermark_enabled: bool = False
     has_watermark: bool = False
@@ -40,6 +71,29 @@ class ChannelProfileResponse(BaseModel):
     watermark_opacity: float = 0.85
     watermark_scale: float = 0.14
     watermark_margin: float = 0.03
+    watermark_start_seconds: float | None = None
+    watermark_end_seconds: float | None = None
+
+    # Hook overlay (Milestone 2)
+    hook_enabled: bool = False
+    hook_text: str | None = None
+    hook_start_seconds: float = 0.0
+    hook_duration_seconds: float = 1.5
+    hook_position: str = "upper_third"
+
+    # Kill effects (Milestone 3)
+    kill_effects_enabled: bool = False
+
+    # Dynamic Reframing (Milestone 4)
+    tracking_enabled: bool = False
+
+    # Audio & Looping (Milestone 5)
+    bg_music_path: str | None = None
+    bg_music_volume: float = 0.30
+    loop_optimization: bool = False
+
+    # Target Frame Rate (Milestone 6)
+    target_fps: int | None = None
 
     default_framing_preset: FramingPreset = "third_person"
     default_quality_preset: QualityPreset = "high"
@@ -64,6 +118,7 @@ class ChannelProfileResponse(BaseModel):
     cta_enabled: bool = False
     cta_style: CtaStyle = "outro_card"
     cta_seconds: float = 3.5
+    cta_position: Literal["bottom", "upper_third"] = "bottom"
     cta_headline: str = "SUBSCRIBE & TAP THE BELL"
     cta_subtitle: str = "Click the bell for more clips"
     cta_speech_text: str = "Subscribe to the channel and tap the bell for more clips."
@@ -86,11 +141,36 @@ class ChannelProfileUpdate(BaseModel):
     """
 
     channel_name: str | None = Field(None, max_length=255)
+    presentation_preset: PresentationPresetName | None = None
+
     watermark_enabled: bool | None = None
     watermark_position: WatermarkPosition | None = None
     watermark_opacity: float | None = Field(None, ge=0.05, le=1.0)
     watermark_scale: float | None = Field(None, ge=0.02, le=0.6)
     watermark_margin: float | None = Field(None, ge=0.0, le=0.2)
+    watermark_start_seconds: float | None = Field(None, ge=0.0)
+    watermark_end_seconds: float | None = Field(None, ge=0.0)
+
+    # Hook Overlay (Milestone 2)
+    hook_enabled: bool | None = None
+    hook_text: str | None = Field(None, max_length=255)
+    hook_start_seconds: float | None = Field(None, ge=0.0)
+    hook_duration_seconds: float | None = Field(None, ge=0.5, le=10.0)
+    hook_position: str | None = Field(None, max_length=32)
+
+    # Kill & Event Effects (Milestone 3)
+    kill_effects_enabled: bool | None = None
+
+    # Dynamic Reframing (Milestone 4)
+    tracking_enabled: bool | None = None
+
+    # Audio & Looping (Milestone 5)
+    bg_music_path: str | None = Field(None, max_length=1024)
+    bg_music_volume: float | None = Field(None, ge=0.0, le=1.0)
+    loop_optimization: bool | None = None
+
+    # Output Quality / Frame Rate (Milestone 6)
+    target_fps: int | None = Field(None, ge=15, le=120)
 
     default_framing_preset: FramingPreset | None = None
     default_quality_preset: QualityPreset | None = None
@@ -112,7 +192,8 @@ class ChannelProfileUpdate(BaseModel):
 
     cta_enabled: bool | None = None
     cta_style: CtaStyle | None = None
-    cta_seconds: float | None = Field(None, ge=2.0, le=10.0)
+    cta_seconds: float | None = Field(None, ge=1.0, le=10.0)
+    cta_position: Literal["bottom", "upper_third"] | None = None
     cta_headline: str | None = Field(None, max_length=255)
     cta_subtitle: str | None = Field(None, max_length=255)
     cta_speech_text: str | None = None
@@ -183,6 +264,8 @@ __all__ = [
     "ChannelProfileUpdate",
     "CtaStyle",
     "FramingPreset",
+    "PresentationPresetName",
+    "PresentationPresetResponse",
     "PrivacyStatus",
     "QualityPreset",
     "WatermarkPosition",

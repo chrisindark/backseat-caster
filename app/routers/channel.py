@@ -18,6 +18,7 @@ from app.database import get_db
 from app.schemas.channel import (
     ChannelProfileResponse,
     ChannelProfileUpdate,
+    PresentationPresetResponse,
     WatermarkUploadResponse,
 )
 from app.services.channel_profile import ChannelProfileService
@@ -25,6 +26,20 @@ from app.services.channel_profile import ChannelProfileService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/channel", tags=["Channel Branding"])
+
+
+@router.get("/presets", response_model=BaseResponse[list[PresentationPresetResponse]])
+def list_presentation_presets():
+    """List available presentation presets (viral_kill, cinematic_kill, multi_kill_montage)."""
+    try:
+        presets = ChannelProfileService.list_presets()
+        return BaseResponse.success_response(response=presets)
+    except Exception as e:
+        logger.exception("Failed to list presentation presets: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list presentation presets: {e!s}",
+        )
 
 
 @router.get("/profile", response_model=BaseResponse[ChannelProfileResponse])
@@ -165,6 +180,7 @@ def preview_branding_card(
             accent=branding.accent_color,
             text_color=branding.text_color,
             font_path=branding.font_path,
+            kind="intro",
         )
     elif kind == "outro":
         render_card_png(
@@ -176,6 +192,7 @@ def preview_branding_card(
             accent=branding.accent_color,
             text_color=branding.text_color,
             font_path=branding.font_path,
+            kind="outro",
         )
     else:
         render_cta_overlay_png(

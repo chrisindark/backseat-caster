@@ -22,7 +22,9 @@ DEFAULT_VOICE = "en-US-ChristopherNeural"
 DEFAULT_SPEECH_TEXT = "Subscribe to the channel and tap the bell for more clips."
 
 #: Bell chime bundled with the app (independent of the process working directory).
-BUNDLED_BELL = Path(__file__).resolve().parent.parent / "assets" / "audio" / "bell_chime.wav"
+BUNDLED_BELL = (
+    Path(__file__).resolve().parent.parent / "assets" / "audio" / "bell_chime.wav"
+)
 
 
 def _cache_dir() -> Path:
@@ -125,12 +127,14 @@ class TTSService:
         if bell_path is not None:
             args.extend(["-i", str(bell_path)])
             delay_ms = int(round(bell_offset_seconds * 1000))
-            limit = max_seconds or 6.0
+            mix = "[0:a][bell]amix=inputs=2:duration=longest:dropout_transition=2"
+            if max_seconds:
+                mix += (
+                    f",apad=pad_dur={max_seconds:.3f},atrim=duration={max_seconds:.3f}"
+                )
             filter_complex = (
                 f"[1:a]adelay={delay_ms}|{delay_ms},volume={bell_volume:.2f}[bell];"
-                f"[0:a][bell]amix=inputs=2:duration=longest:dropout_transition=2,"
-                f"apad=pad_dur={limit:.3f},atrim=duration={limit:.3f},"
-                f"loudnorm=I=-14:TP=-1.5:LRA=11[a_out]"
+                f"{mix},loudnorm=I=-14:TP=-1.5:LRA=11[a_out]"
             )
             args.extend(["-filter_complex", filter_complex, "-map", "[a_out]"])
         elif max_seconds:
@@ -146,6 +150,16 @@ class TTSService:
         except Exception:
             return False
         return output.exists() and output.stat().st_size > 0
+
+    @staticmethod
+    def audio_duration_seconds(path: Path) -> float:
+        """Return the duration of a generated CTA WAV in seconds."""
+        import wave
+
+        with wave.open(str(path), "rb") as wav:
+            if wav.getframerate() <= 0:
+                return 0.0
+            return wav.getnframes() / wav.getframerate()
 
     @classmethod
     def generate_cta_audio(
@@ -188,7 +202,9 @@ class TTSService:
             if include_bell:
                 estimated = max(estimated, bell_offset_seconds + 1.5)
             logger.warning("TTS unavailable; writing silent CTA placeholder")
-            return cls._silent_wav(min(estimated, limit) if limit else estimated, fallback)
+            return cls._silent_wav(
+                min(estimated, limit) if limit else estimated, fallback
+            )
 
         assembled = cls._assemble_wav(
             working,

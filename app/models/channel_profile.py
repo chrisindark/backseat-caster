@@ -25,6 +25,9 @@ class ChannelProfile(Base):
     # Identity
     channel_name = Column(String(255), nullable=True)
 
+    # Presentation Preset (Milestone 1): viral_kill | cinematic_kill | multi_kill_montage
+    presentation_preset = Column(String(32), default="viral_kill", nullable=True)
+
     # Watermark / logo overlay applied by the render engine
     watermark_path = Column(String(1024), nullable=True)
     watermark_enabled = Column(Boolean, default=False)
@@ -32,6 +35,29 @@ class ChannelProfile(Base):
     watermark_opacity = Column(Float, default=0.85)
     watermark_scale = Column(Float, default=0.14)
     watermark_margin = Column(Float, default=0.03)
+    watermark_start_seconds = Column(Float, nullable=True)
+    watermark_end_seconds = Column(Float, nullable=True)
+
+    # Hook Overlay (Milestone 2)
+    hook_enabled = Column(Boolean, nullable=True)
+    hook_text = Column(String(255), nullable=True)
+    hook_start_seconds = Column(Float, nullable=True)
+    hook_duration_seconds = Column(Float, nullable=True)
+    hook_position = Column(String(32), nullable=True)
+
+    # Kill & Event Effects (Milestone 3)
+    kill_effects_enabled = Column(Boolean, nullable=True)
+
+    # Dynamic Reframing (Milestone 4)
+    tracking_enabled = Column(Boolean, nullable=True)
+
+    # Audio & Looping (Milestone 5)
+    bg_music_path = Column(String(1024), nullable=True)
+    bg_music_volume = Column(Float, nullable=True)
+    loop_optimization = Column(Boolean, nullable=True)
+
+    # Output Quality / Frame Rate (Milestone 6)
+    target_fps = Column(Integer, nullable=True)
 
     # Render defaults
     default_framing_preset = Column(String(64), default="third_person")
@@ -64,6 +90,7 @@ class ChannelProfile(Base):
     cta_subtitle = Column(String(255), nullable=True)
     cta_speech_text = Column(Text, nullable=True)
     cta_voice = Column(String(64), nullable=True)
+    cta_position = Column(String(32), default="bottom", nullable=True)
 
     # Publishing defaults
     title_template = Column(String(255), nullable=True)

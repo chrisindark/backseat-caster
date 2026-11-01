@@ -20,21 +20,32 @@ from app.rendering.branding import (
     build_branding_plan,
     build_card_video_filter,
     build_concat_filter,
+    cleanup_png_dir,
+    render_cta_overlay_png,
+    render_hook_overlay_png,
+    render_kill_notification_png,
+    render_text_watermark_png,
 )
 from app.rendering.config import (
     CROP_PADDING_PRESETS,
     BrandingConfig,
+    DurationBudget,
     RenderConfig,
     default_render_config,
 )
 from app.rendering.filters import (
+    build_cinematic_zoom_filter,
     build_landscape_filter,
+    build_punch_in_filter,
     build_vertical_blur_filter,
     build_vertical_crop_filter,
     build_watermark_filter,
+    resolve_cinematic_target_time,
 )
+from app.rendering.loop import LoopAnalysisResult, analyze_loop_continuity
 from app.rendering.manifest import write_manifest
 from app.rendering.probe import probe_media
+from app.rendering.tracking import PlayerTracker, TrackingResult
 from app.rendering.validator import validate_render_parameters
 
 logger = logging.getLogger(__name__)
@@ -143,6 +154,9 @@ def select_encoder(config: RenderConfig) -> tuple[str, list[str]]:
             "yuv420p",
         ]
 
+    if config.target_fps:
+        flags.extend(["-r", str(config.target_fps)])
+
     return chosen, flags
 
 
@@ -151,6 +165,33 @@ class RenderEngine:
 
     def __init__(self, config: RenderConfig | None = None):
         self.config = config or default_render_config
+        self._last_tracking_result: TrackingResult | None = None
+
+    def _duration_budget(self, *, bookend_seconds: float = 0.0) -> DurationBudget:
+        """Upload budget for this render (ceiling minus the cards it adds)."""
+        return DurationBudget(
+            max_seconds=self.config.max_total_seconds,
+            bookend_seconds=bookend_seconds,
+        )
+
+    def _cta_summary(
+        self, *, has_voiceover: bool, voiceover_start_seconds: float
+    ) -> dict[str, Any]:
+        """Manifest-friendly record of the CTA settings that produced this clip."""
+        cta = self.config.cta
+        overlay = bool(cta.enabled and cta.style == "overlay")
+        return {
+            "enabled": bool(cta.enabled),
+            "style": cta.style,
+            "seconds": cta.seconds,
+            "overlay": overlay,
+            "headline": cta.headline,
+            "subtitle": cta.subtitle,
+            "speech_text": cta.speech_text,
+            "voice": cta.voice,
+            "voiceover": has_voiceover,
+            "voiceover_start_seconds": round(max(0.0, voiceover_start_seconds), 3),
+        }
 
     def _render_single_target(
         self,
@@ -358,6 +399,17 @@ class RenderEngine:
                 ]
             )
 
+        # Milestone 5: Creator-supplied background music looped seamlessly
+        if self.config.music.active:
+            cmd.extend(
+                [
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    str(self.config.music.path),
+                ]
+            )
+
         modes = list(target_dict.keys())
         n_targets = len(modes)
 
@@ -366,7 +418,9 @@ class RenderEngine:
         branding_active = bool(branding_plan and branding_plan.active)
         card_inputs: dict[str, tuple[int | None, int | None]] = {}
         progress_duration = duration_seconds
-        next_input_index = 1 + (1 if narration_path else 0)
+        next_input_index = (
+            1 + (1 if narration_path else 0) + (1 if self.config.music.active else 0)
+        )
         if branding_active and branding_plan is not None:
             for mode_name in modes:
                 intro_card = branding_plan.intro_card(mode_name)
@@ -402,30 +456,201 @@ class RenderEngine:
                 card_inputs[mode_name] = (intro_idx, outro_idx)
             progress_duration = duration_seconds + branding_plan.padding_seconds
 
-        # Tier 3: channel watermark. One still-image input per target keeps the
-        # single-pass render intact and lets each output scale the logo for its
-        # own orientation.
-        watermark_active = bool(self.config.watermark.active)
-        watermark_inputs: dict[str, int] = {}
-        if watermark_active and self.config.watermark.path:
-            # The logo only covers the gameplay segment (not the branded cards),
-            # so its input length stays tied to the clip window. Looping it for
-            # the composed length instead would make `overlay` extend the main
-            # stream and silently lengthen every output.
-            logo_duration = max(0.1, duration_seconds)
+        # Common directory for generated overlay assets
+        _out_dir = (
+            list(targets.values())[0].parent
+            if isinstance(targets, dict) and targets
+            else Path(".")
+        )
+
+        # Milestone 4: Computer vision dynamic vertical reframing
+        tracking_result: TrackingResult | None = None
+        crop_x_expr: str = ""
+        if self.config.tracking.enabled:
+            tracker = PlayerTracker(config=self.config.tracking)
+            tracking_result = tracker.track_clip(
+                source_path=source_path,
+                start_seconds=start_seconds,
+                duration_seconds=duration_seconds,
+            )
+            crop_x_expr = tracking_result.crop_x_expr
+        self._last_tracking_result = tracking_result
+
+        # In-video hook caption overlay (Milestone 2): shown in the upper third
+        # for the first `hook_duration_seconds` of gameplay.
+        hook_active = bool(self.config.hook.active)
+        hook_inputs: dict[str, int] = {}
+        hook_dir: Path | None = None
+        if hook_active:
+            hook_dir = _out_dir / ".hook_overlay"
+            hook_dir.mkdir(parents=True, exist_ok=True)
+            hook_seconds = float(self.config.hook.duration_seconds)
             for mode_name in modes:
+                is_landscape = mode_name == "landscape"
+                ow = (
+                    self.config.landscape_width
+                    if is_landscape
+                    else self.config.vertical_width
+                )
+                oh = (
+                    self.config.landscape_height
+                    if is_landscape
+                    else self.config.vertical_height
+                )
+                hook_path = render_hook_overlay_png(
+                    hook_dir / f"{mode_name}_hook.png",
+                    size=(ow, oh),
+                    text=self.config.hook.text or "",
+                    position=self.config.hook.position,
+                    accent=self.config.branding.accent_color,
+                    text_color=self.config.branding.text_color,
+                    font_path=self.config.branding.font_path,
+                )
                 cmd.extend(
                     [
                         "-loop",
                         "1",
                         "-t",
-                        f"{logo_duration:.3f}",
+                        f"{hook_seconds:.3f}",
                         "-i",
-                        str(self.config.watermark.path),
+                        str(hook_path),
                     ]
                 )
-                watermark_inputs[mode_name] = next_input_index
+                hook_inputs[mode_name] = next_input_index
                 next_input_index += 1
+
+        # CTA in-video overlay (Mode A): a transparent lower-third pill shown
+        # for the last `cta_seconds` of the gameplay segment.
+        cta_overlay_active = (
+            bool(self.config.cta.enabled) and self.config.cta.style == "overlay"
+        )
+        overlay_inputs: dict[str, int] = {}
+        overlay_dir: Path | None = None
+        if cta_overlay_active:
+            overlay_dir = _out_dir / ".cta_overlay"
+            overlay_dir.mkdir(parents=True, exist_ok=True)
+            overlay_seconds = float(self.config.cta.seconds)
+            for mode_name in modes:
+                is_landscape = mode_name == "landscape"
+                ow = (
+                    self.config.landscape_width
+                    if is_landscape
+                    else self.config.vertical_width
+                )
+                oh = (
+                    self.config.landscape_height
+                    if is_landscape
+                    else self.config.vertical_height
+                )
+                overlay_path = render_cta_overlay_png(
+                    overlay_dir / f"{mode_name}_cta.png",
+                    size=(ow, oh),
+                    headline=self.config.cta.headline,
+                    subtitle=self.config.cta.subtitle,
+                    position=self.config.cta.position,
+                    accent=self.config.branding.accent_color,
+                    text_color=self.config.branding.text_color,
+                    font_path=self.config.branding.font_path,
+                )
+                cmd.extend(
+                    [
+                        "-loop",
+                        "1",
+                        "-t",
+                        f"{overlay_seconds:.3f}",
+                        "-i",
+                        str(overlay_path),
+                    ]
+                )
+                overlay_inputs[mode_name] = next_input_index
+                next_input_index += 1
+
+        # Tier 3: channel watermark. One still-image input per target keeps the
+        # single-pass render intact and lets each output scale the logo for its
+        # own orientation.
+        watermark_active = bool(self.config.watermark.active)
+        watermark_inputs: dict[str, int] = {}
+        watermark_dir: Path | None = None
+        if watermark_active:
+            wm_file: Path | None = None
+            if self.config.watermark.path and Path(self.config.watermark.path).exists():
+                wm_file = Path(self.config.watermark.path)
+            elif self.config.watermark.channel_name:
+                watermark_dir = _out_dir / ".watermark"
+                watermark_dir.mkdir(parents=True, exist_ok=True)
+                wm_file = render_text_watermark_png(
+                    watermark_dir / "text_watermark.png",
+                    channel_name=self.config.watermark.channel_name,
+                    opacity=self.config.watermark.opacity,
+                    font_path=self.config.branding.font_path,
+                )
+
+            if wm_file and wm_file.exists():
+                # The logo only covers the gameplay segment (not the branded cards),
+                # so its input length stays tied to the clip window. Looping it for
+                # the composed length instead would make `overlay` extend the main
+                # stream and silently lengthen every output.
+                logo_duration = max(0.1, duration_seconds)
+                for mode_name in modes:
+                    cmd.extend(
+                        [
+                            "-loop",
+                            "1",
+                            "-t",
+                            f"{logo_duration:.3f}",
+                            "-i",
+                            str(wm_file),
+                        ]
+                    )
+                    watermark_inputs[mode_name] = next_input_index
+                    next_input_index += 1
+
+        # Milestone 3: Kill notification badges driven by deterministic event timestamps.
+        kill_effects_active = bool(self.config.kill_effects.active)
+        kill_badge_inputs: dict[int, dict[str, int]] = {}
+        kill_badge_dir: Path | None = None
+        if kill_effects_active and self.config.kill_effects.kill_notification:
+            kill_badge_dir = _out_dir / ".kill_effects"
+            kill_badge_dir.mkdir(parents=True, exist_ok=True)
+            badge_duration = float(self.config.kill_effects.kill_notification_duration)
+            for ev_idx, ev in enumerate(self.config.kill_effects.events):
+                ev_label = str(ev.get("label") or "ELIMINATION")
+                ev_combo = int(ev.get("combo") or (ev_idx + 1))
+                kill_badge_inputs[ev_idx] = {}
+                for mode_name in modes:
+                    is_landscape = mode_name == "landscape"
+                    ow = (
+                        self.config.landscape_width
+                        if is_landscape
+                        else self.config.vertical_width
+                    )
+                    oh = (
+                        self.config.landscape_height
+                        if is_landscape
+                        else self.config.vertical_height
+                    )
+                    badge_path = render_kill_notification_png(
+                        kill_badge_dir / f"{mode_name}_ev_{ev_idx}.png",
+                        size=(ow, oh),
+                        label=ev_label,
+                        combo=ev_combo,
+                        position=self.config.kill_effects.position,
+                        accent=self.config.branding.accent_color,
+                        text_color=self.config.branding.text_color,
+                        font_path=self.config.branding.font_path,
+                    )
+                    cmd.extend(
+                        [
+                            "-loop",
+                            "1",
+                            "-t",
+                            f"{badge_duration:.3f}",
+                            "-i",
+                            str(badge_path),
+                        ]
+                    )
+                    kill_badge_inputs[ev_idx][mode_name] = next_input_index
+                    next_input_index += 1
 
         # Build filtergraph:
         filter_parts = []
@@ -468,6 +693,7 @@ class RenderEngine:
                         input_label=v_in,
                         output_label=v_out,
                         prefix=p,
+                        crop_x=crop_x_expr,
                     )
                 )
             elif mode == "direct_crop":
@@ -479,6 +705,7 @@ class RenderEngine:
                         input_label=v_in,
                         output_label=v_out,
                         prefix=p,
+                        crop_x=crop_x_expr,
                     )
                 )
             elif mode == "cinematic":
@@ -490,6 +717,7 @@ class RenderEngine:
                         input_label=v_in,
                         output_label=v_out,
                         prefix=p,
+                        crop_x=crop_x_expr,
                     )
                 )
             elif mode == "custom" or mode == "vertical_crop":
@@ -501,6 +729,7 @@ class RenderEngine:
                         input_label=v_in,
                         output_label=v_out,
                         prefix=p,
+                        crop_x=crop_x_expr,
                     )
                 )
             else:
@@ -519,6 +748,83 @@ class RenderEngine:
         for i, mode_name in enumerate(modes):
             v_out = f"v_out_{i}"
             v_composed = v_out
+
+            # Milestone 3: Punch-in momentary zoom on elimination events
+            if kill_effects_active and self.config.kill_effects.punch_in:
+                punch_times = [
+                    float(ev["time"])
+                    for ev in self.config.kill_effects.events
+                    if "time" in ev and 0.0 <= float(ev["time"]) <= duration_seconds
+                ]
+                if punch_times:
+                    is_landscape_mode = mode_name == "landscape"
+                    pw = (
+                        self.config.landscape_width
+                        if is_landscape_mode
+                        else self.config.vertical_width
+                    )
+                    ph = (
+                        self.config.landscape_height
+                        if is_landscape_mode
+                        else self.config.vertical_height
+                    )
+                    v_punch = f"v_punch_{i}"
+                    filter_parts.append(
+                        build_punch_in_filter(
+                            input_label=v_composed,
+                            output_label=v_punch,
+                            width=pw,
+                            height=ph,
+                            event_times=punch_times,
+                            duration=self.config.kill_effects.punch_in_duration,
+                            scale=self.config.kill_effects.punch_in_scale,
+                            prefix=f"punch_{i}",
+                        )
+                    )
+                    v_composed = v_punch
+
+            # Milestone 7.4: Cinematic Kill restrained zoom payoff treatment
+            cinematic_active = (
+                self.config.cinematic_treatment.enabled
+                if self.config.cinematic_treatment
+                else False
+            )
+            if cinematic_active:
+                events = self.config.cinematic_treatment.events or (
+                    self.config.kill_effects.events if self.config.kill_effects else []
+                )
+                target_t = resolve_cinematic_target_time(
+                    duration_seconds=duration_seconds,
+                    events=events,
+                    explicit_target=self.config.cinematic_treatment.target_time,
+                    effect_duration=self.config.cinematic_treatment.duration,
+                )
+                is_landscape_mode = mode_name == "landscape"
+                cw = (
+                    self.config.landscape_width
+                    if is_landscape_mode
+                    else self.config.vertical_width
+                )
+                ch = (
+                    self.config.landscape_height
+                    if is_landscape_mode
+                    else self.config.vertical_height
+                )
+                v_cine = f"v_cine_{i}"
+                filter_parts.append(
+                    build_cinematic_zoom_filter(
+                        input_label=v_composed,
+                        output_label=v_cine,
+                        width=cw,
+                        height=ch,
+                        target_time=target_t,
+                        duration=self.config.cinematic_treatment.duration,
+                        scale=self.config.cinematic_treatment.scale,
+                        prefix=f"cine_{i}",
+                    )
+                )
+                v_composed = v_cine
+
             if watermark_active and mode_name in watermark_inputs:
                 is_landscape_mode = mode_name == "landscape"
                 wm_width = (
@@ -543,9 +849,67 @@ class RenderEngine:
                         opacity=self.config.watermark.opacity,
                         scale=self.config.watermark.scale,
                         margin=self.config.watermark.margin,
+                        start_seconds=self.config.watermark.start_seconds,
+                        end_seconds=self.config.watermark.end_seconds,
                         prefix=f"wm_{i}",
                     )
                 )
+
+            # In-video hook caption overlay (Milestone 2): composite the badge
+            # during the opening hook window (first 1-1.5s).
+            hook_idx = hook_inputs.get(mode_name)
+            if hook_idx is not None:
+                hook_start = max(0.0, float(self.config.hook.start_seconds))
+                hook_end = min(
+                    duration_seconds,
+                    hook_start + float(self.config.hook.duration_seconds),
+                )
+                hook_label = f"v_hook_{i}"
+                filter_parts.append(
+                    f"[{v_composed}][{hook_idx}:v]overlay="
+                    f"0:0:"
+                    f"enable='between(t,{hook_start:.3f},{hook_end:.3f})'"
+                    f"[{hook_label}]"
+                )
+                v_composed = hook_label
+
+            # Milestone 3: Kill notification badge overlay at deterministic event moments
+            if kill_effects_active and self.config.kill_effects.kill_notification:
+                for ev_idx, ev in enumerate(self.config.kill_effects.events):
+                    b_idx = kill_badge_inputs.get(ev_idx, {}).get(mode_name)
+                    if b_idx is not None and "time" in ev:
+                        ev_start = max(0.0, float(ev["time"]))
+                        ev_end = min(
+                            duration_seconds,
+                            ev_start
+                            + float(
+                                self.config.kill_effects.kill_notification_duration
+                            ),
+                        )
+                        b_label = f"v_kbadge_{i}_{ev_idx}"
+                        filter_parts.append(
+                            f"[{v_composed}][{b_idx}:v]overlay="
+                            f"0:0:"
+                            f"enable='between(t,{ev_start:.3f},{ev_end:.3f})'"
+                            f"[{b_label}]"
+                        )
+                        v_composed = b_label
+
+            # CTA in-video overlay: composite the lower-third or upper-third pill onto the
+            # gameplay segment for the last `cta_seconds` of the clip. This is
+            # independent of the branded cards, so the CTA still shows when
+            # intro/outro cards are switched off.
+            cta_overlay_idx = overlay_inputs.get(mode_name)
+            if cta_overlay_idx is not None:
+                start_time = max(0.0, duration_seconds - float(self.config.cta.seconds))
+                overlay_label = f"v_cta_overlay_{i}"
+                filter_parts.append(
+                    f"[{v_composed}][{cta_overlay_idx}:v]overlay="
+                    f"0:0:"
+                    f"enable='between(t,{start_time:.3f},{duration_seconds:.3f})'"
+                    f"[{overlay_label}]"
+                )
+                v_composed = overlay_label
 
             if not branding_active:
                 video_map_labels.append(v_composed)
@@ -725,6 +1089,11 @@ class RenderEngine:
                 except Exception:
                     pass
             err_thread.join(timeout=2.0)
+            cleanup_png_dir(overlay_dir)
+            cleanup_png_dir(hook_dir)
+            cleanup_png_dir(kill_badge_dir)
+            if watermark_dir:
+                cleanup_png_dir(watermark_dir)
 
         err_msg = "".join(stderr_output).strip()
 
@@ -748,6 +1117,8 @@ class RenderEngine:
         output_dir: Path | str,
         clip_id: str | None = None,
         narration_path: Path | str | None = None,
+        narration_start_seconds: float = 0.0,
+        audio_total_seconds: float | None = None,
         overwrite: bool = False,
         crop_preset: str | None = None,
         crop_blur_padding: float | None = None,
@@ -820,11 +1191,14 @@ class RenderEngine:
             target_lufs if target_lufs is not None else self.config.target_lufs
         )
 
+        music_input_idx = 2 if narr_file is not None else 1
         audio_filter, audio_label = build_audio_filter_graph(
             start_seconds=0,
             duration_seconds=effective_duration,
             has_source_audio=probe.has_audio,
             has_narration=narr_file is not None,
+            narration_start_seconds=narration_start_seconds,
+            audio_total_seconds=audio_total_seconds,
             ducked_game_gain=self.config.ducked_game_gain,
             narration_gain=self.config.narration_gain,
             limiter_enabled=self.config.limiter_enabled,
@@ -832,6 +1206,11 @@ class RenderEngine:
             target_lufs=effective_target_lufs,
             loudnorm_true_peak=self.config.loudnorm_true_peak,
             loudnorm_lra=self.config.loudnorm_lra,
+            has_music=bool(self.config.music.active),
+            music_input_label=f"{music_input_idx}:a",
+            music_gain=self.config.music.volume,
+            loop_optimization=bool(self.config.loop.enabled),
+            loop_fade_seconds=self.config.loop.fade_seconds,
         )
 
         # Resolve vertical crop layout preset and padding
@@ -847,7 +1226,9 @@ class RenderEngine:
 
         # Resolve modes to render
         if not modes:
-            modes = [crop_preset or effective_preset or "third_person"]
+            modes = self.config.modes or [
+                crop_preset or effective_preset or "third_person"
+            ]
 
         normalized_modes: list[str] = []
         for m in modes:
@@ -898,6 +1279,15 @@ class RenderEngine:
             branding_plan.padding_seconds if branding_plan else 0.0
         )
 
+        duration_budget = self._duration_budget(
+            bookend_seconds=branding_plan.padding_seconds if branding_plan else 0.0
+        )
+        if branding_plan is not None and not duration_budget.fits(effective_duration):
+            logger.warning(
+                "Branded clip exceeds the upload ceiling: %s",
+                duration_budget.over_ceiling_message(effective_duration),
+            )
+
         # 5. Execute Single-Pass Multi-Target Render
         if progress_callback:
             progress_callback(
@@ -917,7 +1307,11 @@ class RenderEngine:
                 narration_path=narr_file,
                 progress_callback=progress_callback,
                 branding_plan=branding_plan,
-                source_fps=probe.fps or 30.0,
+                source_fps=(
+                    float(self.config.target_fps)
+                    if self.config.target_fps
+                    else (probe.fps or 30.0)
+                ),
             )
         finally:
             if branding_plan is not None:
@@ -1000,6 +1394,15 @@ class RenderEngine:
 
         end_time_perf = time.perf_counter()
         render_duration = end_time_perf - start_time_perf
+
+        loop_analysis: LoopAnalysisResult | None = None
+        if self.config.loop.enabled:
+            loop_analysis = analyze_loop_continuity(
+                source_path=source_path,
+                start_seconds=start_seconds,
+                duration_seconds=effective_duration,
+            )
+
         manifest_file = write_manifest(
             output_dir=out_directory,
             clip_id=clip_id,
@@ -1019,12 +1422,35 @@ class RenderEngine:
             clamped=is_clamped,
             quality_preset=self.config.quality_preset,
             watermark=self.config.watermark.describe(),
+            hook=self.config.hook.describe(),
+            kill_effects=self.config.kill_effects.describe(),
+            cinematic_treatment=(
+                self.config.cinematic_treatment.describe()
+                if self.config.cinematic_treatment
+                else {"enabled": False}
+            ),
             branding=(
                 branding_plan.describe(total_duration)
                 if branding_plan is not None
                 else effective_branding.describe()
                 if effective_branding is not None
                 else {"enabled": False}
+            ),
+            cta=self._cta_summary(
+                has_voiceover=narr_file is not None,
+                voiceover_start_seconds=narration_start_seconds,
+            ),
+            duration_budget=duration_budget.describe_composed(total_duration),
+            tracking=(
+                self._last_tracking_result.describe()
+                if self._last_tracking_result is not None
+                else {"enabled": bool(self.config.tracking.enabled)}
+            ),
+            music=self.config.music.describe(),
+            loop=(
+                loop_analysis.describe()
+                if loop_analysis is not None
+                else self.config.loop.describe()
             ),
         )
         files_created.append(str(manifest_file))

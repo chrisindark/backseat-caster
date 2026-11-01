@@ -635,7 +635,19 @@ class AutoStageService:
         if existing_job:
             raise RuntimeError("clip already exists")
 
-        duration = min(60.0, max(3.0, float(candidate.duration_seconds or 15.0)))
+        budget = ChannelProfileService.duration_budget(db)
+        candidate_duration = float(candidate.duration_seconds or 15.0)
+        duration = max(3.0, min(budget.clip_budget, candidate_duration))
+        if candidate_duration > budget.clip_budget:
+            logger.info(
+                "Candidate %s trimmed %.1fs -> %.1fs so the branded clip fits "
+                "the %.0fs ceiling (%.1fs of cards)",
+                candidate.id,
+                candidate_duration,
+                duration,
+                budget.max_seconds,
+                budget.bookend_seconds,
+            )
         request = RenderClipRequest(
             video_id=video.id,
             start_seconds=float(candidate.start_seconds),
@@ -672,7 +684,7 @@ class AutoStageService:
             candidate=candidate,
             clip_id=clip_id,
             preferred_format=mode,
-            is_short=duration <= 60.0,
+            is_short=budget.is_uploadable(duration),
         )
         profile = ChannelProfileService.get_or_create(db)
         if profile.title_template:

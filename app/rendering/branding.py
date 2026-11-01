@@ -99,6 +99,420 @@ def _fit_font(
     return resolve_font(16, font_path)
 
 
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    """Wrap text to a pixel width, splitting unusually long handles safely."""
+    from PIL import Image, ImageDraw
+
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lines: list[str] = []
+    current = ""
+    for word in (text or "").split():
+        if probe.textlength(word, font=font) > max_width:
+            if current:
+                lines.append(current)
+                current = ""
+            chunk = ""
+            for char in word:
+                if chunk and probe.textlength(chunk + char, font=font) > max_width:
+                    lines.append(chunk)
+                    chunk = char
+                else:
+                    chunk += char
+            current = chunk
+            continue
+        candidate = f"{current} {word}".strip()
+        if current and probe.textlength(candidate, font=font) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def render_cta_overlay_png(
+    path: Path,
+    *,
+    size: tuple[int, int],
+    headline: str,
+    subtitle: str = "",
+    position: str = "bottom",
+    accent: str = "#F43F5E",
+    text_color: str = "#FFFFFF",
+    font_path: str | None = None,
+) -> Path:
+    """Draw a transparent lower-third pill (bell + headline + subtitle)."""
+    from PIL import Image, ImageDraw
+
+    width, height = max(2, int(size[0])), max(2, int(size[1]))
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    short_edge = min(width, height)
+    pill_w = int(width * 0.78)
+    pill_h = int(short_edge * 0.16)
+    margin = int(short_edge * 0.06)
+    pill_x0 = (width - pill_w) // 2
+    if position == "upper_third":
+        pill_y0 = int(height * 0.14)
+    else:
+        pill_y0 = height - pill_h - margin
+    pill_x1 = pill_x0 + pill_w
+    pill_y1 = pill_y0 + pill_h
+
+    # Semi-transparent dark pill with accent border.
+    draw.rounded_rectangle(
+        [pill_x0, pill_y0, pill_x1, pill_y1],
+        radius=pill_h // 2,
+        fill=(11, 13, 19, 210),
+        outline=hex_to_rgb(accent, DEFAULT_ACCENT),
+        width=max(2, short_edge // 120),
+    )
+
+    accent_rgb = hex_to_rgb(accent, DEFAULT_ACCENT)
+    text_rgb = hex_to_rgb(text_color, DEFAULT_TEXT)
+
+    # Bell icon on the left.
+    bell_cx = pill_x0 + int(pill_h * 0.9)
+    bell_cy = pill_y0 + pill_h // 2
+    bell_r = int(pill_h * 0.32)
+    draw.ellipse(
+        [bell_cx - bell_r, bell_cy - bell_r, bell_cx + bell_r, bell_cy + bell_r],
+        fill=accent_rgb,
+    )
+    # Clapper
+    draw.rectangle(
+        [
+            bell_cx - bell_r // 3,
+            bell_cy + bell_r - 2,
+            bell_cx + bell_r // 3,
+            bell_cy + bell_r + bell_r // 2,
+        ],
+        fill=accent_rgb,
+    )
+
+    # Text block.
+    headline = (headline or "SUBSCRIBE").strip()
+    sub = (subtitle or "").strip()
+    title_font = _fit_font(headline, int(pill_w * 0.55), int(pill_h * 0.42), font_path)
+    title_box = draw.textbbox((0, 0), headline, font=title_font)
+    title_h = title_box[3] - title_box[1]
+
+    sub_font = None
+    sub_h = 0
+    gap = int(short_edge * 0.012) if sub else 0
+    if sub:
+        sub_font = _fit_font(sub, int(pill_w * 0.55), int(pill_h * 0.26), font_path)
+        sub_box = draw.textbbox((0, 0), sub, font=sub_font)
+        sub_h = sub_box[3] - sub_box[1]
+
+    text_block_h = title_h + (gap + sub_h if sub else 0)
+    text_x = bell_cx + bell_r + int(pill_h * 0.35)
+    text_y = pill_y0 + (pill_h - text_block_h) // 2
+    draw.text(
+        (text_x - title_box[0], text_y - title_box[1]),
+        headline,
+        font=title_font,
+        fill=text_rgb,
+    )
+    if sub and sub_font:
+        sub_y = text_y + title_h + gap
+        sub_box = draw.textbbox((0, 0), sub, font=sub_font)
+        draw.text(
+            (text_x - sub_box[0], sub_y - sub_box[1]),
+            sub,
+            font=sub_font,
+            fill=accent_rgb,
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path, "PNG")
+    return path
+
+
+def render_text_watermark_png(
+    path: Path,
+    *,
+    channel_name: str,
+    size: tuple[int, int] = (640, 160),
+    opacity: float = 0.85,
+    text_color: str = "#FFFFFF",
+    font_path: str | None = None,
+) -> Path:
+    """Render a subtle text watermark / channel handle PNG with alpha transparency."""
+    from PIL import Image, ImageDraw
+
+    width, height = max(100, int(size[0])), max(40, int(size[1]))
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    clean_text = (channel_name or "").strip()
+    if not clean_text:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(path, "PNG")
+        return path
+
+    font = _fit_font(clean_text, int(width * 0.85), int(height * 0.55), font_path)
+    bbox = draw.textbbox((0, 0), clean_text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    pad_x = int(height * 0.25)
+    pad_y = int(height * 0.15)
+    pill_w = text_w + pad_x * 2
+    pill_h = text_h + pad_y * 2
+    pill_x0 = (width - pill_w) // 2
+    pill_y0 = (height - pill_h) // 2
+    pill_x1 = pill_x0 + pill_w
+    pill_y1 = pill_y0 + pill_h
+
+    # Soft dark pill background for readability over light/dark gameplay
+    alpha_int = max(30, min(255, int(255 * opacity * 0.7)))
+    draw.rounded_rectangle(
+        [pill_x0, pill_y0, pill_x1, pill_y1],
+        radius=pill_h // 2,
+        fill=(11, 13, 19, alpha_int),
+        outline=(255, 255, 255, max(20, int(alpha_int * 0.4))),
+        width=max(1, height // 60),
+    )
+
+    text_x = pill_x0 + pad_x - bbox[0]
+    text_y = pill_y0 + pad_y - bbox[1]
+
+    # Draw text with specified opacity
+    t_alpha = max(40, min(255, int(255 * opacity)))
+    t_rgb = hex_to_rgb(text_color, DEFAULT_TEXT)
+    draw.text(
+        (text_x, text_y),
+        clean_text,
+        font=font,
+        fill=(t_rgb[0], t_rgb[1], t_rgb[2], t_alpha),
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path, "PNG")
+    return path
+
+
+def render_hook_overlay_png(
+    path: Path,
+    *,
+    size: tuple[int, int],
+    text: str,
+    position: str = "upper_third",
+    accent: str = "#F43F5E",
+    text_color: str = "#FFFFFF",
+    font_path: str | None = None,
+) -> Path:
+    """Draw a transparent canvas with an upper-third hook caption badge.
+
+    Keeps center 50% crosshairs and combat reticles completely untouched.
+    """
+    from PIL import Image, ImageDraw
+
+    width, height = max(2, int(size[0])), max(2, int(size[1]))
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    raw_text = (text or "").strip()
+    if not raw_text:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(path, "PNG")
+        return path
+
+    short_edge = min(width, height)
+    card_w = int(width * 0.82)
+    max_text_w = int(card_w * 0.88)
+
+    # Fit font for up to 2 lines
+    font_size = max(20, int(short_edge * 0.042))
+    font = resolve_font(font_size, font_path)
+    lines = _wrap_text(raw_text, font, max_text_w)
+    if len(lines) > 2:
+        # Scale font down slightly if text spills to 3+ lines
+        font_size = max(16, int(font_size * 0.8))
+        font = resolve_font(font_size, font_path)
+        lines = _wrap_text(raw_text, font, max_text_w)[:2]
+
+    # Measure lines
+    line_metrics = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    line_heights = [b[3] - b[1] for b in line_metrics]
+    line_widths = [b[2] - b[0] for b in line_metrics]
+    line_gap = max(4, int(short_edge * 0.01))
+    total_text_h = sum(line_heights) + (len(lines) - 1) * line_gap
+
+    pad_x = max(16, int(short_edge * 0.04))
+    pad_y = max(12, int(short_edge * 0.025))
+
+    actual_card_w = min(card_w, max(line_widths) + pad_x * 2)
+    card_h = total_text_h + pad_y * 2
+    card_x0 = (width - actual_card_w) // 2
+
+    if position == "top":
+        card_y0 = int(height * 0.05)
+    elif position == "center":
+        card_y0 = int(height * 0.40)
+    else:  # upper_third (default)
+        card_y0 = int(height * 0.14)
+
+    card_x1 = card_x0 + actual_card_w
+    card_y1 = card_y0 + card_h
+
+    # Card background: dark translucent container with accent glow border
+    accent_rgb = hex_to_rgb(accent, DEFAULT_ACCENT)
+    text_rgb = hex_to_rgb(text_color, DEFAULT_TEXT)
+
+    draw.rounded_rectangle(
+        [card_x0, card_y0, card_x1, card_y1],
+        radius=max(8, card_h // 5),
+        fill=(11, 13, 19, 215),
+        outline=accent_rgb,
+        width=max(2, short_edge // 140),
+    )
+
+    # Accent indicator bar on the left edge inside the card
+    bar_w = max(3, short_edge // 120)
+    bar_margin = max(6, int(pad_x * 0.4))
+    draw.rounded_rectangle(
+        [
+            card_x0 + bar_margin,
+            card_y0 + pad_y // 2,
+            card_x0 + bar_margin + bar_w,
+            card_y1 - pad_y // 2,
+        ],
+        radius=bar_w // 2,
+        fill=accent_rgb,
+    )
+
+    # Draw centered text lines
+    curr_y = card_y0 + pad_y
+    for i, line in enumerate(lines):
+        bbox = line_metrics[i]
+        lw = line_widths[i]
+        lh = line_heights[i]
+        text_x = card_x0 + (actual_card_w - lw) // 2 - bbox[0]
+        text_y = curr_y - bbox[1]
+        draw.text((text_x, text_y), line, font=font, fill=text_rgb)
+        curr_y += lh + line_gap
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path, "PNG")
+    return path
+
+
+def render_kill_notification_png(
+    path: Path,
+    *,
+    size: tuple[int, int],
+    label: str,
+    combo: int = 1,
+    position: str = "lower_third",
+    accent: str = "#F43F5E",
+    text_color: str = "#FFFFFF",
+    font_path: str | None = None,
+) -> Path:
+    """Draw a transparent canvas with a restrained kill notification badge.
+
+    Positioned in the lower-third (y ≈ 0.72 * height) or upper-third (y ≈ 0.22 * height)
+    to completely avoid covering the center 50% crosshairs, killfeed, or bottom HUD.
+    """
+    from PIL import Image, ImageDraw
+
+    width, height = max(2, int(size[0])), max(2, int(size[1]))
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    raw_label = (label or "ELIMINATION").strip().upper()
+    short_edge = min(width, height)
+    pill_w = max(180, int(width * 0.58))
+    pill_h = max(36, int(short_edge * 0.085))
+
+    pill_x0 = (width - pill_w) // 2
+    if position == "upper_third":
+        pill_y0 = int(height * 0.22)
+    else:  # lower_third (default)
+        pill_y0 = int(height * 0.72)
+
+    pill_x1 = pill_x0 + pill_w
+    pill_y1 = pill_y0 + pill_h
+
+    # Highlight colors
+    accent_rgb = hex_to_rgb(accent, DEFAULT_ACCENT)
+    text_rgb = hex_to_rgb(text_color, DEFAULT_TEXT)
+
+    # Dark translucent container with accent glow border
+    draw.rounded_rectangle(
+        [pill_x0, pill_y0, pill_x1, pill_y1],
+        radius=pill_h // 2,
+        fill=(11, 13, 19, 220),
+        outline=accent_rgb,
+        width=max(2, short_edge // 160),
+    )
+
+    # Optional combo badge on the left side
+    combo_badge_w = 0
+    if combo > 1:
+        combo_text = f"{combo}x"
+        combo_font = _fit_font(
+            combo_text, int(pill_h * 0.9), int(pill_h * 0.45), font_path
+        )
+        c_box = draw.textbbox((0, 0), combo_text, font=combo_font)
+        c_w = c_box[2] - c_box[0]
+        c_h = c_box[3] - c_box[1]
+        combo_badge_w = max(int(pill_h * 0.8), c_w + 16)
+        badge_x0 = pill_x0 + int(pill_h * 0.15)
+        badge_y0 = pill_y0 + int(pill_h * 0.15)
+        badge_x1 = badge_x0 + combo_badge_w
+        badge_y1 = pill_y1 - int(pill_h * 0.15)
+
+        draw.rounded_rectangle(
+            [badge_x0, badge_y0, badge_x1, badge_y1],
+            radius=(badge_y1 - badge_y0) // 2,
+            fill=accent_rgb,
+        )
+        draw.text(
+            (
+                badge_x0 + (combo_badge_w - c_w) // 2 - c_box[0],
+                badge_y0 + ((badge_y1 - badge_y0) - c_h) // 2 - c_box[1],
+            ),
+            combo_text,
+            font=combo_font,
+            fill=(255, 255, 255),
+        )
+    else:
+        # Subtle accent dot
+        dot_r = max(4, pill_h // 8)
+        dot_cx = pill_x0 + int(pill_h * 0.5)
+        dot_cy = pill_y0 + pill_h // 2
+        draw.ellipse(
+            [dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r],
+            fill=accent_rgb,
+        )
+        combo_badge_w = int(pill_h * 0.5)
+
+    # Main elimination label
+    avail_text_w = pill_w - combo_badge_w - int(pill_h * 0.6)
+    label_font = _fit_font(raw_label, avail_text_w, int(pill_h * 0.48), font_path)
+    l_box = draw.textbbox((0, 0), raw_label, font=label_font)
+    l_w = l_box[2] - l_box[0]
+    l_h = l_box[3] - l_box[1]
+
+    text_x = (
+        pill_x0
+        + combo_badge_w
+        + int(pill_h * 0.3)
+        + (avail_text_w - l_w) // 2
+        - l_box[0]
+    )
+    text_y = pill_y0 + (pill_h - l_h) // 2 - l_box[1]
+    draw.text((text_x, text_y), raw_label, font=label_font, fill=text_rgb)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path, "PNG")
+    return path
+
+
 def render_card_png(
     path: Path,
     *,
@@ -142,7 +556,7 @@ def render_card_png(
     if sub:
         sub_font = _fit_font(sub, int(width * 0.74), int(short_edge * 0.055), font_path)
         sub_box = draw.textbbox((0, 0), sub, font=sub_font)
-        sub_w, sub_h = sub_box[2] - sub_box[0], sub_box[3] - sub_box[1]
+        sub_h = sub_box[3] - sub_box[1]
         block_h += gap + sub_h
 
     cursor_y = (height - block_h) / 2
@@ -208,17 +622,22 @@ class BrandingPlan:
 
     def cleanup(self) -> None:
         """Remove generated card images once FFmpeg has consumed them."""
-        if not self.card_dir or not self.card_dir.exists():
-            return
-        for leftover in self.card_dir.glob("*.png"):
-            try:
-                leftover.unlink()
-            except OSError:  # pragma: no cover - best effort
-                pass
+        cleanup_png_dir(self.card_dir)
+
+
+def cleanup_png_dir(directory: Path | None) -> None:
+    """Delete a throwaway PNG directory (branded cards, CTA overlays)."""
+    if not directory or not directory.exists():
+        return
+    for leftover in directory.glob("*.png"):
         try:
-            self.card_dir.rmdir()
+            leftover.unlink()
         except OSError:  # pragma: no cover - best effort
             pass
+    try:
+        directory.rmdir()
+    except OSError:  # pragma: no cover - best effort
+        pass
 
 
 def build_branding_plan(

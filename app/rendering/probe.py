@@ -119,3 +119,49 @@ def probe_media(file_path: Path | str) -> MediaProbeResult:
         audio_channels=audio_channels,
         file_size_bytes=file_size,
     )
+
+
+def probe_audio(file_path: Path | str) -> dict[str, Any]:
+    """Inspect local audio file using ffprobe, verifying audio stream exists."""
+    path = Path(file_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Media file not found: {path}")
+
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration,size",
+        "-show_entries",
+        "stream=codec_type,codec_name,sample_rate,channels",
+        "-of",
+        "json",
+        str(path),
+    ]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(proc.stdout)
+    except subprocess.CalledProcessError as e:
+        logger.error("FFprobe execution failed on %s: %s", path, e.stderr)
+        raise RuntimeError(
+            f"FFprobe failed to inspect {path}: {e.stderr.strip()}"
+        ) from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse FFprobe JSON output for {path}") from e
+
+    format_info = data.get("format", {})
+    streams = data.get("streams", [])
+    audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if not audio_stream:
+        raise ValueError(f"No audio stream found in media file: {path}")
+
+    return {
+        "duration": float(format_info.get("duration") or 0.0),
+        "file_size": int(format_info.get("size") or path.stat().st_size),
+        "codec_name": audio_stream.get("codec_name"),
+        "sample_rate": int(audio_stream.get("sample_rate") or 0),
+        "channels": int(audio_stream.get("channels") or 0),
+        "has_audio": True,
+    }

@@ -23,7 +23,7 @@ from app.rendering.engine import RenderEngine
 
 @pytest.fixture(scope="session")
 def brand_assets(tmp_path_factory) -> dict[str, Path]:
-    """3-second 640x360 synthetic gameplay clip with audio."""
+    """20-second 640x360 synthetic gameplay clip with audio."""
     temp_dir = tmp_path_factory.mktemp("brand_assets")
     video_path = temp_dir / "gameplay.mp4"
     subprocess.run(
@@ -33,11 +33,11 @@ def brand_assets(tmp_path_factory) -> dict[str, Path]:
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=duration=3:size=640x360:rate=30",
+            "testsrc2=duration=20:size=640x360:rate=30",
             "-f",
             "lavfi",
             "-i",
-            "sine=frequency=440:duration=3",
+            "sine=frequency=440:duration=20",
             "-c:v",
             "libx264",
             "-preset",
@@ -97,7 +97,7 @@ def test_resolve_font_always_returns_a_usable_face():
     assert font.getbbox("SUBSCRIBE")[2] > 0
 
 
-def test_render_card_png_draws_exact_pixels(tmp_path):
+def test_render_card_png_draws_branded_card_pixels(tmp_path):
     card = render_card_png(
         tmp_path / "card.png",
         size=(320, 180),
@@ -112,6 +112,7 @@ def test_render_card_png_draws_exact_pixels(tmp_path):
         assert image.size == (320, 180)
         # Accent rules hug the top and bottom edges, background fills the rest.
         assert image.convert("RGB").getpixel((160, 1)) == (255, 0, 0)
+        assert image.convert("RGB").getpixel((160, 178)) == (255, 0, 0)
         assert image.convert("RGB").getpixel((160, 90)) == (16, 16, 16)
 
 
@@ -236,6 +237,7 @@ class TestBrandedRender:
                 vertical_width=360,
                 vertical_height=640,
                 quality_preset="compact",
+                preferred_encoder="libx264",
                 branding=branding,
             )
         )
@@ -329,6 +331,7 @@ class TestBrandedRender:
                 vertical_width=360,
                 vertical_height=640,
                 quality_preset="compact",
+                preferred_encoder="libx264",
                 branding=branding,
                 watermark=WatermarkConfig(enabled=True, path=str(logo)),
             )
@@ -371,6 +374,7 @@ def test_execute_render_job_applies_configured_branding(
     from app.schemas.channel import ChannelProfileUpdate
     from app.services.channel_profile import ChannelProfileService
     from app.services.renders import RenderService
+    from app.services.tts import TTSService
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -381,6 +385,12 @@ def test_execute_render_job_applies_configured_branding(
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
         monkeypatch.setattr(settings, "RENDERS_DIR", str(tmp_path / "renders"))
+        cta_audio = TTSService._silent_wav(4.0, tmp_path / "cta.wav")
+        monkeypatch.setattr(
+            TTSService,
+            "generate_cta_audio",
+            staticmethod(lambda speech_text, **kwargs: cta_audio),
+        )
 
         # The creator turns bookends on in the channel profile.
         ChannelProfileService.update(
@@ -390,14 +400,18 @@ def test_execute_render_job_applies_configured_branding(
                 branding_enabled=True,
                 branding_intro_seconds=1.0,
                 branding_outro_seconds=2.0,
+                max_clip_seconds=15.0,
+                cta_enabled=True,
+                cta_style="outro_card",
+                cta_seconds=4.5,
             ),
         )
 
         video = Video(
             id="brand_vod",
             title="Branded VOD",
-            duration=3,
-            duration_formatted="0:03",
+            duration=20,
+            duration_formatted="0:20",
             channel_name="Test",
             channel_id="UC_test",
             channel_url="https://youtube.com/@test",
@@ -415,7 +429,7 @@ def test_execute_render_job_applies_configured_branding(
                 status="pending",
                 progress=0.0,
                 start_seconds=0.0,
-                duration_seconds=2.0,
+                duration_seconds=12.0,
                 crop_preset="direct_crop",
                 modes="landscape",
                 encoder="libx264",
@@ -428,13 +442,19 @@ def test_execute_render_job_applies_configured_branding(
 
         clip_dir = tmp_path / "renders" / "brand_job"
         assert _probe_duration(clip_dir / "landscape.mp4") == pytest.approx(
-            5.0, abs=0.25
+            15.0, abs=0.25
         )
+        rendered_job = session.query(RenderJob).filter_by(id="brand_job").one()
+        assert rendered_job.duration_seconds == pytest.approx(10.0)
         manifest = json.loads((clip_dir / "manifest.json").read_text())
         assert manifest["branding"]["enabled"] is True
         assert manifest["branding"]["channel_name"] == "@BackseatCaster"
         assert manifest["branding"]["intro_seconds"] == pytest.approx(1.0)
-        assert manifest["branding"]["outro_seconds"] == pytest.approx(2.0)
+        assert manifest["branding"]["outro_seconds"] == pytest.approx(4.0)
+        assert manifest["branding"]["padding_seconds"] == pytest.approx(5.0)
+        assert manifest["cta"]["voiceover"] is True
+        assert manifest["duration_budget"]["composed_seconds"] == pytest.approx(15.0)
+        assert manifest["duration_budget"]["uploadable"] is True
     finally:
         session.close()
         Base.metadata.drop_all(bind=engine)

@@ -27,7 +27,15 @@ def write_manifest(
     clamped: bool = False,
     quality_preset: str | None = None,
     watermark: dict[str, Any] | None = None,
+    hook: dict[str, Any] | None = None,
+    kill_effects: dict[str, Any] | None = None,
+    cinematic_treatment: dict[str, Any] | None = None,
     branding: dict[str, Any] | None = None,
+    cta: dict[str, Any] | None = None,
+    duration_budget: dict[str, Any] | None = None,
+    tracking: dict[str, Any] | None = None,
+    music: dict[str, Any] | None = None,
+    loop: dict[str, Any] | None = None,
 ) -> Path:
     """Generate and write manifest.json into the clip output directory."""
     effective_modes = modes or list(outputs.keys())
@@ -98,7 +106,15 @@ def write_manifest(
         },
         "quality_preset": quality_preset,
         "watermark": watermark or {"enabled": False},
+        "hook": hook or {"enabled": False},
+        "kill_effects": kill_effects or {"enabled": False},
+        "cinematic_treatment": cinematic_treatment or {"enabled": False},
         "branding": branding or {"enabled": False},
+        "cta": cta or {"enabled": False},
+        "tracking": tracking or {"enabled": False},
+        "music": music or {"enabled": False},
+        "loop": loop or {"enabled": False},
+        "duration_budget": duration_budget,
         "outputs": outputs,
         "created_at": datetime.now(UTC).isoformat(),
         "render_duration_seconds": round(render_duration, 2)

@@ -13,9 +13,15 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_task_db_session
+from app.models.highlight_candidate import HighlightCandidate
 from app.models.render_job import RenderJob
 from app.models.video import Video
-from app.rendering.config import CROP_PADDING_PRESETS, QUALITY_PRESETS, RenderConfig
+from app.rendering.config import (
+    CROP_PADDING_PRESETS,
+    QUALITY_PRESETS,
+    DurationBudget,
+    RenderConfig,
+)
 from app.rendering.engine import RenderEngine
 from app.schemas.render import (
     RenderClipRequest,
@@ -24,7 +30,7 @@ from app.schemas.render import (
     RenderJobUpdateRequest,
     UploadSelectionRequest,
 )
-from app.services.channel_profile import ChannelProfileService
+from app.services.channel_profile import ChannelProfileService, extract_candidate_events
 from app.services.upload_metadata import (
     append_pinned_hashtags,
     apply_title_template,
@@ -160,6 +166,13 @@ class RenderService:
         resolved_quality = explicit_quality or profile.default_quality_preset or "high"
         if resolved_quality not in QUALITY_PRESETS:
             resolved_quality = "high"
+
+        # The upload ceiling covers clip + branded bookends, so validate the
+        # composed duration here instead of letting a too-long clip render.
+        budget = ChannelProfileService.duration_budget(db)
+        requested_duration = float(request.duration_seconds)
+        if not budget.fits(requested_duration):
+            raise RuntimeError(budget.over_ceiling_message(requested_duration))
 
         clip_id = (
             request.clip_id
@@ -1223,6 +1236,123 @@ class RenderService:
                 resolved_quality = "high"
 
             branding_config = ChannelProfileService.branding_config(db)
+            duration_budget = ChannelProfileService.duration_budget(db)
+
+            # Optional CTA voiceover (TTS + bell chime). It plays over the
+            # outro card when there is one, otherwise over the tail of the
+            # clip, so enabling the CTA does not require branded cards.
+            cta_narration_path: Path | None = narr_file
+            cta_narration_start = 0.0
+            cta_audio_total: float | None = None
+            if profile.cta_enabled:
+                try:
+                    from app.services.tts import TTSService
+
+                    clip_seconds = float(job.duration_seconds or 0.0)
+                    outro_seconds = (
+                        branding_config.outro_seconds
+                        if branding_config.has_outro
+                        else 0.0
+                    )
+                    style = getattr(profile, "cta_style", "outro_card")
+                    plays_over_outro = style == "outro_card" and outro_seconds > 0
+                    # Overlay narration is constrained to its on-screen window.
+                    # Outro-card narration instead determines the card duration,
+                    # so the spoken CTA and bell can finish before the video ends.
+                    cta_window = float(profile.cta_seconds or 3.5)
+                    if not plays_over_outro:
+                        cta_window = min(cta_window, clip_seconds or cta_window)
+                    cta_audio = TTSService.generate_cta_audio(
+                        speech_text=profile.cta_speech_text or "",
+                        voice=profile.cta_voice or "en-US-ChristopherNeural",
+                        include_bell=True,
+                        max_seconds=None if plays_over_outro else cta_window,
+                    )
+                    if cta_audio is not None:
+                        cta_narration_path = cta_audio
+                        if plays_over_outro:
+                            cta_narration_start = clip_seconds
+                            cta_audio_seconds = TTSService.audio_duration_seconds(
+                                cta_audio
+                            )
+                            effective_outro_seconds = max(
+                                float(outro_seconds), cta_audio_seconds
+                            )
+                            if effective_outro_seconds > float(outro_seconds):
+                                branding_config = branding_config.model_copy(
+                                    update={"outro_seconds": effective_outro_seconds}
+                                )
+                                bookend_seconds = (
+                                    branding_config.intro_seconds
+                                    if branding_config.has_intro
+                                    else 0.0
+                                ) + effective_outro_seconds
+                                duration_budget = DurationBudget(
+                                    max_seconds=duration_budget.max_seconds,
+                                    bookend_seconds=bookend_seconds,
+                                )
+                                logger.info(
+                                    "Extended CTA outro for %s to %.2fs to fit the full voiceover",
+                                    job.clip_id,
+                                    effective_outro_seconds,
+                                )
+                            cta_audio_total = clip_seconds + cta_audio_seconds
+                        else:
+                            # Overlay mode (or no outro card to speak over).
+                            cta_narration_start = max(0.0, clip_seconds - cta_window)
+                            cta_audio_total = clip_seconds
+                        logger.info(
+                            "CTA voiceover enabled for %s: %s (starts at %.1fs)",
+                            job.clip_id,
+                            cta_audio,
+                            cta_narration_start,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "CTA audio generation failed for %s: %s", job.clip_id, exc
+                    )
+
+            requested_clip_seconds = float(job.duration_seconds or 0.0)
+            if not duration_budget.fits(requested_clip_seconds):
+                available_clip_seconds = (
+                    duration_budget.max_seconds - duration_budget.bookend_seconds
+                )
+                if available_clip_seconds < 0.5:
+                    raise ValueError(
+                        "The complete CTA outro leaves less than the minimum "
+                        "0.5-second gameplay window under the configured upload ceiling."
+                    )
+                budgeted_clip_seconds = min(
+                    requested_clip_seconds, available_clip_seconds
+                )
+                logger.warning(
+                    "Shortened gameplay window for %s from %.2fs to %.2fs so the "
+                    "complete branded render fits the %.0fs upload ceiling",
+                    job.clip_id,
+                    requested_clip_seconds,
+                    budgeted_clip_seconds,
+                    duration_budget.max_seconds,
+                )
+                job.duration_seconds = budgeted_clip_seconds
+
+            # Extract deterministic events if tied to a highlight candidate (Milestone 3)
+            candidate_events: list[dict[str, Any]] = []
+            if job.highlight_candidate_id:
+                cand = (
+                    db.query(HighlightCandidate)
+                    .filter(HighlightCandidate.id == job.highlight_candidate_id)
+                    .first()
+                )
+                if cand and cand.details_json:
+                    try:
+                        cand_details = json.loads(cand.details_json)
+                        candidate_events = extract_candidate_events(
+                            cand_details,
+                            clip_start=float(job.start_seconds),
+                            clip_end=float(job.start_seconds + job.duration_seconds),
+                        )
+                    except Exception as ev_err:
+                        logger.warning("Failed to extract candidate events: %s", ev_err)
 
             config = RenderConfig(
                 preferred_encoder=job.encoder,
@@ -1240,7 +1370,20 @@ class RenderService:
                 target_lufs=job.target_lufs if job.target_lufs is not None else -14.0,
                 api_prefix=settings.API_PREFIX,
                 watermark=ChannelProfileService.watermark_config(db),
+                hook=ChannelProfileService.hook_config(db),
+                kill_effects=ChannelProfileService.kill_effects_config(
+                    db, events=candidate_events
+                ),
+                tracking=ChannelProfileService.tracking_config(db),
+                cinematic_treatment=ChannelProfileService.cinematic_treatment_config(
+                    db, events=candidate_events
+                ),
+                music=ChannelProfileService.music_config(db),
+                loop=ChannelProfileService.loop_config(db),
+                target_fps=ChannelProfileService.target_fps(db),
                 branding=branding_config,
+                cta=ChannelProfileService.cta_config(db),
+                max_total_seconds=duration_budget.max_seconds,
             )
             engine = RenderEngine(config=config)
 
@@ -1268,7 +1411,9 @@ class RenderService:
                 duration_seconds=job.duration_seconds,
                 output_dir=out_dir,
                 clip_id=job.clip_id,
-                narration_path=narr_file,
+                narration_path=cta_narration_path,
+                narration_start_seconds=cta_narration_start,
+                audio_total_seconds=cta_audio_total,
                 overwrite=job.overwrite,
                 crop_preset=job.crop_preset,
                 crop_blur_padding=job.crop_blur_padding,
@@ -1290,13 +1435,25 @@ class RenderService:
                     result.branding_outro_seconds,
                     result.total_duration_seconds,
                 )
-                if result.total_duration_seconds > 60.5:
-                    logger.warning(
-                        "Clip %s is %.1fs after branding, which exceeds the 60s "
-                        "Shorts limit; shorten the clip window or the bookends",
-                        job.clip_id,
-                        result.total_duration_seconds,
-                    )
+            composed = result.total_duration_seconds
+            tier = duration_budget.tier_for_composed(composed)
+            if composed > duration_budget.max_seconds + 0.05:
+                logger.warning(
+                    "Clip %s is %.1fs, over the %.0fs ceiling; shorten the clip "
+                    "window or the bookends before publishing",
+                    job.clip_id,
+                    composed,
+                    duration_budget.max_seconds,
+                )
+            else:
+                logger.info(
+                    "Clip %s is %.1fs composed (tier: %s, budget: %.1fs of %.0fs)",
+                    job.clip_id,
+                    composed,
+                    tier,
+                    duration_budget.bookend_seconds,
+                    duration_budget.max_seconds,
+                )
 
             prefix = settings.API_PREFIX
             if result.clamped and result.effective_duration_seconds > 0:

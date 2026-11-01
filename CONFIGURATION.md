@@ -175,7 +175,7 @@ How it renders: cards are drawn locally with Pillow at each output's exact size 
 
 Notes:
 
-- Bookends add `BRANDING_INTRO_SECONDS + BRANDING_OUTRO_SECONDS` to the clip. Nothing is trimmed automatically — if the total crosses 60 s the upload is no longer a Short, so shorten the clip window or the cards.
+- Bookends add `BRANDING_INTRO_SECONDS + BRANDING_OUTRO_SECONDS` to the clip. The upload ceiling is 90 s by default (`MAX_CLIP_SECONDS` seeds the profile's `max_clip_seconds`), so a clip with bookends that exceeds it is rejected at render time rather than uploaded as a non-Short. 60 / 72 / 88 s are soft labels inside the ceiling and never block an upload.
 - `manifest.json` records the applied branding and the composed `outputs.*.duration`, which includes the cards.
 - `docker-compose.yml` installs `fonts-dejavu-core` in the backend image; on bare macOS the system Arial face is used, and Pillow's bundled font is the last-resort fallback.
 
@@ -186,7 +186,7 @@ BRANDING_INTRO_SECONDS=1.2
 BRANDING_OUTRO_SECONDS=2.0
 ```
 
-The equivalent profile payload (`PUT /api/v1/channel/profile`) uses the `branding_*` field names — `branding_enabled`, `branding_intro`, `branding_outro`, `branding_intro_seconds`, `branding_outro_seconds`, `branding_intro_title`, `branding_intro_subtitle`, `branding_outro_title`, `branding_outro_subtitle`, `branding_background_color`, `branding_accent_color`, `branding_text_color`, `branding_font_path`. The card headline uses the profile's `channel_name`.
+The equivalent profile payload (`PUT /api/v1/channel/profile`) uses the `branding_*` field names — `branding_enabled`, `branding_intro`, `branding_outro`, `branding_intro_seconds`, `branding_outro_seconds`, `branding_intro_title`, `branding_intro_subtitle`, `branding_outro_title`, `branding_outro_subtitle`, `branding_background_color`, `branding_accent_color`, `branding_text_color`, `branding_font_path`. The card headline uses the profile's `channel_name`. The upload ceiling is `max_clip_seconds` (default 90, range 15–300).
 
 ---
 

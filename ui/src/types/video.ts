@@ -319,6 +319,28 @@ export interface RenderManifest {
     scale?: number;
     margin?: number;
   };
+  branding?: {
+    enabled: boolean;
+    intro?: boolean;
+    outro?: boolean;
+    intro_seconds?: number;
+    outro_seconds?: number;
+    padding_seconds?: number;
+    total_duration_seconds?: number;
+    channel_name?: string | null;
+  };
+  cta?: {
+    enabled: boolean;
+    style?: "outro_card" | "overlay" | string;
+    seconds?: number;
+    overlay?: boolean;
+    headline?: string;
+    subtitle?: string;
+    speech_text?: string;
+    voice?: string;
+    voiceover?: boolean;
+    voiceover_start_seconds?: number;
+  };
   auto_staged?: boolean;
   highlight_candidate_id?: string | null;
   youtube_upload_status?: string | null;
@@ -756,8 +778,37 @@ export interface DemoProjectResponse {
   clip_ids: string[];
 }
 
+export type PresentationPresetName = "viral_kill" | "cinematic_kill" | "multi_kill_montage";
+
+export interface PresentationPreset {
+  name: PresentationPresetName;
+  label: string;
+  description: string;
+  branding_enabled: boolean;
+  branding_intro: boolean;
+  branding_outro: boolean;
+  watermark_enabled: boolean;
+  watermark_position: string;
+  watermark_opacity: number;
+  watermark_scale: number;
+  watermark_margin: number;
+  cta_enabled: boolean;
+  cta_style: string;
+  cta_seconds: number;
+  default_framing_preset: string;
+  default_quality_preset: string;
+  hook_enabled: boolean;
+  hook_position: string;
+  hook_duration_seconds: number;
+  kill_effects_enabled: boolean;
+  cinematic_treatment_enabled: boolean;
+  bg_music_volume: number;
+  loop_optimization: boolean;
+}
+
 export interface ChannelProfile {
   channel_name?: string | null;
+  presentation_preset?: PresentationPresetName;
   watermark_enabled: boolean;
   has_watermark: boolean;
   watermark_url?: string | null;
@@ -765,6 +816,22 @@ export interface ChannelProfile {
   watermark_opacity: number;
   watermark_scale: number;
   watermark_margin: number;
+  watermark_start_seconds?: number | null;
+  watermark_end_seconds?: number | null;
+  hook_enabled?: boolean;
+  hook_text?: string | null;
+  hook_start_seconds?: number;
+  hook_duration_seconds?: number;
+  hook_position?: string;
+  kill_effects_enabled?: boolean;
+  tracking_enabled?: boolean;
+  cinematic_treatment_enabled?: boolean;
+  bg_music_path?: string | null;
+  has_music?: boolean;
+  music_url?: string | null;
+  bg_music_volume?: number;
+  loop_optimization?: boolean;
+  target_fps?: number | null;
   default_framing_preset: "third_person" | "cinematic" | "direct_crop" | "vertical_blur" | "custom" | string;
   default_quality_preset: "high" | "compact" | "archive" | string;
   branding_enabled: boolean;
@@ -780,6 +847,15 @@ export interface ChannelProfile {
   branding_accent_color: string;
   branding_text_color: string;
   branding_font_path?: string | null;
+  max_clip_seconds: number;
+  cta_enabled: boolean;
+  cta_style: string;
+  cta_seconds: number;
+  cta_position?: "bottom" | "upper_third" | string;
+  cta_headline: string;
+  cta_subtitle: string;
+  cta_speech_text: string;
+  cta_voice: string;
   title_template?: string | null;
   pinned_hashtags: string[];
   default_privacy: "public" | "unlisted" | "private" | string;
@@ -790,11 +866,26 @@ export interface ChannelProfile {
 
 export interface ChannelProfileUpdate {
   channel_name?: string | null;
+  presentation_preset?: PresentationPresetName;
   watermark_enabled?: boolean;
   watermark_position?: string;
   watermark_opacity?: number;
   watermark_scale?: number;
   watermark_margin?: number;
+  watermark_start_seconds?: number | null;
+  watermark_end_seconds?: number | null;
+  hook_enabled?: boolean;
+  hook_text?: string | null;
+  hook_start_seconds?: number | null;
+  hook_duration_seconds?: number | null;
+  hook_position?: string | null;
+  kill_effects_enabled?: boolean | null;
+  tracking_enabled?: boolean | null;
+  cinematic_treatment_enabled?: boolean | null;
+  bg_music_path?: string | null;
+  bg_music_volume?: number | null;
+  loop_optimization?: boolean | null;
+  target_fps?: number | null;
   default_framing_preset?: string;
   default_quality_preset?: string;
   branding_enabled?: boolean;
@@ -810,6 +901,15 @@ export interface ChannelProfileUpdate {
   branding_accent_color?: string | null;
   branding_text_color?: string | null;
   branding_font_path?: string | null;
+  max_clip_seconds?: number;
+  cta_enabled?: boolean;
+  cta_style?: string;
+  cta_seconds?: number;
+  cta_position?: "bottom" | "upper_third" | string | null;
+  cta_headline?: string | null;
+  cta_subtitle?: string | null;
+  cta_speech_text?: string | null;
+  cta_voice?: string | null;
   title_template?: string | null;
   pinned_hashtags?: string[];
   default_privacy?: string;
@@ -818,6 +918,12 @@ export interface ChannelProfileUpdate {
 }
 
 export interface WatermarkUploadResponse {
+  profile: ChannelProfile;
+  filename: string;
+  message: string;
+}
+
+export interface MusicUploadResponse {
   profile: ChannelProfile;
   filename: string;
   message: string;

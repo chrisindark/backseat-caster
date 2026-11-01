@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -15,19 +17,102 @@ from app.rendering.config import (
     CROP_PADDING_PRESETS,
     QUALITY_PRESETS,
     BrandingConfig,
+    CinematicTreatmentConfig,
+    CtaConfig,
+    DurationBudget,
+    HookConfig,
+    KillEffectsConfig,
+    LoopConfig,
+    MusicConfig,
+    TrackingConfig,
     WatermarkConfig,
     default_branding_config,
 )
+from app.rendering.presentation import (
+    DEFAULT_PRESENTATION_PRESET,
+    PRESENTATION_PRESETS,
+    get_presentation_preset,
+)
+from app.rendering.probe import probe_audio
 from app.schemas.channel import (
     ChannelProfileResponse,
     ChannelProfileUpdate,
+    PresentationPresetResponse,
     normalize_hashtags,
 )
 
 logger = logging.getLogger(__name__)
 
 PROFILE_ID = 1
+CTA_STYLES = ("outro_card", "overlay")
 WATERMARK_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MUSIC_EXTENSIONS = {".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac"}
+MAX_MUSIC_BYTES = 50 * 1024 * 1024
+
+
+def _cta_style(raw: str | None) -> str:
+    """Coerce a stored CTA style, so a legacy/unknown value cannot break renders."""
+    return raw if raw in CTA_STYLES else "outro_card"
+
+
+def extract_candidate_events(
+    details: dict[str, Any], clip_start: float, clip_end: float
+) -> list[dict[str, Any]]:
+    """Extract deterministic event moments (relative to clip start) from highlight metadata."""
+    raw_events: list[tuple[float, str, float]] = []
+
+    # 1. Trigger events
+    for trigger in details.get("trigger_events", []):
+        t_abs = trigger.get("time")
+        if t_abs is not None and clip_start <= float(t_abs) <= clip_end:
+            rel_t = round(float(t_abs) - clip_start, 3)
+            label = str(trigger.get("label") or "Elimination")
+            conf = float(trigger.get("confidence", 1.0))
+            raw_events.append((rel_t, label, conf))
+
+    # 2. Killfeed rows
+    killfeed = details.get("killfeed_chain") or {}
+    for row in killfeed.get("rows", []):
+        t_abs = row.get("timestamp")
+        action = str(row.get("action") or "").lower()
+        if t_abs is not None and clip_start <= float(t_abs) <= clip_end:
+            if action in ("elimination", "knock"):
+                rel_t = round(float(t_abs) - clip_start, 3)
+                label = "Elimination"
+                conf = float(row.get("confidence", 0.8))
+                raw_events.append((rel_t, label, conf))
+
+    raw_events.sort(key=lambda x: x[0])
+
+    merged: list[dict[str, Any]] = []
+    for rel_t, label, conf in raw_events:
+        if merged and abs(merged[-1]["time"] - rel_t) < 0.35:
+            # Upgrade label if current is more specific
+            if any(
+                k in label.lower() for k in ("wipe", "ko", "double", "triple", "quad")
+            ):
+                merged[-1]["label"] = label
+            merged[-1]["confidence"] = max(merged[-1]["confidence"], conf)
+        else:
+            merged.append({"time": rel_t, "label": label, "confidence": conf})
+
+    combo = 1
+    for ev in merged:
+        ev["combo"] = combo
+        if ev["label"].lower() in ("elimination", "knock"):
+            if combo == 2:
+                ev["label"] = "DOUBLE KO"
+            elif combo == 3:
+                ev["label"] = "TRIPLE KO"
+            elif combo == 4:
+                ev["label"] = "QUAD KO"
+            elif combo >= 5:
+                ev["label"] = "MULTI KO"
+        combo += 1
+
+    return merged
+
+
 MAX_WATERMARK_BYTES = 15 * 1024 * 1024
 
 #: Free-text columns that are stored as ``NULL`` when blank, so the render
@@ -36,6 +121,7 @@ TEXT_FIELDS = frozenset(
     {
         "title_template",
         "channel_name",
+        "presentation_preset",
         "branding_intro_title",
         "branding_intro_subtitle",
         "branding_outro_title",
@@ -44,6 +130,13 @@ TEXT_FIELDS = frozenset(
         "branding_background_color",
         "branding_accent_color",
         "branding_text_color",
+        "cta_headline",
+        "cta_subtitle",
+        "cta_speech_text",
+        "cta_voice",
+        "hook_text",
+        "hook_position",
+        "bg_music_path",
     }
 )
 
@@ -102,6 +195,7 @@ class ChannelProfileService:
         profile = ChannelProfile(
             id=PROFILE_ID,
             channel_name=(settings.DEFAULT_YOUTUBE_CHANNEL or "").strip() or None,
+            presentation_preset=DEFAULT_PRESENTATION_PRESET,
             watermark_path=None,
             watermark_enabled=False,
             watermark_position="bottom_right",
@@ -115,6 +209,14 @@ class ChannelProfileService:
             default_privacy="public",
             upload_slots=json.dumps(_default_slots()),
             upload_timezone=(settings.AUTO_STAGE_TIMEZONE or "UTC").strip() or "UTC",
+            max_clip_seconds=float(settings.MAX_CLIP_SECONDS),
+            cta_enabled=False,
+            cta_style="outro_card",
+            cta_seconds=3.5,
+            cta_headline="SUBSCRIBE & TAP THE BELL",
+            cta_subtitle="Click the bell for more clips",
+            cta_speech_text="Subscribe to the channel and tap the bell for more clips.",
+            cta_voice="en-US-ChristopherNeural",
             **cls._branding_seed_values(),
         )
         db.add(profile)
@@ -147,34 +249,96 @@ class ChannelProfileService:
             )
             watermark_url = f"{prefix}/channel/watermark?v={version}"
 
-        quality = (profile.default_quality_preset or "high").strip()
+        preset = get_presentation_preset(profile.presentation_preset)
+        quality = (
+            profile.default_quality_preset or preset.default_quality_preset
+        ).strip()
         if quality not in QUALITY_PRESETS:
             quality = "high"
 
         branding = cls.branding_config(db)
+        cta = cls.cta_config(db)
 
         return ChannelProfileResponse(
             channel_name=profile.channel_name,
-            watermark_enabled=bool(profile.watermark_enabled),
+            presentation_preset=preset.name,
+            watermark_enabled=bool(profile.watermark_enabled)
+            if profile.watermark_enabled is not None
+            else preset.watermark_enabled,
             has_watermark=bool(profile.watermark_path),
             watermark_url=watermark_url,
-            watermark_position=profile.watermark_position or "bottom_right",
+            watermark_position=profile.watermark_position or preset.watermark_position,
             watermark_opacity=(
                 float(profile.watermark_opacity)
                 if profile.watermark_opacity is not None
-                else 0.85
+                else preset.watermark_opacity
             ),
             watermark_scale=(
                 float(profile.watermark_scale)
                 if profile.watermark_scale is not None
-                else 0.14
+                else preset.watermark_scale
             ),
             watermark_margin=(
                 float(profile.watermark_margin)
                 if profile.watermark_margin is not None
-                else 0.03
+                else preset.watermark_margin
             ),
-            default_framing_preset=profile.default_framing_preset or "third_person",
+            watermark_start_seconds=profile.watermark_start_seconds,
+            watermark_end_seconds=profile.watermark_end_seconds,
+            hook_enabled=(
+                bool(profile.hook_enabled)
+                if profile.hook_enabled is not None
+                else preset.hook_enabled
+            ),
+            hook_text=profile.hook_text,
+            hook_start_seconds=(
+                float(profile.hook_start_seconds)
+                if profile.hook_start_seconds is not None
+                else 0.0
+            ),
+            hook_duration_seconds=(
+                float(profile.hook_duration_seconds)
+                if profile.hook_duration_seconds is not None
+                else preset.hook_duration_seconds
+            ),
+            hook_position=profile.hook_position or preset.hook_position,
+            kill_effects_enabled=(
+                bool(profile.kill_effects_enabled)
+                if profile.kill_effects_enabled is not None
+                else preset.kill_effects_enabled
+            ),
+            tracking_enabled=(
+                bool(profile.tracking_enabled)
+                if profile.tracking_enabled is not None
+                else preset.tracking_enabled
+            ),
+            cinematic_treatment_enabled=(
+                bool(profile.cinematic_treatment_enabled)
+                if profile.cinematic_treatment_enabled is not None
+                else preset.cinematic_treatment_enabled
+            ),
+            bg_music_path=profile.bg_music_path,
+            has_music=bool(
+                profile.bg_music_path and Path(profile.bg_music_path).exists()
+            ),
+            music_url=(
+                "/api/v1/channel/music"
+                if bool(profile.bg_music_path and Path(profile.bg_music_path).exists())
+                else None
+            ),
+            bg_music_volume=(
+                float(profile.bg_music_volume)
+                if profile.bg_music_volume is not None
+                else preset.bg_music_volume
+            ),
+            loop_optimization=(
+                bool(profile.loop_optimization)
+                if profile.loop_optimization is not None
+                else preset.loop_optimization
+            ),
+            target_fps=profile.target_fps,
+            default_framing_preset=profile.default_framing_preset
+            or preset.default_framing_preset,
             default_quality_preset=quality,
             branding_enabled=branding.enabled,
             branding_intro=branding.intro,
@@ -189,6 +353,16 @@ class ChannelProfileService:
             branding_accent_color=branding.accent_color,
             branding_text_color=branding.text_color,
             branding_font_path=branding.font_path,
+            max_clip_seconds=cls.duration_budget(db).max_seconds,
+            cta_enabled=cta.enabled,
+            cta_style=cta.style,
+            cta_seconds=cta.seconds,
+            cta_position=cta.position,
+            cta_headline=profile.cta_headline or "SUBSCRIBE & TAP THE BELL",
+            cta_subtitle=profile.cta_subtitle or "Click the bell for more clips",
+            cta_speech_text=profile.cta_speech_text
+            or "Subscribe to the channel and tap the bell for more clips.",
+            cta_voice=profile.cta_voice or "en-US-ChristopherNeural",
             title_template=profile.title_template,
             pinned_hashtags=normalize_hashtags(_json_list(profile.pinned_hashtags)),
             default_privacy=profile.default_privacy or "public",
@@ -268,8 +442,8 @@ class ChannelProfileService:
         """Resolve the profile's branded intro/outro settings for a render.
 
         Columns are ``None`` on rows created before branding moved into the
-        profile, so unset columns fall back to the current ``BRANDING_*``
-        settings instead of forcing the creator to re-enter them.
+        profile, so unset columns fall back to the active presentation preset
+        and ``BRANDING_*`` settings instead of forcing the creator to re-enter them.
         """
         profile = cls.get_or_create(db)
         env = default_branding_config()
@@ -278,8 +452,14 @@ class ChannelProfileService:
             value = getattr(profile, f"branding_{attr}", None)
             return fallback if value is None else value
 
+        enabled_val = (
+            profile.branding_enabled
+            if profile.branding_enabled is not None
+            else env.enabled
+        )
+
         return BrandingConfig(
-            enabled=bool(pick("enabled", env.enabled)),
+            enabled=bool(enabled_val),
             intro=bool(pick("intro", env.intro)),
             outro=bool(pick("outro", env.outro)),
             intro_seconds=float(pick("intro_seconds", env.intro_seconds)),
@@ -296,33 +476,246 @@ class ChannelProfileService:
         )
 
     @classmethod
+    def duration_budget(cls, db: Session) -> DurationBudget:
+        """Resolve how long a clip may be once branded bookends are added.
+
+        ``max_clip_seconds`` is nullable so profiles created before the ceiling
+        existed fall back to ``MAX_CLIP_SECONDS`` (90s by default).
+        """
+        profile = cls.get_or_create(db)
+        branding = cls.branding_config(db)
+        bookends = (branding.intro_seconds if branding.has_intro else 0.0) + (
+            branding.outro_seconds if branding.has_outro else 0.0
+        )
+        ceiling = profile.max_clip_seconds
+        if ceiling is None:
+            ceiling = settings.MAX_CLIP_SECONDS
+        return DurationBudget(
+            max_seconds=round(float(ceiling), 2),
+            bookend_seconds=round(float(bookends), 2),
+        )
+
+    @classmethod
+    def cta_config(cls, db: Session) -> CtaConfig:
+        """Resolve the profile's CTA (voiceover / overlay) settings."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        enabled_val = (
+            profile.cta_enabled
+            if profile.cta_enabled is not None
+            else preset.cta_enabled
+        )
+        style_val = profile.cta_style or preset.cta_style
+        seconds_val = (
+            profile.cta_seconds
+            if profile.cta_seconds is not None
+            else preset.cta_seconds
+        )
+        position_val = getattr(profile, "cta_position", None) or "bottom"
+        return CtaConfig(
+            enabled=bool(enabled_val),
+            style=_cta_style(style_val),
+            seconds=float(seconds_val),
+            position="upper_third" if position_val == "upper_third" else "bottom",
+            headline=profile.cta_headline or "SUBSCRIBE & TAP THE BELL",
+            subtitle=profile.cta_subtitle or "Click the bell for more clips",
+            speech_text=profile.cta_speech_text
+            or "Subscribe to the channel and tap the bell for more clips.",
+            voice=profile.cta_voice or "en-US-ChristopherNeural",
+        )
+
+    @classmethod
     def watermark_config(cls, db: Session) -> WatermarkConfig:
         profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
         path = profile.watermark_path
-        enabled = bool(profile.watermark_enabled and path)
-        if enabled and not Path(path).exists():
+        enabled_val = (
+            profile.watermark_enabled
+            if profile.watermark_enabled is not None
+            else preset.watermark_enabled
+        )
+        channel_name = profile.channel_name or settings.branding_channel_name
+        enabled = bool(enabled_val and (path or channel_name))
+        if path and not Path(path).exists():
             logger.warning("Channel watermark is enabled but missing on disk: %s", path)
-            enabled = False
+            path = None
         return WatermarkConfig(
             enabled=enabled,
-            path=path if enabled else None,
-            position=profile.watermark_position or "bottom_right",
+            path=path if (path and Path(path).exists()) else None,
+            position=profile.watermark_position or preset.watermark_position,
             opacity=(
                 float(profile.watermark_opacity)
                 if profile.watermark_opacity is not None
-                else 0.85
+                else preset.watermark_opacity
             ),
             scale=(
                 float(profile.watermark_scale)
                 if profile.watermark_scale is not None
-                else 0.14
+                else preset.watermark_scale
             ),
             margin=(
                 float(profile.watermark_margin)
                 if profile.watermark_margin is not None
-                else 0.03
+                else preset.watermark_margin
             ),
+            start_seconds=(
+                float(profile.watermark_start_seconds)
+                if profile.watermark_start_seconds is not None
+                else 0.0
+            ),
+            end_seconds=(
+                float(profile.watermark_end_seconds)
+                if profile.watermark_end_seconds is not None
+                else None
+            ),
+            channel_name=channel_name,
         )
+
+    @classmethod
+    def hook_config(cls, db: Session) -> HookConfig:
+        """Resolve the profile's in-video hook caption overlay settings."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        enabled_val = (
+            profile.hook_enabled
+            if profile.hook_enabled is not None
+            else preset.hook_enabled
+        )
+        return HookConfig(
+            enabled=bool(enabled_val),
+            text=profile.hook_text,
+            start_seconds=(
+                float(profile.hook_start_seconds)
+                if profile.hook_start_seconds is not None
+                else 0.0
+            ),
+            duration_seconds=(
+                float(profile.hook_duration_seconds)
+                if profile.hook_duration_seconds is not None
+                else preset.hook_duration_seconds
+            ),
+            position=profile.hook_position or preset.hook_position,
+        )
+
+    @classmethod
+    def kill_effects_config(
+        cls, db: Session, events: list[dict[str, Any]] | None = None
+    ) -> KillEffectsConfig:
+        """Resolve event-aware payoff and kill effects settings."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        enabled_val = (
+            profile.kill_effects_enabled
+            if profile.kill_effects_enabled is not None
+            else preset.kill_effects_enabled
+        )
+        return KillEffectsConfig(
+            enabled=bool(enabled_val),
+            events=events or [],
+        )
+
+    @classmethod
+    def tracking_config(cls, db: Session) -> TrackingConfig:
+        """Resolve dynamic vertical reframing tracking settings."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        enabled_val = (
+            profile.tracking_enabled
+            if profile.tracking_enabled is not None
+            else preset.tracking_enabled
+        )
+        return TrackingConfig(
+            enabled=bool(enabled_val),
+        )
+
+    @classmethod
+    def cinematic_treatment_config(
+        cls, db: Session, events: list[dict[str, Any]] | None = None
+    ) -> CinematicTreatmentConfig:
+        """Resolve cinematic kill payoff treatment configuration (Milestone 7.4)."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        enabled_val = (
+            profile.cinematic_treatment_enabled
+            if profile.cinematic_treatment_enabled is not None
+            else preset.cinematic_treatment_enabled
+        )
+        return CinematicTreatmentConfig(
+            enabled=bool(enabled_val),
+            events=events or [],
+        )
+
+    @classmethod
+    def music_config(cls, db: Session) -> MusicConfig:
+        """Resolve background music configuration."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        has_music = bool(profile.bg_music_path and Path(profile.bg_music_path).exists())
+        volume_val = (
+            float(profile.bg_music_volume)
+            if profile.bg_music_volume is not None
+            else preset.bg_music_volume
+        )
+        return MusicConfig(
+            enabled=has_music,
+            path=profile.bg_music_path,
+            volume=volume_val,
+        )
+
+    @classmethod
+    def loop_config(cls, db: Session) -> LoopConfig:
+        """Resolve seamless loop optimization configuration."""
+        profile = cls.get_or_create(db)
+        preset = get_presentation_preset(profile.presentation_preset)
+        loop_val = (
+            bool(profile.loop_optimization)
+            if profile.loop_optimization is not None
+            else preset.loop_optimization
+        )
+        return LoopConfig(
+            enabled=loop_val,
+        )
+
+    @classmethod
+    def target_fps(cls, db: Session) -> int | None:
+        """Resolve target frame rate setting."""
+        profile = cls.get_or_create(db)
+        return profile.target_fps
+
+    @classmethod
+    def list_presets(cls) -> list[PresentationPresetResponse]:
+        """List all deterministic presentation presets and their specifications."""
+        result: list[PresentationPresetResponse] = []
+        for preset in PRESENTATION_PRESETS.values():
+            result.append(
+                PresentationPresetResponse(
+                    name=preset.name,
+                    label=preset.label,
+                    description=preset.description,
+                    branding_enabled=preset.branding_enabled,
+                    branding_intro=preset.branding_intro,
+                    branding_outro=preset.branding_outro,
+                    watermark_enabled=preset.watermark_enabled,
+                    watermark_position=preset.watermark_position,
+                    watermark_opacity=preset.watermark_opacity,
+                    watermark_scale=preset.watermark_scale,
+                    watermark_margin=preset.watermark_margin,
+                    cta_enabled=preset.cta_enabled,
+                    cta_style=_cta_style(preset.cta_style),
+                    cta_seconds=preset.cta_seconds,
+                    default_framing_preset=preset.default_framing_preset,
+                    default_quality_preset=preset.default_quality_preset,
+                    hook_enabled=preset.hook_enabled,
+                    hook_position=preset.hook_position,
+                    hook_duration_seconds=preset.hook_duration_seconds,
+                    kill_effects_enabled=preset.kill_effects_enabled,
+                    tracking_enabled=preset.tracking_enabled,
+                    cinematic_treatment_enabled=preset.cinematic_treatment_enabled,
+                    bg_music_volume=preset.bg_music_volume,
+                    loop_optimization=preset.loop_optimization,
+                )
+            )
+        return result
 
     @classmethod
     def save_watermark(
@@ -394,3 +787,84 @@ class ChannelProfileService:
         if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
             return True
         return False
+
+    @classmethod
+    def save_music(
+        cls, db: Session, data: bytes, filename: str
+    ) -> tuple[ChannelProfileResponse, str]:
+        """Validate and store background music, updating profile."""
+        suffix = Path(filename or "").suffix.lower()
+        if suffix not in MUSIC_EXTENSIONS:
+            raise ValueError(
+                "Unsupported audio format. Use MP3, WAV, AAC, M4A, OGG, or FLAC."
+            )
+        if not data:
+            raise ValueError("Music file is empty.")
+        if len(data) > MAX_MUSIC_BYTES:
+            raise ValueError("Music file is too large (max 50 MB).")
+
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp.flush()
+            tmp_path = Path(tmp.name)
+
+        try:
+            probe = probe_audio(tmp_path)
+            if not probe.get("has_audio"):
+                raise ValueError("Uploaded file does not contain a valid audio stream.")
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError(
+                f"Uploaded file could not be verified by ffprobe: {e!s}"
+            ) from e
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+        music_dir = settings.channel_assets_path / "music"
+        music_dir.mkdir(parents=True, exist_ok=True)
+        target = music_dir / f"bg_music{suffix}"
+
+        profile = cls.get_or_create(db)
+        old_path = Path(profile.bg_music_path) if profile.bg_music_path else None
+        if old_path and old_path != target and old_path.exists():
+            try:
+                old_path.unlink()
+            except OSError as exc:
+                logger.warning("Could not remove old music track %s: %s", old_path, exc)
+
+        target.write_bytes(data)
+        profile.bg_music_path = str(target)
+        profile.updated_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(profile)
+        return cls.to_response(db, profile), target.name
+
+    @classmethod
+    def delete_music(cls, db: Session) -> ChannelProfileResponse:
+        """Remove uploaded background music track."""
+        profile = cls.get_or_create(db)
+        if profile.bg_music_path:
+            path = Path(profile.bg_music_path)
+            try:
+                if path.is_relative_to(settings.channel_assets_path) and path.exists():
+                    path.unlink()
+            except OSError as exc:
+                logger.warning("Could not remove music %s: %s", path, exc)
+        profile.bg_music_path = None
+        profile.updated_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(profile)
+        return cls.to_response(db, profile)
+
+    @classmethod
+    def music_file(cls, db: Session) -> Path | None:
+        """Return path to uploaded music file if present on disk."""
+        profile = cls.get_or_create(db)
+        if not profile.bg_music_path:
+            return None
+        path = Path(profile.bg_music_path)
+        if not path.exists():
+            return None
+        return path

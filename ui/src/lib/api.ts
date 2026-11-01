@@ -11,6 +11,8 @@ import {
   HighlightCandidateListResponse,
   HighlightRunListResponse,
   HighlightStatusResponse,
+  MusicUploadResponse,
+  PresentationPreset,
   RegenerateMetadataRequest,
   RegenerateMetadataResponse,
   RenderClipResponse,
@@ -42,6 +44,10 @@ import {
 } from "@/types/video";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1";
+
+export function getApiBase(): string {
+  return API_BASE;
+}
 
 async function parseResponse<T>(res: Response, fallbackActionName: string): Promise<T> {
   if (!res.ok) {
@@ -674,6 +680,11 @@ export function getHighlightThumbnailUrl(
 // Channel Brand Profile Helpers
 // -----------------------------------------------------------------------------
 
+export async function fetchPresentationPresets(): Promise<PresentationPreset[]> {
+  const res = await fetch(`${API_BASE}/channel/presets`, { cache: "no-store" });
+  return parseResponse<PresentationPreset[]>(res, "fetch presentation presets");
+}
+
 export async function fetchChannelProfile(): Promise<ChannelProfile> {
   const res = await fetch(`${API_BASE}/channel/profile`, { cache: "no-store" });
   return parseResponse<ChannelProfile>(res, "fetch channel profile");
@@ -711,6 +722,29 @@ export async function deleteChannelWatermark(): Promise<ChannelProfile> {
 
 export function getChannelWatermarkUrl(version?: string | null): string {
   return `${API_BASE}/channel/watermark${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+}
+
+export async function uploadChannelMusic(
+  file: File
+): Promise<MusicUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/channel/music`, {
+    method: "POST",
+    body: formData,
+  });
+  return parseResponse<MusicUploadResponse>(res, "upload background music");
+}
+
+export async function deleteChannelMusic(): Promise<ChannelProfile> {
+  const res = await fetch(`${API_BASE}/channel/music`, {
+    method: "DELETE",
+  });
+  return parseResponse<ChannelProfile>(res, "delete background music");
+}
+
+export function getChannelMusicUrl(version?: string | null): string {
+  return `${API_BASE}/channel/music${version ? `?v=${encodeURIComponent(version)}` : ""}`;
 }
 
 // -----------------------------------------------------------------------------

@@ -724,6 +724,32 @@ export function getChannelWatermarkUrl(version?: string | null): string {
   return `${API_BASE}/channel/watermark${version ? `?v=${encodeURIComponent(version)}` : ""}`;
 }
 
+export function getChannelBrandingPreviewUrl(params: {
+  kind: "intro" | "outro" | "overlay";
+  orientation?: "landscape" | "vertical";
+  title?: string;
+  subtitle?: string;
+  accent?: string;
+  background?: string;
+  text_color?: string;
+  t?: number;
+}): string {
+  const q = new URLSearchParams();
+  q.set("kind", params.kind);
+  if (params.orientation) q.set("orientation", params.orientation);
+  if (params.title !== undefined && params.title !== null && params.title.trim() !== "") {
+    q.set("title", params.title.trim());
+  }
+  if (params.subtitle !== undefined && params.subtitle !== null && params.subtitle.trim() !== "") {
+    q.set("subtitle", params.subtitle.trim());
+  }
+  if (params.accent) q.set("accent", params.accent);
+  if (params.background) q.set("background", params.background);
+  if (params.text_color) q.set("text_color", params.text_color);
+  if (params.t !== undefined) q.set("t", String(params.t));
+  return `${API_BASE}/channel/branding/preview?${q.toString()}`;
+}
+
 export async function uploadChannelMusic(
   file: File
 ): Promise<MusicUploadResponse> {

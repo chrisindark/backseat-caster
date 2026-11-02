@@ -7,6 +7,7 @@ import {
   deleteChannelWatermark,
   fetchChannelProfile,
   fetchPresentationPresets,
+  getChannelBrandingPreviewUrl,
   getChannelMusicUrl,
   getChannelWatermarkUrl,
   updateChannelProfile,
@@ -30,11 +31,13 @@ import {
   Image as ImageIcon,
   Layers,
   Mic,
+  Monitor,
   Music,
   Loader2,
   Palette,
   RefreshCw,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Trash2,
   UploadCloud,
@@ -167,9 +170,12 @@ export default function ChannelProfilePage() {
   const [brandingAccentColor, setBrandingAccentColor] = useState("#F43F5E");
   const [brandingBackgroundColor, setBrandingBackgroundColor] =
     useState("#0B0D13");
+  const [brandingOpacity, setBrandingOpacity] = useState(0.85);
+  const [brandingStyle, setBrandingStyle] = useState<"overlay" | "bookend">("overlay");
 
   const [maxClipSeconds, setMaxClipSeconds] = useState(90);
   const [previewTick, setPreviewTick] = useState(0);
+  const [previewOrientation, setPreviewOrientation] = useState<"landscape" | "vertical">("landscape");
 
   // CTA voiceover (TTS + bell chime)
   const [ctaEnabled, setCtaEnabled] = useState(false);
@@ -231,6 +237,8 @@ export default function ChannelProfilePage() {
     setBrandingOutroSubtitle(data.branding_outro_subtitle || "");
     setBrandingAccentColor(data.branding_accent_color || "#F43F5E");
     setBrandingBackgroundColor(data.branding_background_color || "#0B0D13");
+    setBrandingOpacity(data.branding_opacity ?? 0.85);
+    setBrandingStyle((data.branding_style as "overlay" | "bookend") || "overlay");
     setMaxClipSeconds(data.max_clip_seconds ?? 90);
     setCtaEnabled(Boolean(data.cta_enabled));
     setCtaStyle(data.cta_style || "outro_card");
@@ -332,6 +340,8 @@ export default function ChannelProfilePage() {
         branding_outro_subtitle: brandingOutroSubtitle.trim() || null,
         branding_accent_color: brandingAccentColor,
         branding_background_color: brandingBackgroundColor,
+        branding_opacity: Number(brandingOpacity),
+        branding_style: brandingStyle,
         max_clip_seconds: maxClipSeconds,
         cta_enabled: ctaEnabled,
         cta_style: ctaStyle,
@@ -426,6 +436,12 @@ export default function ChannelProfilePage() {
       setBrandingEnabled(Boolean(p.branding_enabled));
       setBrandingIntro(Boolean(p.branding_intro));
       setBrandingOutro(Boolean(p.branding_outro));
+      if (p.branding_opacity !== undefined) {
+        setBrandingOpacity(p.branding_opacity);
+      }
+      if (p.branding_style) {
+        setBrandingStyle((p.branding_style as "overlay" | "bookend") || "overlay");
+      }
       setWatermarkEnabled(Boolean(p.watermark_enabled));
       setWatermarkPosition(p.watermark_position || "bottom_right");
       setWatermarkOpacity(p.watermark_opacity ?? 0.85);
@@ -1275,6 +1291,64 @@ export default function ChannelProfilePage() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 rounded-xl bg-black/20 border border-white/5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Card background opacity{" "}
+                      <span className="font-mono text-amber-300">
+                        {Math.round(brandingOpacity * 100)}%
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={brandingOpacity}
+                      onChange={(e) => setBrandingOpacity(Number(e.target.value))}
+                      className="w-full accent-amber-500"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Semi-transparent backdrop lets gameplay motion play continuously underneath the card.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Card display style
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBrandingStyle("overlay")}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all text-left ${
+                          brandingStyle === "overlay"
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                            : "bg-black/30 border-white/10 text-slate-400 hover:border-white/20"
+                        }`}
+                      >
+                        <div>Overlay on Gameplay</div>
+                        <div className="text-[10px] font-normal text-slate-500 mt-0.5">
+                          Shows action behind card
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBrandingStyle("bookend")}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all text-left ${
+                          brandingStyle === "bookend"
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                            : "bg-black/30 border-white/10 text-slate-400 hover:border-white/20"
+                        }`}
+                      >
+                        <div>Standalone Bookend</div>
+                        <div className="text-[10px] font-normal text-slate-500 mt-0.5">
+                          Sequential pre/post screen
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap items-center gap-4">
                   <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
                     <input
@@ -1296,24 +1370,175 @@ export default function ChannelProfilePage() {
                   </label>
                 </div>
 
-                <div className="flex items-center gap-3 border-t border-white/5 pt-3">
-                  <img
-                    src={`${getApiBase()}/channel/branding/preview?kind=intro&orientation=landscape&t=${previewTick}`}
-                    alt="Intro card preview"
-                    className="h-16 w-auto rounded border border-white/10"
-                  />
-                  <img
-                    src={`${getApiBase()}/channel/branding/preview?kind=outro&orientation=landscape&t=${previewTick}`}
-                    alt="Outro card preview"
-                    className="h-16 w-auto rounded border border-white/10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTick((t) => t + 1)}
-                    className="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 cursor-pointer"
-                  >
-                    Refresh previews
-                  </button>
+                {/* Intro & Outro Cards Preview Section */}
+                <div className="border-t border-white/10 pt-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Clapperboard className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Intro &amp; Outro Card Visual Previews</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        Real-time rendered preview of your channel intro bumper and subscribe outro screen.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* Orientation switcher */}
+                      <div className="flex items-center p-0.5 bg-black/50 border border-white/10 rounded-lg text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewOrientation("landscape")}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                            previewOrientation === "landscape"
+                              ? "bg-amber-500 text-slate-950 shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          <Monitor className="w-3 h-3" />
+                          <span>16:9 Landscape</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewOrientation("vertical")}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                            previewOrientation === "vertical"
+                              ? "bg-amber-500 text-slate-950 shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          <Smartphone className="w-3 h-3" />
+                          <span>9:16 Shorts</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTick((t) => t + 1)}
+                        className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 transition-colors cursor-pointer"
+                        title="Re-fetch card previews"
+                      >
+                        <RefreshCw className="w-3 h-3 text-amber-400" />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                    {/* Intro Card Box */}
+                    <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                          <span>Intro Card</span>
+                          <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                            {brandingIntroSeconds.toFixed(1)}s
+                          </span>
+                        </span>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            brandingIntro && brandingEnabled
+                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                              : "bg-slate-800 text-slate-400"
+                          }`}
+                        >
+                          {brandingIntro && brandingEnabled ? "Active in Renders" : "Disabled"}
+                        </span>
+                      </div>
+
+                      <div
+                        className={`relative w-full ${
+                          previewOrientation === "landscape"
+                            ? "aspect-video max-w-sm mx-auto"
+                            : "aspect-[9/16] max-w-[200px] mx-auto"
+                        } rounded-lg overflow-hidden bg-[#0B0D13] border border-white/10 shadow-lg flex items-center justify-center`}
+                      >
+                        <img
+                          key={`intro-${previewOrientation}-${previewTick}`}
+                          src={getChannelBrandingPreviewUrl({
+                            kind: "intro",
+                            orientation: previewOrientation,
+                            title: brandingIntroTitle,
+                            subtitle: brandingIntroSubtitle,
+                            accent: brandingAccentColor,
+                            background: brandingBackgroundColor,
+                            t: previewTick,
+                          })}
+                          alt="Branded Intro Card Preview"
+                          className="w-full h-full object-contain"
+                          loading="lazy"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            target.style.display = "none";
+                            const parent = target.parentElement;
+                            if (parent && !parent.querySelector(".preview-fallback")) {
+                              const errDiv = document.createElement("div");
+                              errDiv.className =
+                                "preview-fallback flex flex-col items-center justify-center p-3 text-center text-rose-300 text-xs gap-1";
+                              errDiv.innerHTML = `<span>Preview generation error</span><span class="text-[10px] text-slate-400">Click Refresh to retry</span>`;
+                              parent.appendChild(errDiv);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Outro Card Box */}
+                    <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                          <span>Outro Card</span>
+                          <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                            {brandingOutroSeconds.toFixed(1)}s
+                          </span>
+                        </span>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            brandingOutro && brandingEnabled
+                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                              : "bg-slate-800 text-slate-400"
+                          }`}
+                        >
+                          {brandingOutro && brandingEnabled ? "Active in Renders" : "Disabled"}
+                        </span>
+                      </div>
+
+                      <div
+                        className={`relative w-full ${
+                          previewOrientation === "landscape"
+                            ? "aspect-video max-w-sm mx-auto"
+                            : "aspect-[9/16] max-w-[200px] mx-auto"
+                        } rounded-lg overflow-hidden bg-[#0B0D13] border border-white/10 shadow-lg flex items-center justify-center`}
+                      >
+                        <img
+                          key={`outro-${previewOrientation}-${previewTick}`}
+                          src={getChannelBrandingPreviewUrl({
+                            kind: "outro",
+                            orientation: previewOrientation,
+                            title: brandingOutroTitle,
+                            subtitle: brandingOutroSubtitle,
+                            accent: brandingAccentColor,
+                            background: brandingBackgroundColor,
+                            t: previewTick,
+                          })}
+                          alt="Branded Outro Card Preview"
+                          className="w-full h-full object-contain"
+                          loading="lazy"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            target.style.display = "none";
+                            const parent = target.parentElement;
+                            if (parent && !parent.querySelector(".preview-fallback")) {
+                              const errDiv = document.createElement("div");
+                              errDiv.className =
+                                "preview-fallback flex flex-col items-center justify-center p-3 text-center text-rose-300 text-xs gap-1";
+                              errDiv.innerHTML = `<span>Preview generation error</span><span class="text-[10px] text-slate-400">Click Refresh to retry</span>`;
+                              parent.appendChild(errDiv);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {brandingEnabled &&

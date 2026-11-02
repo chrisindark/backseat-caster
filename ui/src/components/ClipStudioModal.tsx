@@ -180,12 +180,16 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
 
   useEffect(() => {
     isMountedRef.current = true;
+    const srcEl = sourceVideoRef.current;
+    const leftEl = compareLeftVideoRef.current;
+    const rightEl = compareRightVideoRef.current;
+    const standaloneEl = standaloneVideoRef.current;
     return () => {
       isMountedRef.current = false;
-      sourceVideoRef.current?.pause();
-      compareLeftVideoRef.current?.pause();
-      compareRightVideoRef.current?.pause();
-      standaloneVideoRef.current?.pause();
+      srcEl?.pause();
+      leftEl?.pause();
+      rightEl?.pause();
+      standaloneEl?.pause();
     };
   }, []);
 

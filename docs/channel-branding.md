@@ -55,13 +55,26 @@ BackseatCaster provides three deterministic presentation presets. Selecting a pr
 
 | Preset | Framing | Cards | Watermark | CTA Style | Visual Payoff | Audio / Music |
 |---|---|---|---|---|---|---|
-| **Viral Kill** *(default)* | `third_person` | Disabled | Subtle lower-right (70% opacity) | Lower-third overlay pill | Clean gameplay focus | 30% bg music volume |
-| **Cinematic Kill** | `cinematic` | Disabled | Subtle lower-right | Disabled | Restrained 8% zoom on elimination or midpoint | 20% bg music volume |
-| **Multi-Kill Montage** | `third_person` | Disabled | Subtle lower-right | Lower-third overlay pill | Punch-in zoom + combo badges (`DOUBLE KO`, `TEAM WIPE`) | 30% bg music volume |
+| **Viral Kill** *(default)* | `third_person` | Overlay (85% opacity) | Subtle lower-right (70% opacity) | Lower-third overlay pill | Clean gameplay focus | 30% bg music volume |
+| **Cinematic Kill** | `cinematic` | Overlay (85% opacity) | Subtle lower-right | Disabled | Restrained 8% zoom on elimination or midpoint | 20% bg music volume |
+| **Multi-Kill Montage** | `third_person` | Overlay (85% opacity) | Subtle lower-right | Lower-third overlay pill | Punch-in zoom + combo badges (`DOUBLE KO`, `TEAM WIPE`) | 30% bg music volume |
 
 ---
 
-## 3. Background Music & Looping Tools
+## 3. Intro & Outro Cards & Opacity
+
+Channel branding cards display the channel name, handle, accent rule, and tagline:
+
+- **Display Styles (`branding_style`):**
+  - **`overlay` (default):** Cards are composited directly on top of the gameplay video stream with FFmpeg's `overlay` filter. Gameplay motion continues underneath, audio starts immediately at $t=0$ without dead silence, and no extra duration padding is added (`padding_seconds == 0.0`).
+  - **`bookend`:** Traditional sequential card slides (`concat=n=3`) placed before and after gameplay with delayed/padded audio.
+- **Card Background Opacity (`branding_opacity`):**
+  - Configurable slider from `0.0` (fully transparent background) to `1.0` (solid background), default `0.85`.
+  - Accent stripes and typography maintain 100% opacity (`alpha=255`) for crisp legibility over moving gameplay.
+
+---
+
+## 4. Background Music & Looping Tools
 
 Creators can upload a dedicated channel background music track to accompany gameplay:
 
@@ -98,6 +111,8 @@ Settings follow a strict three-tier precedence: **Per-Clip Request > Channel Pro
 |---|---|---|---|
 | `branding_enabled` | `False` (all presets) | `branding_enabled` | `RenderClipRequest.branding.enabled` |
 | `branding_intro` / `outro` | Preset definition | Profile columns | `RenderClipRequest.branding.intro` / `outro` |
+| `branding_opacity` | `0.85` | `branding_opacity` (0.0 to 1.0) | `RenderClipRequest.branding.opacity` |
+| `branding_style` | `overlay` | `branding_style` (`overlay` or `bookend`) | `RenderClipRequest.branding.style` |
 | `default_framing_preset` | Preset default (`third_person` / `cinematic`) | `default_framing_preset` | `RenderClipRequest.crop_preset` |
 | `default_quality_preset` | `high` | `default_quality_preset` | `RenderClipRequest.quality_preset` |
 | `target_fps` | `None` (source native) | `target_fps` (e.g. 60) | `RenderClipRequest.target_fps` |

@@ -110,6 +110,13 @@ def test_list_presentation_presets_api(client: TestClient):
     names = {p["name"] for p in presets}
     assert names == {"viral_kill", "cinematic_kill", "multi_kill_montage"}
 
+    # Check preset branding fields
+    for p in presets:
+        assert "branding_opacity" in p
+        assert "branding_style" in p
+        assert 0.0 <= p["branding_opacity"] <= 1.0
+        assert p["branding_style"] in {"overlay", "bookend"}
+
 
 def test_channel_profile_presentation_preset_lifecycle(client: TestClient, db_session):
     """Channel profile persists presentation_preset and honors overrides."""
@@ -157,6 +164,8 @@ def test_channel_profile_new_settings_roundtrip(client: TestClient, db_session):
         "hook_position": "upper_third",
         "kill_effects_enabled": True,
         "target_fps": 60,
+        "branding_opacity": 0.65,
+        "branding_style": "overlay",
     }
     resp = client.put(f"{settings.API_PREFIX}/channel/profile", json=payload)
     assert resp.status_code == 200
@@ -171,6 +180,8 @@ def test_channel_profile_new_settings_roundtrip(client: TestClient, db_session):
     assert data["hook_position"] == "upper_third"
     assert data["kill_effects_enabled"] is True
     assert data["target_fps"] == 60
+    assert data["branding_opacity"] == 0.65
+    assert data["branding_style"] == "overlay"
 
 
 def test_cinematic_target_time_resolution():

@@ -2,6 +2,7 @@
 
 import { YouTubeChannelVideoItem } from "@/types/video";
 import { motion } from "framer-motion";
+import { Tooltip, TruncatedText } from "./Tooltip";
 import {
   CheckCircle2,
   ExternalLink,
@@ -107,21 +108,28 @@ export const YouTubeVideoCard: React.FC<YouTubeVideoCardProps> = ({
       <div className="p-4 flex-1 flex flex-col justify-between gap-3">
         <div>
           {/* Video Title */}
-          <h3
-            onClick={() => onPreview(video)}
-            className="text-sm font-semibold text-slate-100 group-hover:text-rose-400 line-clamp-2 leading-snug cursor-pointer transition-colors"
-            title={video.title}
-          >
-            {video.title}
-          </h3>
+          <div onClick={() => onPreview(video)} className="cursor-pointer">
+            <TruncatedText
+              text={video.title}
+              lines={2}
+              className="text-sm font-semibold text-slate-100 group-hover:text-rose-400 leading-snug transition-colors"
+              tooltipTitle="YouTube Video Title"
+            />
+          </div>
 
           {/* Channel Name & Meta */}
           <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-            <span className="font-medium text-slate-300 truncate max-w-[150px]">
-              {video.channel_name || "YouTube VOD"}
-            </span>
+            <Tooltip content={`Channel / Creator: ${video.channel_name || "YouTube VOD"}`}>
+              <span className="font-medium text-slate-300 truncate max-w-[150px] cursor-help">
+                {video.channel_name || "YouTube VOD"}
+              </span>
+            </Tooltip>
             <div className="flex items-center gap-2 shrink-0">
-              {video.view_count > 0 && <span>{formatViews(video.view_count)}</span>}
+              {video.view_count > 0 && (
+                <Tooltip content={`Views: ${video.view_count.toLocaleString()}`}>
+                  <span className="cursor-help">{formatViews(video.view_count)}</span>
+                </Tooltip>
+              )}
               {video.published_at && (
                 <>
                   <span>•</span>

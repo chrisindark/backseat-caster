@@ -787,6 +787,8 @@ export interface PresentationPreset {
   branding_enabled: boolean;
   branding_intro: boolean;
   branding_outro: boolean;
+  branding_opacity?: number;
+  branding_style?: "overlay" | "bookend" | string;
   watermark_enabled: boolean;
   watermark_position: string;
   watermark_opacity: number;
@@ -847,6 +849,8 @@ export interface ChannelProfile {
   branding_accent_color: string;
   branding_text_color: string;
   branding_font_path?: string | null;
+  branding_opacity?: number;
+  branding_style?: "overlay" | "bookend" | string;
   max_clip_seconds: number;
   cta_enabled: boolean;
   cta_style: string;
@@ -901,6 +905,8 @@ export interface ChannelProfileUpdate {
   branding_accent_color?: string | null;
   branding_text_color?: string | null;
   branding_font_path?: string | null;
+  branding_opacity?: number | null;
+  branding_style?: "overlay" | "bookend" | string | null;
   max_clip_seconds?: number;
   cta_enabled?: boolean;
   cta_style?: string;

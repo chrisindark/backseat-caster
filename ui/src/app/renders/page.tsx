@@ -6,6 +6,7 @@ import { ManifestModal } from "@/components/ManifestModal";
 import { Navbar } from "@/components/Navbar";
 import { RenderCard } from "@/components/RenderCard";
 import { RenderJobRow } from "@/components/RenderJobRow";
+import { Tooltip } from "@/components/Tooltip";
 import { UploadQueueModal } from "@/components/UploadQueueModal";
 import {
   bulkDeleteRenders,
@@ -758,24 +759,40 @@ function RendersContent() {
               </div>
 
               {/* Refresh button */}
-              <button
-                type="button"
-                onClick={handleManualRefresh}
-                disabled={isRefreshing}
-                className="p-2 rounded-xl bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/5 transition-all"
-                title="Refresh Renders and Jobs"
-              >
-                <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
-              </button>
+              <Tooltip content="Manually refresh all render jobs, manifests, and system health">
+                <button
+                  type="button"
+                  onClick={handleManualRefresh}
+                  disabled={isRefreshing}
+                  className="p-2 rounded-xl bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/5 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                </button>
+              </Tooltip>
+
+              {/* Quick Upload Modal button if items selected */}
+              {selectedForUploadList.length > 0 && (
+                <Tooltip content="Open popover modal to quickly review metadata and tags for staged clips">
+                  <button
+                    type="button"
+                    onClick={openUploadQueueModal}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <span>Quick Modal ({selectedForUploadList.length})</span>
+                  </button>
+                </Tooltip>
+              )}
 
               {/* Open Upload Queue Button */}
-              <Link
-                href="/staging"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-md shadow-rose-900/30 transition-all cursor-pointer whitespace-nowrap"
-              >
-                <YoutubeIcon className="w-3.5 h-3.5" />
-                <span>Upload Staging ({selectedForUploadList.length})</span>
-              </Link>
+              <Tooltip content="Navigate to Staging Page to manage metadata, AI copy, and schedule publishing">
+                <Link
+                  href="/staging"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-md shadow-rose-900/30 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <YoutubeIcon className="w-3.5 h-3.5" />
+                  <span>Upload Staging ({selectedForUploadList.length})</span>
+                </Link>
+              </Tooltip>
             </div>
           </div>
 

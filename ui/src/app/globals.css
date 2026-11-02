@@ -68,3 +68,18 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Tooltip Theme Enhancements */
+.rt-TooltipContent {
+  z-index: 100 !important;
+  max-width: 440px !important;
+  background-color: rgba(15, 18, 28, 0.96) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.4) !important;
+  border-radius: 10px !important;
+  padding: 6px 10px !important;
+  word-break: break-word !important;
+  white-space: normal !important;
+}
+

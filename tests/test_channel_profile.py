@@ -288,6 +288,15 @@ def test_duration_budget_resolves_from_profile(client, db_session, monkeypatch):
     assert budget.max_seconds == 120.0
     assert budget.clip_budget == pytest.approx(116.8)
 
+    # In overlay mode, cards do not consume budget duration.
+    client.put(
+        f"{settings.API_PREFIX}/channel/profile",
+        json={"branding_style": "overlay"},
+    )
+    budget_overlay = ChannelProfileService.duration_budget(db_session)
+    assert budget_overlay.bookend_seconds == 0.0
+    assert budget_overlay.clip_budget == 120.0
+
     # Legacy rows fall back to the env settings instead of 0/None.
     monkeypatch.setattr(settings, "MAX_CLIP_SECONDS", 75.0)
     monkeypatch.setattr(settings, "BRANDING_ENABLED", True)
@@ -345,13 +354,31 @@ def test_branding_preview_cleans_up_its_temp_files(client, monkeypatch):
         return path
 
     monkeypatch.setattr(tempfile, "mkdtemp", spy)
+
+    # Test overlay preview
     res = client.get(
         f"{settings.API_PREFIX}/channel/branding/preview"
         "?kind=overlay&orientation=vertical"
     )
-
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"
+
+    # Test intro card preview
+    res_intro = client.get(
+        f"{settings.API_PREFIX}/channel/branding/preview"
+        "?kind=intro&orientation=landscape"
+    )
+    assert res_intro.status_code == 200
+    assert res_intro.headers["content-type"] == "image/png"
+
+    # Test outro card preview with custom live parameters
+    res_outro = client.get(
+        f"{settings.API_PREFIX}/channel/branding/preview"
+        "?kind=outro&orientation=vertical&title=SUB+NOW&subtitle=Check+clips&accent=%23ff0055"
+    )
+    assert res_outro.status_code == 200
+    assert res_outro.headers["content-type"] == "image/png"
+
     assert created and all(not path.exists() for path in created)
 
 

@@ -1255,7 +1255,11 @@ class RenderService:
                         else 0.0
                     )
                     style = getattr(profile, "cta_style", "outro_card")
-                    plays_over_outro = style == "outro_card" and outro_seconds > 0
+                    plays_over_outro = (
+                        style == "outro_card"
+                        and outro_seconds > 0
+                        and branding_config.style == "bookend"
+                    )
                     # Overlay narration is constrained to its on-screen window.
                     # Outro-card narration instead determines the card duration,
                     # so the spoken CTA and bell can finish before the video ends.
@@ -1283,10 +1287,17 @@ class RenderService:
                                     update={"outro_seconds": effective_outro_seconds}
                                 )
                                 bookend_seconds = (
-                                    branding_config.intro_seconds
-                                    if branding_config.has_intro
-                                    else 0.0
-                                ) + effective_outro_seconds
+                                    0.0
+                                    if branding_config.style == "overlay"
+                                    else (
+                                        (
+                                            branding_config.intro_seconds
+                                            if branding_config.has_intro
+                                            else 0.0
+                                        )
+                                        + effective_outro_seconds
+                                    )
+                                )
                                 duration_budget = DurationBudget(
                                     max_seconds=duration_budget.max_seconds,
                                     bookend_seconds=bookend_seconds,

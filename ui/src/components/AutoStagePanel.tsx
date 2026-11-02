@@ -7,6 +7,7 @@ import {
   scheduleStagedClip,
 } from "@/lib/api";
 import { useScrollLock } from "@/lib/useScrollLock";
+import { Tooltip, TruncatedText } from "./Tooltip";
 import {
   PreviousMetadata,
   RenderJobResponse,
@@ -86,28 +87,38 @@ export const QuotaBar: React.FC<{ quota: YouTubeQuota; showDetails?: boolean }> 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          <Gauge className="w-3.5 h-3.5 text-emerald-400" />
-          YouTube API Quota
-        </span>
-        <span className="text-[11px] font-mono text-slate-400">
-          {quota.units_used.toLocaleString()} / {quota.daily_limit_units.toLocaleString()} units
-        </span>
+        <Tooltip content="Advisory YouTube Data API v3 daily quota accounting. Each video upload requires 1,600 units from YouTube's 10,000 units default daily pool.">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 cursor-help">
+            <Gauge className="w-3.5 h-3.5 text-emerald-400" />
+            YouTube API Quota
+          </span>
+        </Tooltip>
+        <Tooltip content={`${quota.units_used} units used out of ${quota.daily_limit_units} daily quota units (${usedPercent}%)`}>
+          <span className="text-[11px] font-mono text-slate-400 cursor-help">
+            {quota.units_used.toLocaleString()} / {quota.daily_limit_units.toLocaleString()} units
+          </span>
+        </Tooltip>
       </div>
-      <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${barColor}`}
-          style={{ width: `${Math.max(2, usedPercent)}%` }}
-        />
-      </div>
+      <Tooltip content={`Quota usage: ${usedPercent}% (${quota.units_used}/${quota.daily_limit_units} units)`}>
+        <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden cursor-help">
+          <div
+            className={`h-full rounded-full transition-all ${barColor}`}
+            style={{ width: `${Math.max(2, usedPercent)}%` }}
+          />
+        </div>
+      </Tooltip>
       {showDetails && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[10px] text-slate-500">
-            <span>
-              {quota.uploads_remaining} of {quota.max_uploads_per_day} uploads left today
-              {!quota.can_upload && !blockedMessage ? " — API quota exhausted" : ""}
-            </span>
-            <span>Resets {formatSchedule(quota.resets_at)}</span>
+            <Tooltip content={`Remaining uploads possible today: ${quota.uploads_remaining} of ${quota.max_uploads_per_day}`}>
+              <span className="cursor-help">
+                {quota.uploads_remaining} of {quota.max_uploads_per_day} uploads left today
+                {!quota.can_upload && !blockedMessage ? " — API quota exhausted" : ""}
+              </span>
+            </Tooltip>
+            <Tooltip content={`Quota counter resets automatically at midnight PST: ${formatSchedule(quota.resets_at)}`}>
+              <span className="cursor-help">Resets {formatSchedule(quota.resets_at)}</span>
+            </Tooltip>
           </div>
           {blockedMessage && (
             <p className="text-[10px] font-medium text-rose-300">{blockedMessage}</p>
@@ -412,29 +423,38 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
                     className="rounded-2xl border border-white/10 bg-slate-900/70 p-4 space-y-3"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white leading-snug break-words">
-                          {String(meta.title || job.video_title || job.clip_id)}
-                        </p>
-                        <p className="text-[10px] text-slate-500 mt-1 font-mono truncate">
-                          {job.clip_id} · {Math.round(Number(job.start_seconds) || 0)}s ·{" "}
-                          {Math.round(Number(job.duration_seconds) || 0)}s
-                        </p>
-                        {typeof meta.description === "string" && meta.description && (
-                          <p className="text-[11px] text-slate-400 mt-1.5 whitespace-pre-line line-clamp-2">
-                            {meta.description}
+                      <div className="min-w-0 flex-1">
+                        <TruncatedText
+                          text={String(meta.title || job.video_title || job.clip_id)}
+                          lines={2}
+                          className="text-sm font-semibold text-white leading-snug"
+                          tooltipTitle="Target YouTube Title"
+                        />
+                        <Tooltip content={`Clip Identifier: ${job.clip_id}`}>
+                          <p className="text-[10px] text-slate-500 mt-1 font-mono truncate cursor-help">
+                            {job.clip_id} · {Math.round(Number(job.start_seconds) || 0)}s ·{" "}
+                            {Math.round(Number(job.duration_seconds) || 0)}s
                           </p>
+                        </Tooltip>
+                        {typeof meta.description === "string" && meta.description && (
+                          <Tooltip content={meta.description}>
+                            <p className="text-[11px] text-slate-400 mt-1.5 whitespace-pre-line line-clamp-2 cursor-help">
+                              {meta.description}
+                            </p>
+                          </Tooltip>
                         )}
                       </div>
-                      <span
-                        className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                          source === "llm"
-                            ? "bg-violet-500/15 text-violet-300 border-violet-500/30"
-                            : "bg-slate-800 text-slate-300 border-white/10"
-                        }`}
-                      >
-                        {source === "llm" ? "AI copy" : "Deterministic copy"}
-                      </span>
+                      <Tooltip content={source === "llm" ? "Generated by local LLM based on gameplay context" : "Generated deterministically by title & tags template"}>
+                        <span
+                          className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${
+                            source === "llm"
+                              ? "bg-violet-500/15 text-violet-300 border-violet-500/30"
+                              : "bg-slate-800 text-slate-300 border-white/10"
+                          }`}
+                        >
+                          {source === "llm" ? "AI copy" : "Deterministic copy"}
+                        </span>
+                      </Tooltip>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">

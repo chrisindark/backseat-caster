@@ -523,8 +523,10 @@ def render_card_png(
     accent: str = "#F43F5E",
     text_color: str = "#FFFFFF",
     font_path: str | None = None,
+    opacity: float = 0.85,
+    kind: str = "intro",
 ) -> Path:
-    """Draw a single branded card (dark background, accent rules, centred text)."""
+    """Draw a single branded card (translucent/opaque background, accent rules, centred text)."""
     from PIL import Image, ImageDraw
 
     width, height = max(2, int(size[0])), max(2, int(size[1]))
@@ -532,15 +534,26 @@ def render_card_png(
     accent_rgb = hex_to_rgb(accent, DEFAULT_ACCENT)
     text_rgb = hex_to_rgb(text_color, DEFAULT_TEXT)
 
-    canvas = Image.new("RGB", (width, height), bg_rgb)
+    # Use RGBA canvas so background opacity lets underlying gameplay show through
+    bg_alpha = max(0, min(255, int(round(255 * opacity))))
+    canvas = Image.new(
+        "RGBA", (width, height), (bg_rgb[0], bg_rgb[1], bg_rgb[2], bg_alpha)
+    )
     draw = ImageDraw.Draw(canvas)
 
     short_edge = min(width, height)
     rule = max(4, short_edge // 90)
-    draw.rectangle([0, 0, width, rule], fill=accent_rgb)
-    draw.rectangle([0, height - rule, width, height], fill=accent_rgb)
+    # Accent rules stay crisp with full opacity
+    draw.rectangle(
+        [0, 0, width, rule], fill=(accent_rgb[0], accent_rgb[1], accent_rgb[2], 255)
+    )
+    draw.rectangle(
+        [0, height - rule, width, height],
+        fill=(accent_rgb[0], accent_rgb[1], accent_rgb[2], 255),
+    )
 
-    headline = (title or "").strip() or "SUBSCRIBE"
+    fallback_title = "SUBSCRIBE" if kind == "outro" else "HIGHLIGHTS"
+    headline = (title or "").strip() or fallback_title
     sub = (subtitle or "").strip()
 
     title_font = _fit_font(
@@ -556,6 +569,7 @@ def render_card_png(
     if sub:
         sub_font = _fit_font(sub, int(width * 0.74), int(short_edge * 0.055), font_path)
         sub_box = draw.textbbox((0, 0), sub, font=sub_font)
+        sub_w = sub_box[2] - sub_box[0]
         sub_h = sub_box[3] - sub_box[1]
         block_h += gap + sub_h
 
@@ -564,17 +578,16 @@ def render_card_png(
         ((width - title_w) / 2 - title_box[0], cursor_y - title_box[1]),
         headline,
         font=title_font,
-        fill=text_rgb,
+        fill=(text_rgb[0], text_rgb[1], text_rgb[2], 255),
     )
 
     if sub and sub_font:
         cursor_y += title_h + gap
-        sub_box = draw.textbbox((0, 0), sub, font=sub_font)
         draw.text(
             ((width - sub_w) / 2 - sub_box[0], cursor_y - sub_box[1]),
             sub,
             font=sub_font,
-            fill=accent_rgb,
+            fill=(accent_rgb[0], accent_rgb[1], accent_rgb[2], 255),
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -598,7 +611,9 @@ class BrandingPlan:
 
     @property
     def padding_seconds(self) -> float:
-        """Extra runtime added by the cards."""
+        """Extra runtime added by the cards. In overlay mode, cards sit on gameplay without adding runtime."""
+        if self.config.style == "overlay":
+            return 0.0
         return self.intro_seconds + self.outro_seconds
 
     def intro_card(self, mode: str) -> Path | None:
@@ -616,6 +631,8 @@ class BrandingPlan:
                 "outro_seconds": self.outro_seconds,
                 "padding_seconds": round(self.padding_seconds, 3),
                 "total_duration_seconds": round(total_duration, 3),
+                "opacity": self.config.opacity,
+                "style": self.config.style,
             }
         )
         return payload
@@ -675,6 +692,8 @@ def build_branding_plan(
                 accent=config.accent_color,
                 text_color=config.text_color,
                 font_path=config.font_path,
+                opacity=config.opacity,
+                kind="intro",
             )
         if outro_seconds > 0:
             outro_path = render_card_png(
@@ -686,6 +705,8 @@ def build_branding_plan(
                 accent=config.accent_color,
                 text_color=config.text_color,
                 font_path=config.font_path,
+                opacity=config.opacity,
+                kind="outro",
             )
         plan.cards[mode] = (intro_path, outro_path)
 

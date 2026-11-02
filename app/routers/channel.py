@@ -217,9 +217,14 @@ def get_bell_chime():
 def preview_branding_card(
     kind: Literal["intro", "outro", "overlay"] = "intro",
     orientation: Literal["landscape", "vertical"] = "landscape",
+    title: str | None = None,
+    subtitle: str | None = None,
+    background: str | None = None,
+    accent: str | None = None,
+    text_color: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """Render a sample card/overlay PNG with the current profile branding."""
+    """Render a sample card/overlay PNG with the current profile branding or live preview parameters."""
     from app.rendering.branding import (
         render_card_png,
         render_cta_overlay_png,
@@ -230,41 +235,55 @@ def preview_branding_card(
 
     size = (1080, 1920) if orientation == "vertical" else (1920, 1080)
 
+    bg_color = background or branding.background_color
+    accent_color = accent or branding.accent_color
+    txt_color = text_color or branding.text_color
+
     tmp_dir = Path(tempfile.mkdtemp(prefix="brand_preview_"))
     out_path = tmp_dir / f"{kind}_{orientation}.png"
 
     if kind == "intro":
+        card_title = title if title is not None else branding.resolved_intro_title()
+        card_subtitle = subtitle if subtitle is not None else branding.intro_subtitle
         render_card_png(
             out_path,
             size=size,
-            title=branding.resolved_intro_title(),
-            subtitle=branding.intro_subtitle,
-            background=branding.background_color,
-            accent=branding.accent_color,
-            text_color=branding.text_color,
+            title=card_title,
+            subtitle=card_subtitle,
+            background=bg_color,
+            accent=accent_color,
+            text_color=txt_color,
             font_path=branding.font_path,
             kind="intro",
         )
     elif kind == "outro":
+        card_title = (
+            title if title is not None else (branding.outro_title or "SUBSCRIBE")
+        )
+        card_subtitle = (
+            subtitle if subtitle is not None else branding.resolved_outro_subtitle()
+        )
         render_card_png(
             out_path,
             size=size,
-            title=branding.outro_title or "SUBSCRIBE",
-            subtitle=branding.resolved_outro_subtitle(),
-            background=branding.background_color,
-            accent=branding.accent_color,
-            text_color=branding.text_color,
+            title=card_title,
+            subtitle=card_subtitle,
+            background=bg_color,
+            accent=accent_color,
+            text_color=txt_color,
             font_path=branding.font_path,
             kind="outro",
         )
     else:
+        overlay_headline = title if title is not None else cta.headline
+        overlay_subtitle = subtitle if subtitle is not None else cta.subtitle
         render_cta_overlay_png(
             out_path,
             size=size,
-            headline=cta.headline,
-            subtitle=cta.subtitle,
-            accent=branding.accent_color,
-            text_color=branding.text_color,
+            headline=overlay_headline,
+            subtitle=overlay_subtitle,
+            accent=accent_color,
+            text_color=txt_color,
             font_path=branding.font_path,
         )
 

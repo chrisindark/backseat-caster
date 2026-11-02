@@ -13,6 +13,7 @@ import {
   getVideoStatus,
 } from "@/lib/api";
 import { YoutubeIcon } from "@/components/icons";
+import { Tooltip, TruncatedText } from "@/components/Tooltip";
 import { HighlightCandidateItem, RenderManifest, VideoItem } from "@/types/video";
 import {
   AlertCircle,
@@ -85,10 +86,11 @@ function VideoDetailContent() {
 
   // Stop video playback on unmount or navigation
   useEffect(() => {
+    const el = videoRef.current;
     return () => {
-      if (videoRef.current) {
+      if (el) {
         try {
-          videoRef.current.pause();
+          el.pause();
         } catch {
           // ignore
         }
@@ -501,10 +503,12 @@ function VideoDetailContent() {
                         key={r.clip_id}
                         className="p-3 bg-black/40 border border-white/5 rounded-xl flex items-center justify-between gap-3 hover:border-rose-500/30 transition-colors"
                       >
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-white truncate font-mono">
-                            {r.clip_id}
-                          </div>
+                        <div className="min-w-0 flex-1">
+                          <Tooltip content={`Full Clip ID: ${r.clip_id}`}>
+                            <div className="text-xs font-bold text-white truncate font-mono cursor-help">
+                              {r.clip_id}
+                            </div>
+                          </Tooltip>
                           <div className="text-[11px] text-slate-400 mt-0.5">
                             Start: {formatSeconds(r.clip?.start_seconds || 0)} • {r.clip?.duration_seconds || 15}s
                           </div>
@@ -639,9 +643,12 @@ function VideoDetailContent() {
                           className="p-3 bg-black/40 rounded-xl border border-white/5 hover:border-red-500/30 transition-colors flex items-center justify-between gap-3 text-xs"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="font-semibold text-white truncate text-xs">
-                              {hl.title || hl.clip_id}
-                            </div>
+                            <TruncatedText
+                              text={hl.title || hl.clip_id}
+                              lines={1}
+                              className="font-semibold text-white text-xs"
+                              tooltipTitle="YouTube Short Title"
+                            />
                             <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
                               <span className="capitalize">{hl.format?.replace("_", " ") || "Short"}</span>
                               {hl.youtube_uploaded_at && (

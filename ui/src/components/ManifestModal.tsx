@@ -2,6 +2,7 @@
 
 import { RenderManifest } from "@/types/video";
 import { useScrollLock } from "@/lib/useScrollLock";
+import { Tooltip } from "./Tooltip";
 import { Check, Copy, FileCode, X } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
@@ -50,17 +51,21 @@ export const ManifestModal: React.FC<ManifestModalProps> = ({ manifest, onClose 
               <h3 className="font-semibold text-slate-100 text-sm md:text-base">
                 Render Manifest Audit
               </h3>
-              <p className="text-xs text-slate-400 font-mono">{manifest.clip_id}</p>
+              <Tooltip content={`Full Clip ID: ${manifest.clip_id}`}>
+                <p className="text-xs text-slate-400 font-mono truncate max-w-xs cursor-help">{manifest.clip_id}</p>
+              </Tooltip>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 transition-colors"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copied ? "Copied" : "Copy JSON"}</span>
-            </button>
+            <Tooltip content="Copy raw JSON manifest structure to system clipboard">
+              <button
+                onClick={handleCopy}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 transition-colors cursor-pointer"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? "Copied" : "Copy JSON"}</span>
+              </button>
+            </Tooltip>
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -137,9 +142,11 @@ export const ManifestModal: React.FC<ManifestModalProps> = ({ manifest, onClose 
               </div>
               <div className="p-3 rounded-xl bg-slate-800/60 border border-white/5">
                 <span className="text-[10px] uppercase font-bold text-slate-400">CTA Voice</span>
-                <p className="text-sm font-semibold text-slate-100 mt-0.5 truncate">
-                  {manifest.cta?.enabled ? manifest.cta.voice ?? "default" : "—"}
-                </p>
+                <Tooltip content={manifest.cta?.enabled ? `Voice model: ${manifest.cta.voice ?? "default"}` : "No CTA Voice configured"}>
+                  <p className="text-sm font-semibold text-slate-100 mt-0.5 truncate cursor-help">
+                    {manifest.cta?.enabled ? manifest.cta.voice ?? "default" : "—"}
+                  </p>
+                </Tooltip>
               </div>
             </div>
           ) : null}

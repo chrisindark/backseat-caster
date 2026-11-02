@@ -916,6 +916,37 @@ class RenderEngine:
                 continue
 
             intro_idx, outro_idx = card_inputs.get(mode_name, (None, None))
+            is_overlay_branding = (
+                branding_plan is not None and branding_plan.config.style == "overlay"
+            )
+
+            if is_overlay_branding and branding_plan is not None:
+                # In-video overlay mode: composite cards directly over the gameplay
+                if intro_idx is not None and branding_plan.intro_seconds > 0:
+                    v_brand_in = f"v_brand_in_{i}"
+                    filter_parts.append(
+                        f"[{v_composed}][{intro_idx}:v]overlay="
+                        f"0:0:"
+                        f"enable='between(t,0.000,{branding_plan.intro_seconds:.3f})'"
+                        f"[{v_brand_in}]"
+                    )
+                    v_composed = v_brand_in
+                if outro_idx is not None and branding_plan.outro_seconds > 0:
+                    start_outro = max(
+                        0.0, duration_seconds - branding_plan.outro_seconds
+                    )
+                    v_brand_out = f"v_brand_out_{i}"
+                    filter_parts.append(
+                        f"[{v_composed}][{outro_idx}:v]overlay="
+                        f"0:0:"
+                        f"enable='between(t,{start_outro:.3f},{duration_seconds:.3f})'"
+                        f"[{v_brand_out}]"
+                    )
+                    v_composed = v_brand_out
+
+                video_map_labels.append(v_composed)
+                continue
+
             is_landscape = mode_name == "landscape"
             card_w = (
                 self.config.landscape_width
@@ -975,9 +1006,15 @@ class RenderEngine:
         if audio_filter:
             filter_parts.append(audio_filter)
 
-        # Branded cards carry no audio, so pad the clip audio with silence to keep
-        # lip-sync aligned behind the intro and the outro.
-        if branding_active and branding_plan is not None and audio_filter:
+        # Branded bookends carry no audio, so pad the clip audio with silence to keep
+        # lip-sync aligned behind the intro and the outro. In overlay mode, gameplay audio
+        # continues naturally from t=0.
+        if (
+            branding_active
+            and branding_plan is not None
+            and branding_plan.config.style == "bookend"
+            and audio_filter
+        ):
             filter_parts.append(
                 build_branding_audio_filter(
                     input_label=clean_audio_label,

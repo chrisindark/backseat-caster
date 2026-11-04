@@ -57,6 +57,10 @@ export interface VideoItem {
   can_cleanup_vod?: boolean;
   can_cleanup_renders?: boolean;
 
+  // Ignored / Do Not Process state
+  is_ignored?: boolean;
+  ignore_reason?: string | null;
+
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -73,6 +77,19 @@ export interface VideoStorageCleanupResult {
   reclaimed_formatted: string;
   vod_deleted: boolean;
   renders_deleted_count: number;
+  message: string;
+}
+
+export interface VideoBatchTagRequest {
+  video_ids: string[];
+  is_ignored: boolean;
+  ignore_reason?: string | null;
+}
+
+export interface VideoBatchTagResponse {
+  updated_count: number;
+  video_ids: string[];
+  is_ignored: boolean;
   message: string;
 }
 

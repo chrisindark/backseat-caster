@@ -254,7 +254,7 @@ export default function ChannelProfilePage() {
     setPinnedHashtags((data.pinned_hashtags || []).join(", "));
     setDefaultPrivacy(data.default_privacy || "public");
     setUploadSlots((data.upload_slots || []).join(", "));
-    setUploadTimezone(data.upload_timezone || "UTC");
+    setUploadTimezone(data.upload_timezone || "Asia/Kolkata");
   }, []);
 
   const loadProfile = useCallback(async () => {
@@ -355,7 +355,7 @@ export default function ChannelProfilePage() {
         pinned_hashtags: splitList(pinnedHashtags).map((h) => h.replace(/^#/, "")),
         default_privacy: defaultPrivacy,
         upload_slots: splitList(uploadSlots),
-        upload_timezone: uploadTimezone.trim() || "UTC",
+        upload_timezone: uploadTimezone.trim() || "Asia/Kolkata",
       };
       const updated = await updateChannelProfile(payload);
       applyProfile(updated);

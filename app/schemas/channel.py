@@ -138,7 +138,7 @@ class ChannelProfileResponse(BaseModel):
     pinned_hashtags: list[str] = Field(default_factory=list)
     default_privacy: PrivacyStatus = "public"
     upload_slots: list[str] = Field(default_factory=list)
-    upload_timezone: str = "UTC"
+    upload_timezone: str = "Asia/Kolkata"
 
     updated_at: str | None = None
 

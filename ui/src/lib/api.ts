@@ -27,6 +27,7 @@ import {
   StagedClipsResponse,
   SystemHealthResponse,
   UpdateSetupSettingsPayload,
+  VideoBatchTagResponse,
   VideoItem,
   VideoListResponse,
   VideoStorageCleanupOptions,
@@ -238,6 +239,23 @@ export async function updateVideo(videoId: string, data: Partial<VideoItem>): Pr
     body: JSON.stringify(data),
   });
   return parseResponse<VideoItem>(res, `update video ${videoId}`);
+}
+
+export async function batchTagVideos(
+  videoIds: string[],
+  isIgnored: boolean = true,
+  ignoreReason?: string | null
+): Promise<VideoBatchTagResponse> {
+  const res = await fetch(`${API_BASE}/videos/batch-tag`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      video_ids: videoIds,
+      is_ignored: isIgnored,
+      ignore_reason: ignoreReason,
+    }),
+  });
+  return parseResponse<VideoBatchTagResponse>(res, "batch tag videos");
 }
 
 export async function deleteVideo(videoId: string, deleteFile = true): Promise<{ status: string; message?: string }> {

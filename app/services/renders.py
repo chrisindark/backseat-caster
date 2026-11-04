@@ -142,6 +142,12 @@ class RenderService:
                 f"Local video file not found for ID: {request.video_id}. Download the VOD first."
             )
 
+        video = db.query(Video).filter(Video.id == request.video_id).first()
+        if video and video.is_ignored:
+            raise RuntimeError(
+                f"Video '{request.video_id}' is tagged as 'Do Not Process' (ignored). Cannot render clips."
+            )
+
         profile = ChannelProfileService.get_or_create(db)
         explicit_preset = (
             request.crop_preset if "crop_preset" in request.model_fields_set else None

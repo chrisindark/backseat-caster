@@ -144,6 +144,10 @@ class AutoStageRequest(BaseModel):
     schedule: bool = Field(
         True, description="Assign staggered native publishAt slots to staged clips"
     )
+    same_day_catchup: bool = Field(
+        True,
+        description="Schedule all clips on the same day by catching up missed earlier slots at the next available slot",
+    )
 
 
 class AutoStagedClipResponse(BaseModel):

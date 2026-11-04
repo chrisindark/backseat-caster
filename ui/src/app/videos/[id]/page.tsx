@@ -11,6 +11,7 @@ import {
   fetchVideo,
   getDownloadedVideoStreamUrl,
   getVideoStatus,
+  updateVideo,
 } from "@/lib/api";
 import { YoutubeIcon } from "@/components/icons";
 import { Tooltip, TruncatedText } from "@/components/Tooltip";
@@ -24,6 +25,7 @@ import {
   Download,
   ExternalLink,
   Eye,
+  EyeOff,
   Film,
   HardDrive,
   Loader2,
@@ -238,6 +240,30 @@ function VideoDetailContent() {
       alert(`Cleanup failed: ${msg}`);
     } finally {
       setIsCleaning(false);
+    }
+  };
+
+  const handleToggleIgnore = async () => {
+    if (!video) return;
+    try {
+      const targetIgnored = !video.is_ignored;
+      let reason: string | undefined = undefined;
+      if (targetIgnored) {
+        const inputReason = prompt(
+          "Reason for tagging as Do Not Process (e.g. Too old, Low quality, Wrong game):",
+          "Too old or low quality"
+        );
+        if (inputReason === null) return;
+        reason = inputReason.trim() || "Too old or low quality";
+      }
+      const updated = await updateVideo(video.id, {
+        is_ignored: targetIgnored,
+        ignore_reason: reason,
+      });
+      setVideo(updated);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Failed to update tag: ${msg}`);
     }
   };
 
@@ -541,6 +567,12 @@ function VideoDetailContent() {
 
                 {/* Status Badges */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {video.is_ignored && (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold">
+                      <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Tagged: Do Not Process</span>
+                    </span>
+                  )}
                   {isDownloaded ? (
                     <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
@@ -561,8 +593,50 @@ function VideoDetailContent() {
                   </span>
                 </div>
 
+                {/* Do Not Process Tag Banner & Toggle */}
+                {video.is_ignored ? (
+                  <div className="p-3.5 bg-amber-950/30 border border-amber-500/30 rounded-xl text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <EyeOff className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-amber-300">Tagged as Do Not Process</span>
+                        <p className="text-[11px] text-amber-200/80 mt-0.5">
+                          {video.ignore_reason || "Archived and skipped from downloads & clip creation."}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleIgnore}
+                      className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold rounded-lg self-start sm:self-auto cursor-pointer transition-colors"
+                    >
+                      Mark Active
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between pt-0.5">
+                    <button
+                      type="button"
+                      onClick={handleToggleIgnore}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs font-medium rounded-lg border border-white/10 transition-colors cursor-pointer"
+                    >
+                      <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Tag as Do Not Process</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* Primary Action Button */}
-                {isDownloaded ? (
+                {video.is_ignored ? (
+                  <div className="pt-2">
+                    <Tooltip content="This video is tagged as Do Not Process. Click 'Mark Active' above if you wish to download and generate clips.">
+                      <div className="w-full flex items-center justify-center gap-2 py-3 bg-slate-800/80 text-slate-500 text-xs font-bold rounded-xl border border-white/5 cursor-not-allowed">
+                        <EyeOff className="w-4 h-4 text-slate-500" />
+                        <span>Skipped from Processing (Do Not Process)</span>
+                      </div>
+                    </Tooltip>
+                  </div>
+                ) : isDownloaded ? (
                   <div className="flex flex-col gap-2 pt-2">
                     <button
                       type="button"

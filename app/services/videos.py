@@ -29,6 +29,7 @@ from app.schemas.video import (
     SyncChannelResponse,
     UploadedHighlightSummary,
     VideoBase,
+    VideoBatchTagResponse,
     VideoCreateRequest,
     VideoListResponse,
     VideoResponse,
@@ -227,6 +228,7 @@ class VideoService:
                 )
             elif status == "not_downloaded":
                 query = query.filter(
+                    Video.is_ignored.is_(False),
                     or_(
                         Video.is_downloaded.is_(False),
                         Video.is_downloaded.is_(None),
@@ -279,6 +281,8 @@ class VideoService:
                     Video.is_downloaded.is_(True),
                     Video.id.in_(uploaded_subquery),
                 )
+            elif status in ["ignored", "do_not_process"]:
+                query = query.filter(Video.is_ignored.is_(True))
 
         total = query.count()
         total_pages = math.ceil(total / limit) if total > 0 else 1
@@ -902,10 +906,53 @@ class VideoService:
         ):
             video.duration_formatted = format_duration(video.duration)
 
+        if "is_ignored" in update_data and not update_data["is_ignored"] and "ignore_reason" not in update_data:
+            video.ignore_reason = None
+
         video.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(video)
         return VideoResponse.model_validate(video)
+
+    @staticmethod
+    def batch_tag_videos(
+        db: Session,
+        video_ids: list[str],
+        is_ignored: bool = True,
+        ignore_reason: str | None = None,
+    ) -> VideoBatchTagResponse:
+        """Batch tag videos as ignored (do not process) or active."""
+        if not video_ids:
+            return VideoBatchTagResponse(
+                updated_count=0,
+                video_ids=[],
+                is_ignored=is_ignored,
+                message="No video IDs provided",
+            )
+
+        videos = db.query(Video).filter(Video.id.in_(video_ids)).all()
+        for v in videos:
+            v.is_ignored = is_ignored
+            v.ignore_reason = (
+                (ignore_reason.strip() if ignore_reason else None)
+                if is_ignored
+                else None
+            )
+            v.updated_at = datetime.now(UTC)
+
+        db.commit()
+        count = len(videos)
+        status_label = (
+            "tagged as 'Do Not Process' (ignored)"
+            if is_ignored
+            else "untagged and marked active"
+        )
+        return VideoBatchTagResponse(
+            updated_count=count,
+            video_ids=[v.id for v in videos],
+            is_ignored=is_ignored,
+            message=f"Successfully {status_label} for {count} video(s).",
+        )
 
     @staticmethod
     def delete_video(
@@ -961,6 +1008,12 @@ class VideoService:
         video = db.query(Video).filter(Video.id == video_id).first()
         if not video:
             return None
+
+        if video.is_ignored:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video '{video_id}' is tagged as 'Do Not Process' (ignored). Remove the tag before downloading.",
+            )
 
         if video.download_status == "downloading":
             return DownloadTaskResponse(

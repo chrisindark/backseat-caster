@@ -722,7 +722,7 @@ function StudioWorkspace() {
     <div className="min-h-screen bg-[#090a0f] flex flex-col">
       <Navbar backendHealthy={backendHealthy} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6">
+      <main className="flex-1 w-full max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Navigation Breadcrumbs & Top Info */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-white/5">
           <div className="flex items-center gap-3">
@@ -874,7 +874,7 @@ function StudioWorkspace() {
         ) : (
           <div className="flex flex-col gap-8">
             {/* Main Studio Controls Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-w-0">
               {/* Left Column: Video Scrubber & Playhead Timeline (7 cols) */}
               <div className="lg:col-span-7 flex flex-col gap-4">
                 <div className="p-5 bg-[#12141c] border border-white/10 rounded-2xl shadow-xl flex flex-col gap-4">
@@ -1209,7 +1209,7 @@ function StudioWorkspace() {
                                   {mode.title}
                                 </span>
                                 <span
-                                  className={`text-[9px] font-mono px-1 py-0.2 rounded border inline-block mt-0.5 ${mode.badgeColor}`}
+                                  className={`text-[9px] font-mono px-1 py-0.5 rounded border inline-block mt-0.5 ${mode.badgeColor}`}
                                 >
                                   {mode.id === "custom"
                                     ? `${Math.round(customBlurPadding * 100)}% Blur`

@@ -119,7 +119,7 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
       }`}
     >
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
         <div className="flex items-center gap-3">
           {onToggleJobSelect && (
             <button
@@ -128,7 +128,7 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
                 e.stopPropagation();
                 onToggleJobSelect(job.clip_id);
               }}
-              className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+              className={`w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
                 isJobSelected
                   ? "bg-rose-600 border-rose-500 text-white shadow-sm shadow-rose-900/50"
                   : "bg-slate-950/80 border-white/20 hover:border-white/40 text-transparent hover:text-slate-600"
@@ -193,7 +193,7 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
               <button
                 type="button"
                 onClick={() => onViewRender(job.clip_id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 border border-rose-500/30 text-xs font-medium transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-lg bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 border border-rose-500/30 text-xs font-medium transition-colors cursor-pointer"
               >
                 <Film className="w-3.5 h-3.5" />
                 <span>View Renders</span>
@@ -207,7 +207,7 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
                 type="button"
                 onClick={handleRetry}
                 disabled={isRetrying}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-medium transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-medium transition-colors cursor-pointer"
               >
                 <RotateCcw className={`w-3.5 h-3.5 ${isRetrying ? "animate-spin" : ""}`} />
                 <span>Retry</span>
@@ -239,7 +239,7 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
               </button>

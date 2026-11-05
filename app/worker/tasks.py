@@ -21,6 +21,10 @@ from app.services.renders import (
     render_clip_celery_task,
 )
 from app.services.videos import download_video_celery_task, execute_download_job
+from app.services.youtube_analytics import (
+    execute_sync_analytics_job,
+    sync_video_analytics_celery_task,
+)
 from app.services.youtube_uploader import (
     batch_upload_clips_celery_task,
     upload_clip_celery_task,
@@ -37,7 +41,9 @@ __all__ = [
     "execute_download_job",
     "execute_highlight_detection_job",
     "execute_render_job",
+    "execute_sync_analytics_job",
     "get_task_db_session",
     "render_clip_celery_task",
+    "sync_video_analytics_celery_task",
     "upload_clip_celery_task",
 ]

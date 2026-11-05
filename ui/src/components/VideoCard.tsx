@@ -75,7 +75,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: Math.min(index * 0.04, 0.4) }}
-      className={`group relative flex flex-col bg-[#12141c] hover:bg-[#181b26] rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:shadow-2xl hover:shadow-rose-950/20 ${
+      className={`group relative flex flex-col min-w-0 bg-[#12141c] hover:bg-[#181b26] rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:shadow-2xl hover:shadow-rose-950/20 ${
         isSelected
           ? "ring-2 ring-rose-500 border border-rose-500/50 bg-[#161a29]"
           : video.is_ignored
@@ -126,7 +126,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               e.stopPropagation();
               onToggleSelect(video.id);
             }}
-            className={`absolute bottom-2.5 left-2.5 z-20 w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+            className={`absolute bottom-2.5 left-2.5 z-20 w-8 h-8 rounded-lg min-w-[32px] min-h-[32px] flex items-center justify-center transition-all cursor-pointer ${
               isSelected
                 ? "bg-rose-600 text-white shadow-md shadow-rose-950/60 ring-2 ring-white/30 opacity-100"
                 : "bg-black/70 text-transparent hover:text-white/80 border border-white/20 opacity-0 group-hover:opacity-100"
@@ -165,7 +165,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             </div>
           )}
           {video.is_ignored && (
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900/95 text-amber-300 text-[11px] font-bold backdrop-blur-md shadow-md border border-amber-500/40">
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900/95 text-amber-300 text-xs font-bold backdrop-blur-md shadow-md border border-amber-500/40">
               <EyeOff className="w-3 h-3 text-amber-400" />
               <span>Do Not Process</span>
             </div>
@@ -314,7 +314,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                     <button
                       type="button"
                       onClick={() => onToggleIgnore(video)}
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
                         video.is_ignored
                           ? "text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/30"
                           : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
@@ -330,7 +330,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                   <Tooltip content="Launch Clip Studio to frame and render vertical highlights">
                     <Link
                       href={`/studio/${video.id}`}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold rounded-lg shadow-md shadow-rose-950/30 transition-all cursor-pointer active:scale-95"
+                      className="flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold rounded-lg shadow-md shadow-rose-950/30 transition-all cursor-pointer active:scale-95"
                     >
                       <Scissors className="w-3.5 h-3.5" />
                       <span>Create Clips</span>
@@ -359,7 +359,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                         onDeleteDownload(video.id);
                       }
                     }}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
                       video.can_cleanup_vod
                         ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40 border border-emerald-500/20"
                         : "text-slate-400 hover:text-rose-400 hover:bg-slate-800"
@@ -402,7 +402,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                     <button
                       type="button"
                       onClick={() => onToggleIgnore(video)}
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      className={`p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
                         video.is_ignored
                           ? "text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/30"
                           : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
@@ -424,7 +424,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 ) : (
                   <button
                     onClick={() => onDownload(video.id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-rose-900/30 transition-all cursor-pointer active:scale-95"
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-rose-900/30 transition-all cursor-pointer active:scale-95"
                     title="Download VOD to enable clipping"
                   >
                     <Download className="w-3.5 h-3.5" />

@@ -63,7 +63,7 @@ export default function StudioHubPage() {
     <div className="min-h-screen bg-[#090a0f] text-slate-100 flex flex-col selection:bg-rose-500 selection:text-white">
       <Navbar backendHealthy={backendHealthy} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 w-full max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Header Hero */}
         <section className="relative rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-rose-950/20 border border-white/10 shadow-2xl backdrop-blur-xl overflow-hidden">
           <div className="absolute top-0 right-0 -mt-12 -mr-12 w-96 h-96 bg-rose-600/10 rounded-full blur-3xl pointer-events-none" />
@@ -148,7 +148,7 @@ export default function StudioHubPage() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
               {downloadedVideos.map((video) => (
                 <div
                   key={video.id}

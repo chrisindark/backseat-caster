@@ -147,6 +147,18 @@ class YouTubeQuotaService:
         return cls.get_summary(db)
 
     @classmethod
+    def record_units_used(cls, db: Session, units: int) -> dict[str, Any]:
+        """Record arbitrary units consumed (e.g. 1 unit for statistics polling)."""
+        if units <= 0:
+            return cls.get_summary(db)
+        summary = cls.get_summary(db)
+        usage = cls.get_or_create_usage(db, summary["quota_day"])
+        usage.units_used = int(usage.units_used or 0) + units
+        db.commit()
+        db.refresh(usage)
+        return cls.get_summary(db)
+
+    @classmethod
     def record_upload_failure(
         cls, db: Session, error: YouTubeUploadError
     ) -> dict[str, Any]:

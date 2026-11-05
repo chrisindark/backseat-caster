@@ -181,3 +181,56 @@ class StagedClipsResponse(BaseModel):
     llm_available: bool = Field(
         False, description="Whether an LLM provider is configured for AI copy"
     )
+
+
+# Phase 11: Analytics & Slot Optimization Schemas
+class SlotPerformanceItem(BaseModel):
+    slot: str
+    videos_count: int
+    avg_views: float
+    avg_velocity_3h: float
+    avg_velocity_24h: float
+    engagement_rate: float
+    performance_score: float
+    rank: int = 1
+    recommended: bool = False
+
+
+class SlotAnalyticsResponse(BaseModel):
+    timezone: str
+    total_tracked_videos: int
+    slots: list[SlotPerformanceItem] = Field(default_factory=list)
+    recommended_slots: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class AnalyticsSyncResponse(BaseModel):
+    polled_count: int
+    updated_count: int
+    snapshots_created: int
+    message: str
+
+
+class VelocitySnapshotItem(BaseModel):
+    hours: float
+    views: int
+    likes: int
+    comments: int = 0
+    recorded_at: str | None = None
+
+
+class ClipVelocityTimelineResponse(BaseModel):
+    clip_id: str
+    job_id: str | None = None
+    youtube_video_id: str | None = None
+    latest_views: int = 0
+    latest_likes: int = 0
+    velocity_3h: int = 0
+    velocity_24h: int = 0
+    snapshots: list[VelocitySnapshotItem] = Field(default_factory=list)
+
+
+class ApplyOptimalSlotsResponse(BaseModel):
+    applied_slots: list[str]
+    timezone: str
+    message: str

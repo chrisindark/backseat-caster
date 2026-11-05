@@ -177,7 +177,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
     >
       {/* Top Header: Video Title, Clip ID, Timestamp */}
       <div className="p-4 sm:p-5 border-b border-white/5 space-y-2">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 min-w-0">
           <div className="flex items-start gap-3 min-w-0 flex-1">
             {onToggleCardSelect && (
               <button
@@ -250,7 +250,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
               type="button"
               onClick={() => handleToggleUpload()}
               disabled={isSelecting}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 isSelected
                   ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-950/40 hover:scale-105"
                   : "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 hover:border-rose-500/40"
@@ -358,7 +358,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
               className={`w-full h-full ${activeTab === "landscape" ? "object-contain" : "object-cover"}`}
             />
             <div className="absolute top-2 left-2 pointer-events-none">
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-black/70 backdrop-blur-md text-white border border-white/10">
+              <span className="px-2 py-1 rounded text-[11px] font-semibold bg-black/70 backdrop-blur-md text-white border border-white/10">
                 {MODE_NAMES[activeTab] || activeTab} ({activeTab === "landscape" ? "16:9" : "9:16"})
               </span>
             </div>
@@ -466,7 +466,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
                 : "Standard gameplay audio track preserved at 100% volume."
             }
           >
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1 cursor-help">
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1 cursor-help">
               <Volume2 className="w-3 h-3 text-slate-400" />
               <span>
                 {render.audio_config?.has_narration ? "Voiceover Ducked" : "Original Game Audio"}
@@ -475,7 +475,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
           </Tooltip>
 
           <Tooltip content={`Video Encoder: ${render.outputs?.landscape?.encoder || "Apple VideoToolbox (Hardware Accelerated)"}`}>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1 cursor-help">
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1 cursor-help">
               <Sparkles className="w-3 h-3 text-rose-400" />
               <span>{render.outputs?.landscape?.encoder || "Apple VideoToolbox"}</span>
             </span>
@@ -483,7 +483,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
 
           {(render.render_stats?.total_render_seconds || render.render_duration_seconds) && (
             <Tooltip content="Total FFmpeg rendering wall-clock time across all active aspect ratio formats.">
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-500/20 cursor-help">
+              <span className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-500/20 cursor-help">
                 Rendered in{" "}
                 {render.render_stats?.total_render_seconds ?? render.render_duration_seconds}s
               </span>
@@ -493,7 +493,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
       </div>
 
       {/* Card Footer: Downloads & Management */}
-      <div className="p-4 border-t border-white/10 bg-slate-900/90 flex items-center justify-between gap-3 mt-auto">
+      <div className="p-4 border-t border-white/10 bg-slate-900/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-auto min-w-0">
         {/* Download links */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {availableModes.map((mode) => (
@@ -511,7 +511,7 @@ export const RenderCard: React.FC<RenderCardProps> = ({
         </div>
 
         {/* Audit & Delete Actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => onInspectManifest(render)}

@@ -2,14 +2,17 @@
 
 import { Navbar } from "@/components/Navbar";
 import {
+  applyOptimalSlots,
   checkBackendHealth,
   deleteChannelMusic,
   deleteChannelWatermark,
   fetchChannelProfile,
   fetchPresentationPresets,
+  fetchSlotAnalytics,
   getChannelBrandingPreviewUrl,
   getChannelMusicUrl,
   getChannelWatermarkUrl,
+  syncYouTubeAnalytics,
   updateChannelProfile,
   uploadChannelMusic,
   uploadChannelWatermark,
@@ -20,6 +23,7 @@ import {
   ChannelProfileUpdate,
   PresentationPreset,
   PresentationPresetName,
+  SlotAnalyticsResponse,
 } from "@/types/video";
 import {
   AlertCircle,
@@ -40,6 +44,7 @@ import {
   Smartphone,
   Sparkles,
   Trash2,
+  TrendingUp,
   UploadCloud,
   Zap,
 } from "lucide-react";
@@ -195,6 +200,54 @@ export default function ChannelProfilePage() {
   const [uploadSlots, setUploadSlots] = useState("");
   const [uploadTimezone, setUploadTimezone] = useState("UTC");
 
+  // YouTube Short View Velocity & Optimal Slot Optimizer state
+  const [slotAnalytics, setSlotAnalytics] = useState<SlotAnalyticsResponse | null>(null);
+  const [isLoadingSlotAnalytics, setIsLoadingSlotAnalytics] = useState<boolean>(false);
+  const [isSyncingAnalytics, setIsSyncingAnalytics] = useState<boolean>(false);
+  const [isApplyingOptimalSlots, setIsApplyingOptimalSlots] = useState<boolean>(false);
+
+  const loadSlotAnalytics = useCallback(async () => {
+    setIsLoadingSlotAnalytics(true);
+    try {
+      const data = await fetchSlotAnalytics();
+      setSlotAnalytics(data);
+    } catch (err) {
+      // Non-blocking: analytics may not be ready if no credentials or newly created
+      console.warn("Could not load slot analytics", err);
+    } finally {
+      setIsLoadingSlotAnalytics(false);
+    }
+  }, []);
+
+  const handleSyncAnalytics = async () => {
+    setIsSyncingAnalytics(true);
+    setErrorMsg(null);
+    try {
+      const res = await syncYouTubeAnalytics();
+      flash(res.message || "YouTube video analytics synced successfully.");
+      await loadSlotAnalytics();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to sync YouTube analytics");
+    } finally {
+      setIsSyncingAnalytics(false);
+    }
+  };
+
+  const handleApplyOptimalSlots = async (topN: number = 3) => {
+    setIsApplyingOptimalSlots(true);
+    setErrorMsg(null);
+    try {
+      const res = await applyOptimalSlots(topN);
+      setUploadSlots(res.applied_slots.join(", "));
+      flash(res.message || `Applied top ${topN} optimal slots to channel profile!`);
+      await loadSlotAnalytics();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to apply optimal slots");
+    } finally {
+      setIsApplyingOptimalSlots(false);
+    }
+  };
+
   const applyProfile = useCallback((data: ChannelProfile) => {
     setProfile(data);
     setChannelName(data.channel_name || "");
@@ -282,13 +335,17 @@ export default function ChannelProfilePage() {
       const healthy = await checkBackendHealth();
       if (!mounted) return;
       setBackendHealthy(healthy);
-      if (healthy) await loadProfile();
-      else setIsLoading(false);
+      if (healthy) {
+        await loadProfile();
+        await loadSlotAnalytics();
+      } else {
+        setIsLoading(false);
+      }
     })();
     return () => {
       mounted = false;
     };
-  }, [loadProfile]);
+  }, [loadProfile, loadSlotAnalytics]);
 
   const flash = (message: string) => {
     setSuccessMsg(message);
@@ -469,7 +526,7 @@ export default function ChannelProfilePage() {
     <div className="min-h-screen bg-[#0b0d13] text-slate-100 flex flex-col font-sans selection:bg-rose-500/30 selection:text-white">
       <Navbar backendHealthy={backendHealthy} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 w-full max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
           <div>
             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold mb-2">
@@ -1131,6 +1188,149 @@ export default function ChannelProfilePage() {
                     </datalist>
                   </div>
                 </div>
+              </div>
+
+              {/* Optimal Upload Slot Optimizer & View Velocity */}
+              <div className="p-5 rounded-2xl bg-[#12141c] border border-white/10 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      Optimal Slot Performance &amp; View Velocity
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Calculates initial view velocity (+3h and +24h) for published Shorts via lightweight stats polling, ranking slots by audience engagement.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSyncAnalytics}
+                      disabled={isSyncingAnalytics}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-white/10 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+                    >
+                      {isSyncingAnalytics ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5 text-rose-400" />
+                      )}
+                      Sync Stats Now
+                    </button>
+                    {slotAnalytics && slotAnalytics.slots.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleApplyOptimalSlots(3)}
+                        disabled={isApplyingOptimalSlots}
+                        className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shadow-emerald-950"
+                      >
+                        {isApplyingOptimalSlots ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        Apply Top 3 Slots
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isLoadingSlotAnalytics ? (
+                  <div className="py-6 flex items-center justify-center text-xs text-slate-400 gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-rose-400" />
+                    Loading slot performance data...
+                  </div>
+                ) : !slotAnalytics || slotAnalytics.total_tracked_with_metrics === 0 ? (
+                  <div className="p-4 rounded-xl bg-slate-900/60 border border-white/5 text-xs text-slate-400 flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-300">No performance data recorded yet</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Upload Shorts to YouTube and click &ldquo;Sync Stats Now&rdquo; to analyze views and early velocity patterns across your schedule slots.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span>
+                        Tracked <strong>{slotAnalytics.total_tracked_with_metrics}</strong> videos across slots (Timezone: <strong>{slotAnalytics.timezone}</strong>)
+                      </span>
+                      {slotAnalytics.recommended_slots.length > 0 && (
+                        <span className="text-emerald-400 font-medium flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Recommended: {slotAnalytics.recommended_slots.join(", ")}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {slotAnalytics.slots.map((s) => {
+                        const isTop = s.rank === 1;
+                        const isTop3 = s.rank <= 3;
+                        return (
+                          <div
+                            key={s.slot}
+                            className={`p-3 rounded-xl border transition-all ${
+                              isTop
+                                ? "bg-emerald-950/20 border-emerald-500/40 shadow-sm"
+                                : isTop3
+                                ? "bg-slate-900/80 border-teal-500/20"
+                                : "bg-black/30 border-white/5"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                    isTop
+                                      ? "bg-amber-400 text-black"
+                                      : isTop3
+                                      ? "bg-teal-500/20 text-teal-300 border border-teal-500/30"
+                                      : "bg-slate-800 text-slate-400"
+                                  }`}
+                                >
+                                  #{s.rank}
+                                </span>
+                                <span className="text-sm font-bold text-white font-mono">
+                                  {s.slot}
+                                </span>
+                              </div>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                  s.is_configured
+                                    ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                    : "bg-slate-800 text-slate-400"
+                                }`}
+                              >
+                                {s.is_configured ? "Active Slot" : "Unconfigured"}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-white/5">
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">Avg Views</span>
+                                <span className="font-semibold text-slate-200">
+                                  {s.avg_views.toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">+3h Vel.</span>
+                                <span className="font-semibold text-emerald-400">
+                                  +{s.avg_velocity_3h.toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">Clips</span>
+                                <span className="font-semibold text-slate-300">
+                                  {s.videos_count}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Branded intro & outro cards */}

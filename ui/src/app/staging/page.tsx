@@ -9,6 +9,7 @@ import {
   getYouTubeAuthStatus,
   getYouTubeAuthUrl,
   regenerateClipMetadata,
+  scheduleStagedClip,
   updateUploadSelection,
   uploadClipToYouTube,
   uploadSelectedClipsToYouTube,
@@ -25,7 +26,9 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  Clock,
   ExternalLink,
+  Eye,
   FileJson,
   Gauge,
   History,
@@ -36,6 +39,7 @@ import {
   Smartphone,
   Sparkles,
   Trash2,
+  TrendingUp,
   Tv,
   UploadCloud,
   Wand2,
@@ -45,6 +49,28 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Tooltip, TruncatedText } from "@/components/Tooltip";
 
 export type UploadFormat = string;
+
+function toLocalInputValue(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => `${n}`.padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+function formatSchedule(iso: string | null | undefined): string {
+  if (!iso) return "Unscheduled";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Unscheduled";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 function getDefaultMetadata(item: RenderManifest) {
   const preferred: UploadFormat =
@@ -109,6 +135,10 @@ export default function StagingPage() {
   const [isUploadingBatch, setIsUploadingBatch] = useState<boolean>(false);
   const [uploadedClips, setUploadedClips] = useState<Record<string, YouTubeUploadResult>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // Scheduled publish slot draft state
+  const [draftSchedules, setDraftSchedules] = useState<Record<string, string>>({});
+  const [savingScheduleId, setSavingScheduleId] = useState<string | null>(null);
 
   // AI vs deterministic regeneration
   const [useAiCopy, setUseAiCopy] = useState<boolean>(false);
@@ -236,6 +266,40 @@ export default function StagingPage() {
       setErrorMessage(err instanceof Error ? err.message : "Failed saving staging");
     } finally {
       setSavingId(null);
+    }
+  };
+
+  const handleSaveSchedule = async (clipId: string) => {
+    const draft = draftSchedules[clipId];
+    if (draft === undefined) return;
+    setSavingScheduleId(clipId);
+    setErrorMessage(null);
+    try {
+      const publishAt = draft ? new Date(draft).toISOString() : null;
+      await scheduleStagedClip(clipId, publishAt);
+      setSuccessMessage(publishAt ? `Publish slot updated for ${clipId}` : `Publish slot cleared for ${clipId}`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+      await loadStagingData();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to update publish slot");
+    } finally {
+      setSavingScheduleId(null);
+    }
+  };
+
+  const handleClearSchedule = async (clipId: string) => {
+    setSavingScheduleId(clipId);
+    setErrorMessage(null);
+    try {
+      await scheduleStagedClip(clipId, null);
+      setDraftSchedules((prev) => ({ ...prev, [clipId]: "" }));
+      setSuccessMessage(`Publish slot cleared for ${clipId}`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+      await loadStagingData();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to clear publish slot");
+    } finally {
+      setSavingScheduleId(null);
     }
   };
 
@@ -498,7 +562,7 @@ export default function StagingPage() {
     <div className="min-h-screen bg-[#0a0a0f] text-slate-100 flex flex-col font-sans selection:bg-rose-500/30">
       <Navbar />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 w-full max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Breadcrumb Navigation & Top Toolbar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="space-y-1">
@@ -790,6 +854,24 @@ export default function StagingPage() {
                             Published
                           </span>
                         )}
+                        {render.latest_view_count != null && (
+                          <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Eye className="w-3 h-3" />
+                            {render.latest_view_count.toLocaleString()} views
+                          </span>
+                        )}
+                        {render.velocity_3h != null && (
+                          <span className="text-[10px] font-bold text-teal-300 bg-teal-500/10 border border-teal-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3" />
+                            +{render.velocity_3h.toLocaleString()} / 3h
+                          </span>
+                        )}
+                        {render.scheduled_publish_at && !isAlreadyUploaded && (
+                          <span className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Slot: {formatSchedule(render.scheduled_publish_at)}
+                          </span>
+                        )}
                         {uploadFailed && (
                           <span className="text-[10px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                             <AlertCircle className="w-3 h-3" />
@@ -1040,7 +1122,7 @@ export default function StagingPage() {
 
                   {/* Card Footer: Save & Single Upload Buttons */}
                   <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <button
                         type="button"
                         onClick={() => handleSaveClipMetadata(render.clip_id)}
@@ -1049,6 +1131,46 @@ export default function StagingPage() {
                       >
                         {savingId === render.clip_id ? "Saving..." : "Save Staging"}
                       </button>
+
+                      {/* Schedule slot editor */}
+                      <div className="flex items-center gap-1.5 bg-slate-900 border border-white/10 px-2.5 py-1 rounded-xl">
+                        <Clock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <input
+                          type="datetime-local"
+                          value={
+                            draftSchedules[render.clip_id] !== undefined
+                              ? draftSchedules[render.clip_id]
+                              : toLocalInputValue(render.scheduled_publish_at)
+                          }
+                          onChange={(e) =>
+                            setDraftSchedules((prev) => ({
+                              ...prev,
+                              [render.clip_id]: e.target.value,
+                            }))
+                          }
+                          className="bg-transparent text-[11px] text-slate-200 focus:outline-none"
+                          title="Schedule native YouTube publish time"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveSchedule(render.clip_id)}
+                          disabled={savingScheduleId === render.clip_id}
+                          className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold disabled:opacity-50 transition-colors"
+                        >
+                          {savingScheduleId === render.clip_id ? "Saving..." : "Set Slot"}
+                        </button>
+                        {(draftSchedules[render.clip_id] || render.scheduled_publish_at) && (
+                          <button
+                            type="button"
+                            onClick={() => handleClearSchedule(render.clip_id)}
+                            disabled={savingScheduleId === render.clip_id}
+                            className="text-slate-500 hover:text-slate-300 text-[10px] transition-colors"
+                            title="Clear scheduled slot"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2">

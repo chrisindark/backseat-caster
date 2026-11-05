@@ -13,6 +13,7 @@ from app.models import (  # noqa: F401
     HighlightRun,
     RenderJob,
     Video,
+    VideoAnalyticsSnapshot,
     WatchIngest,
     YouTubeQuotaUsage,
 )

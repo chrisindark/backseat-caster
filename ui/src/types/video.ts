@@ -239,6 +239,12 @@ export interface RenderJobResponse {
   auto_staged?: boolean;
   highlight_candidate_id?: string | null;
   scheduled_publish_at?: string | null;
+  latest_view_count?: number | null;
+  latest_like_count?: number | null;
+  latest_comment_count?: number | null;
+  velocity_3h?: number | null;
+  velocity_24h?: number | null;
+  metrics_last_polled_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   completed_at?: string | null;
@@ -365,6 +371,12 @@ export interface RenderManifest {
   youtube_upload_error?: string | null;
   youtube_uploaded_at?: string | null;
   scheduled_publish_at?: string | null;
+  latest_view_count?: number | null;
+  latest_like_count?: number | null;
+  latest_comment_count?: number | null;
+  velocity_3h?: number | null;
+  velocity_24h?: number | null;
+  metrics_last_polled_at?: string | null;
   youtube_upload?: {
     video_id: string;
     url: string;
@@ -957,4 +969,60 @@ export interface YouTubeCredentialsPayload {
   client_secret?: string;
   refresh_token?: string;
   client_secrets_json?: string;
+}
+
+// -----------------------------------------------------------------------------
+// YouTube Short View Velocity Tracker & Optimal Slot Optimizer Types
+// -----------------------------------------------------------------------------
+
+export interface SlotPerformanceItem {
+  slot: string;
+  videos_count: number;
+  avg_views: number;
+  avg_velocity_3h: number;
+  avg_velocity_24h: number;
+  performance_score: number;
+  is_configured: boolean;
+  rank: number;
+}
+
+export interface SlotAnalyticsResponse {
+  timezone: string;
+  configured_slots: string[];
+  total_uploaded_videos: number;
+  total_tracked_with_metrics: number;
+  slots: SlotPerformanceItem[];
+  recommended_slots: string[];
+}
+
+export interface AnalyticsSyncResponse {
+  status: string;
+  message: string;
+  polled_count?: number;
+  snapshots_created?: number;
+}
+
+export interface VelocitySnapshotItem {
+  recorded_at: string;
+  hours_since_publish: number;
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+}
+
+export interface ClipVelocityTimelineResponse {
+  clip_id: string;
+  youtube_video_id?: string | null;
+  published_at?: string | null;
+  total_views: number;
+  velocity_3h?: number | null;
+  velocity_24h?: number | null;
+  snapshots: VelocitySnapshotItem[];
+}
+
+export interface ApplyOptimalSlotsResponse {
+  status: string;
+  message: string;
+  previous_slots: string[];
+  applied_slots: string[];
 }

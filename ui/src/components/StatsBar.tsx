@@ -69,7 +69,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 p-1 bg-slate-900/80 rounded-xl border border-white/10 overflow-x-auto w-full sm:w-auto">
+      <div className="flex items-center gap-1 p-1 bg-slate-900/80 rounded-xl border border-white/10 overflow-x-auto scrollbar-hide w-full sm:w-auto max-w-full">
         {filters.map((f) => {
           const Icon = f.icon;
           const isActive = activeFilter === f.id;
@@ -77,7 +77,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
             <button
               key={f.id}
               onClick={() => onFilterChange(f.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 min-h-[44px] text-[13px] font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer shrink-0 ${
                 isActive
                   ? "bg-rose-600 text-white shadow-sm shadow-rose-900/50"
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
@@ -87,7 +87,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
               <span>{f.label}</span>
               {f.count !== undefined && f.count > 0 && (
                 <span
-                  className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  className={`ml-1 px-2 py-0.5 rounded-full text-[11px] font-mono ${
                     isActive
                       ? "bg-white/20 text-white font-bold"
                       : "bg-white/5 text-slate-400"

@@ -340,7 +340,7 @@ export default function YouTubeChannelPage() {
         backendHealthy={backendHealthy}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6">
+      <main className="flex-1 w-full max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Offline Warning Banner */}
         {!backendHealthy && (
           <div className="mb-6 p-4 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-200 flex items-center justify-between gap-4">
@@ -520,7 +520,7 @@ export default function YouTubeChannelPage() {
         {/* Action & Sync Controls Bar */}
         <section
           aria-label="Sync Action Bar"
-          className="mt-6 p-4 bg-[#12141c]/95 border border-white/10 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-16 z-30 shadow-2xl backdrop-blur-xl"
+          className="mt-6 p-4 bg-[#12141c]/95 border border-white/10 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-[76px] sm:top-[84px] lg:top-20 z-30 shadow-2xl backdrop-blur-xl"
         >
           {/* Selection controls */}
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -611,7 +611,7 @@ export default function YouTubeChannelPage() {
         {/* Video Grid Section */}
         <section className="mt-6" aria-label="YouTube Channel Videos">
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 py-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5 py-8">
               {Array.from({ length: 8 }).map((_, idx) => (
                 <div
                   key={idx}
@@ -628,7 +628,7 @@ export default function YouTubeChannelPage() {
             </div>
           ) : filteredVideos.length > 0 ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5">
                 {filteredVideos.map((video, idx) => (
                   <YouTubeVideoCard
                     key={video.id}

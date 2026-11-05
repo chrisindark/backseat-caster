@@ -295,11 +295,15 @@ function StudioWorkspace() {
 
   // Stop all video playback on unmount or navigation
   useEffect(() => {
+    const srcEl = sourceVideoRef.current;
+    const leftEl = compareLeftVideoRef.current;
+    const rightEl = compareRightVideoRef.current;
+    const standaloneEl = standaloneVideoRef.current;
     return () => {
-      sourceVideoRef.current?.pause();
-      compareLeftVideoRef.current?.pause();
-      compareRightVideoRef.current?.pause();
-      standaloneVideoRef.current?.pause();
+      srcEl?.pause();
+      leftEl?.pause();
+      rightEl?.pause();
+      standaloneEl?.pause();
     };
   }, []);
 
@@ -1153,8 +1157,17 @@ function StudioWorkspace() {
                       </button>
                       <button
                         type="button"
+                        onClick={handleSelectAllShorts}
+                        className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-purple-500/15 hover:bg-purple-500/30 text-purple-300 hover:text-white border border-purple-500/30 transition-all cursor-pointer"
+                        title="Select all 5 vertical Shorts framing modes"
+                      >
+                        All 9:16 Shorts
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleSelectAllModes}
                         className="px-2 py-0.5 text-[10px] font-medium rounded-lg bg-black/40 hover:bg-black/70 text-slate-300 hover:text-white border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                        title="Select all 6 output modes"
                       >
                         All 6
                       </button>

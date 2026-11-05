@@ -353,6 +353,8 @@ class ChannelProfileService:
             branding_accent_color=branding.accent_color,
             branding_text_color=branding.text_color,
             branding_font_path=branding.font_path,
+            branding_opacity=branding.opacity,
+            branding_style=branding.style,
             max_clip_seconds=cls.duration_budget(db).max_seconds,
             cta_enabled=cta.enabled,
             cta_style=cta.style,
@@ -473,6 +475,10 @@ class ChannelProfileService:
             accent_color=str(pick("accent_color", env.accent_color)),
             text_color=str(pick("text_color", env.text_color)),
             font_path=pick("font_path", env.font_path) or None,
+            opacity=float(pick("opacity", 0.85)),
+            style="overlay"
+            if str(pick("style", env.style)).lower() == "overlay"
+            else "bookend",
         )
 
     @classmethod
@@ -484,8 +490,13 @@ class ChannelProfileService:
         """
         profile = cls.get_or_create(db)
         branding = cls.branding_config(db)
-        bookends = (branding.intro_seconds if branding.has_intro else 0.0) + (
-            branding.outro_seconds if branding.has_outro else 0.0
+        bookends = (
+            0.0
+            if branding.style == "overlay"
+            else (
+                (branding.intro_seconds if branding.has_intro else 0.0)
+                + (branding.outro_seconds if branding.has_outro else 0.0)
+            )
         )
         ceiling = profile.max_clip_seconds
         if ceiling is None:
@@ -695,6 +706,8 @@ class ChannelProfileService:
                     branding_enabled=preset.branding_enabled,
                     branding_intro=preset.branding_intro,
                     branding_outro=preset.branding_outro,
+                    branding_opacity=preset.branding_opacity,
+                    branding_style=preset.branding_style,
                     watermark_enabled=preset.watermark_enabled,
                     watermark_position=preset.watermark_position,
                     watermark_opacity=preset.watermark_opacity,

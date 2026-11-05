@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { YoutubeIcon } from "./icons";
+import { Tooltip, TruncatedText } from "./Tooltip";
 
 export type UploadFormat = string;
 export type UploadPrivacy = "private" | "unlisted" | "public";
@@ -583,12 +584,19 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           </div>
                         </div>
 
-                        <div>
-                          <h4 className="font-semibold text-sm text-slate-100 line-clamp-1">
-                            {render.video_title || render.clip_id}
-                          </h4>
+                        <div className="min-w-0 flex-1">
+                          <TruncatedText
+                            text={render.video_title || render.clip_id}
+                            lines={1}
+                            className="font-semibold text-sm text-slate-100"
+                            tooltipTitle="Video Title"
+                          />
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-400">
-                            <span className="font-mono text-[11px] text-slate-300">{render.clip_id}</span>
+                            <Tooltip content={`Full Clip ID: ${render.clip_id}`}>
+                              <span className="font-mono text-[11px] text-slate-300 truncate max-w-[180px] cursor-help">
+                                {render.clip_id}
+                              </span>
+                            </Tooltip>
                             <span>•</span>
                             <span>
                               {render.clip?.duration_seconds ?? render.request?.duration_seconds ?? 0}s duration

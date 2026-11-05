@@ -21,6 +21,7 @@ import React, { useEffect, useState } from "react";
 import { fetchRenderJobs, fetchSystemHealth } from "@/lib/api";
 import { PreflightReportItem } from "@/types/video";
 import { PreflightModal } from "./PreflightModal";
+import { Tooltip } from "./Tooltip";
 
 interface NavbarProps {
   channelInput?: string;
@@ -204,9 +205,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Layers className="w-3.5 h-3.5" />
               <span>Renders & Jobs</span>
               {activeJobs > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-400/30 animate-pulse">
-                  {activeJobs}
-                </span>
+                <Tooltip content={`${activeJobs} render job${activeJobs > 1 ? "s" : ""} actively processing in background`}>
+                  <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-400/30 animate-pulse cursor-help">
+                    {activeJobs}
+                  </span>
+                </Tooltip>
               )}
             </Link>
 
@@ -260,34 +263,45 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* Backend & Preflight Status indicator */}
-          <button
-            type="button"
-            onClick={() => setIsPreflightModalOpen(true)}
-            title="Click to view system preflight checks & storage diagnostics"
-            className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-white/10 text-xs text-slate-300 transition-colors cursor-pointer"
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                !backendHealthy
-                  ? "bg-rose-500 shadow-sm shadow-rose-500"
-                  : preflightReport && !preflightReport.ready
-                  ? "bg-rose-500 shadow-sm shadow-rose-500 animate-pulse"
-                  : preflightReport?.status === "degraded"
-                  ? "bg-amber-400 shadow-sm shadow-amber-400"
-                  : "bg-emerald-400 shadow-sm shadow-emerald-400"
-              }`}
-            />
-            <span className="font-medium">
-              {!backendHealthy
-                ? "API Offline"
+          <Tooltip
+            content={
+              !backendHealthy
+                ? "FastAPI Backend is currently unreachable. Make sure uvicorn is running."
                 : preflightReport && !preflightReport.ready
-                ? "Preflight Error"
+                ? `System dependencies missing (${preflightReport.errors.length} issue${preflightReport.errors.length > 1 ? "s" : ""}). Click to view instructions.`
                 : preflightReport?.status === "degraded"
-                ? "Low Storage"
-                : "API Ready"}
-            </span>
-            <Zap className="w-3 h-3 text-slate-500 hover:text-slate-300 ml-0.5" />
-          </button>
+                ? "Storage warning: disk space is running low. Click to inspect diagnostics."
+                : "FastAPI Backend & local render engine fully initialized and operational."
+            }
+          >
+            <button
+              type="button"
+              onClick={() => setIsPreflightModalOpen(true)}
+              className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-white/10 text-xs text-slate-300 transition-colors cursor-pointer"
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  !backendHealthy
+                    ? "bg-rose-500 shadow-sm shadow-rose-500"
+                    : preflightReport && !preflightReport.ready
+                    ? "bg-rose-500 shadow-sm shadow-rose-500 animate-pulse"
+                    : preflightReport?.status === "degraded"
+                    ? "bg-amber-400 shadow-sm shadow-amber-400"
+                    : "bg-emerald-400 shadow-sm shadow-emerald-400"
+                }`}
+              />
+              <span className="font-medium">
+                {!backendHealthy
+                  ? "API Offline"
+                  : preflightReport && !preflightReport.ready
+                  ? "Preflight Error"
+                  : preflightReport?.status === "degraded"
+                  ? "Low Storage"
+                  : "API Ready"}
+              </span>
+              <Zap className="w-3 h-3 text-slate-500 hover:text-slate-300 ml-0.5" />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Search Input (if callback provided) */}

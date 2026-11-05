@@ -15,6 +15,7 @@ import {
   HighlightStatusResponse,
 } from "@/types/video";
 import { AnimatePresence, motion } from "framer-motion";
+import { Tooltip, TruncatedText } from "./Tooltip";
 import {
   AlertCircle,
   Award,
@@ -1088,27 +1089,33 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                           <div>
                             {/* Suggested Shorts Title */}
                             <div className="flex items-start justify-between gap-1.5 mb-1.5">
-                              <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
-                                {candidate.suggested_title || `${badge.label} Highlight`}
-                              </h4>
+                              <div className="min-w-0 flex-1">
+                                <TruncatedText
+                                  text={candidate.suggested_title || `${badge.label} Highlight`}
+                                  lines={2}
+                                  className="text-xs font-bold text-white leading-snug"
+                                  tooltipTitle="Suggested Title"
+                                />
+                              </div>
                               {candidate.suggested_title && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleCopyTitle(
-                                      candidate.candidate_id,
-                                      candidate.suggested_title
-                                    )
-                                  }
-                                  title="Copy suggested Shorts title"
-                                  className="p-1 rounded bg-black/40 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
-                                >
-                                  {copiedTitleId === candidate.candidate_id ? (
-                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  ) : (
-                                    <Copy className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
+                                <Tooltip content="Copy suggested YouTube Shorts title to clipboard">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleCopyTitle(
+                                        candidate.candidate_id,
+                                        candidate.suggested_title
+                                      )
+                                    }
+                                    className="p-1 rounded bg-black/40 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                                  >
+                                    {copiedTitleId === candidate.candidate_id ? (
+                                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </Tooltip>
                               )}
                             </div>
 

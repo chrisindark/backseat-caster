@@ -40,6 +40,12 @@ class Video(Base):
     download_progress = Column(Float, default=0.0)
     error_message = Column(Text, nullable=True)
 
+    # Ignored / Do Not Process state (tracking old or low-value videos to skip downloads/clipping)
+    is_ignored = Column(
+        Boolean, default=False, server_default="0", index=True, nullable=False
+    )
+    ignore_reason = Column(String(256), nullable=True)
+
     # Highlight candidate mining state
     highlight_status = Column(
         String(32), default="idle", index=True
@@ -89,6 +95,8 @@ class Video(Base):
             "download_status": self.download_status,
             "download_progress": self.download_progress,
             "error_message": self.error_message,
+            "is_ignored": bool(self.is_ignored),
+            "ignore_reason": self.ignore_reason,
             "highlight_status": self.highlight_status or "idle",
             "highlight_progress": self.highlight_progress or 0.0,
             "highlight_stage": self.highlight_stage or "",

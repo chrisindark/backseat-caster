@@ -2,6 +2,7 @@
 
 import { RenderJobResponse } from "@/types/video";
 import { YoutubeIcon } from "./icons";
+import { Tooltip, TruncatedText } from "./Tooltip";
 import {
   AlertCircle,
   Check,
@@ -172,38 +173,46 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
           )}
 
           {/* Preset Pill */}
-          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-white/5">
-            {job.crop_preset || "third_person"}
-          </span>
+          <Tooltip content={`Framing Crop Preset: ${job.crop_preset || "third_person"}`}>
+            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-white/5 cursor-help">
+              {job.crop_preset || "third_person"}
+            </span>
+          </Tooltip>
 
-          <span className="text-xs text-slate-400 font-mono hidden sm:inline">
-            {job.job_id}
-          </span>
+          <Tooltip content={`Background Job ID: ${job.job_id}`}>
+            <span className="text-xs text-slate-400 font-mono hidden sm:inline cursor-help">
+              {job.job_id}
+            </span>
+          </Tooltip>
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
           {job.status === "completed" && onViewRender && (
-            <button
-              type="button"
-              onClick={() => onViewRender(job.clip_id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 border border-rose-500/30 text-xs font-medium transition-colors"
-            >
-              <Film className="w-3.5 h-3.5" />
-              <span>View Renders</span>
-            </button>
+            <Tooltip content="Switch to gallery and inspect rendered formats">
+              <button
+                type="button"
+                onClick={() => onViewRender(job.clip_id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 border border-rose-500/30 text-xs font-medium transition-colors cursor-pointer"
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>View Renders</span>
+              </button>
+            </Tooltip>
           )}
 
           {job.status === "failed" && (
-            <button
-              type="button"
-              onClick={handleRetry}
-              disabled={isRetrying}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-medium transition-colors"
-            >
-              <RotateCcw className={`w-3.5 h-3.5 ${isRetrying ? "animate-spin" : ""}`} />
-              <span>Retry</span>
-            </button>
+            <Tooltip content="Re-run the FFmpeg rendering pipeline for this highlight">
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={isRetrying}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-medium transition-colors cursor-pointer"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isRetrying ? "animate-spin" : ""}`} />
+                <span>Retry</span>
+              </button>
+            </Tooltip>
           )}
 
           {showDeleteConfirm ? (
@@ -226,14 +235,15 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-              title="Delete Job"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <Tooltip content="Permanently delete job and associated rendered files">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -256,12 +266,17 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
 
       {/* Details Row */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 text-xs">
-        <div className="space-y-1">
-          <h4 className="font-semibold text-slate-100 line-clamp-1">
-            {job.video_title || `Video ${job.video_id}`}
-          </h4>
+        <div className="space-y-1 min-w-0 flex-1">
+          <TruncatedText
+            text={job.video_title || `Video ${job.video_id}`}
+            lines={1}
+            className="font-semibold text-slate-100"
+            tooltipTitle="VOD Title"
+          />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-400 font-mono text-[11px]">
-            <span>Clip: {job.clip_id}</span>
+            <Tooltip content={`Full Clip ID: ${job.clip_id}`}>
+              <span className="cursor-help">Clip: {job.clip_id}</span>
+            </Tooltip>
             <span>•</span>
             <span>
               Start: {startFormatted} ({Math.round(job.duration_seconds)}s)
@@ -269,24 +284,30 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
             {job.encoder && (
               <>
                 <span>•</span>
-                <span>Encoder: {job.encoder}</span>
+                <Tooltip content={`FFmpeg hardware/software encoder used: ${job.encoder}`}>
+                  <span className="cursor-help">Encoder: {job.encoder}</span>
+                </Tooltip>
               </>
             )}
             {job.render_duration_seconds && (
               <>
                 <span>•</span>
-                <span className="text-emerald-400 font-medium">
-                  {job.render_duration_seconds.toFixed(1)}s elapsed
-                </span>
+                <Tooltip content="Total render elapsed time">
+                  <span className="text-emerald-400 font-medium cursor-help">
+                    {job.render_duration_seconds.toFixed(1)}s elapsed
+                  </span>
+                </Tooltip>
               </>
             )}
           </div>
         </div>
 
         {job.created_at && (
-          <div className="text-right text-[11px] text-slate-500 shrink-0">
-            <span>{new Date(job.created_at).toLocaleString()}</span>
-          </div>
+          <Tooltip content={`Job queued at ${new Date(job.created_at).toLocaleString()}`}>
+            <div className="text-right text-[11px] text-slate-500 shrink-0 cursor-help">
+              <span>{new Date(job.created_at).toLocaleString()}</span>
+            </div>
+          </Tooltip>
         )}
       </div>
 
@@ -301,18 +322,20 @@ export const RenderJobRow: React.FC<RenderJobRowProps> = ({
             <button
               type="button"
               onClick={() => setShowErrorDetails((v) => !v)}
-              className="text-[11px] underline text-rose-400"
+              className="text-[11px] underline text-rose-400 cursor-pointer"
             >
               {showErrorDetails ? "Collapse" : "Expand"}
             </button>
           </div>
-          <p
-            className={`font-mono text-[11px] text-rose-200/90 ${
-              showErrorDetails ? "whitespace-pre-wrap" : "line-clamp-2"
-            }`}
-          >
-            {job.error_message}
-          </p>
+          <Tooltip content={showErrorDetails ? undefined : job.error_message} disabled={showErrorDetails}>
+            <p
+              className={`font-mono text-[11px] text-rose-200/90 ${
+                showErrorDetails ? "whitespace-pre-wrap" : "line-clamp-2 cursor-help"
+              }`}
+            >
+              {job.error_message}
+            </p>
+          </Tooltip>
         </div>
       )}
     </div>

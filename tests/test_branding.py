@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -400,6 +402,7 @@ def test_execute_render_job_applies_configured_branding(
                 branding_enabled=True,
                 branding_intro_seconds=1.0,
                 branding_outro_seconds=2.0,
+                branding_style="bookend",
                 max_clip_seconds=15.0,
                 cta_enabled=True,
                 cta_style="outro_card",
@@ -458,3 +461,172 @@ def test_execute_render_job_applies_configured_branding(
     finally:
         session.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_render_card_png_opacity(tmp_path: Path):
+    """Verify render_card_png respects opacity on the background while keeping accents crisp."""
+    # 75% opacity
+    card_75 = tmp_path / "card_75.png"
+    render_card_png(
+        card_75,
+        size=(640, 360),
+        title="NIGHTOWL",
+        subtitle="Highlights",
+        opacity=0.75,
+        kind="intro",
+    )
+    img = Image.open(card_75)
+    assert img.mode == "RGBA"
+    # Background sample (middle left where no text or rule is drawn)
+    bg_pixel = img.getpixel((20, 180))
+    # Alpha should be around int(255 * 0.75) = 191
+    assert 180 <= bg_pixel[3] <= 200
+
+    # 0% opacity (transparent backdrop)
+    card_0 = tmp_path / "card_0.png"
+    render_card_png(
+        card_0,
+        size=(640, 360),
+        title="NIGHTOWL",
+        subtitle="Highlights",
+        opacity=0.0,
+        kind="intro",
+    )
+    img_0 = Image.open(card_0)
+    assert img_0.getpixel((20, 180))[3] == 0
+
+    # Top accent rule is always fully opaque (alpha = 255)
+    rule_pixel = img_0.getpixel((320, 2))
+    assert rule_pixel[3] == 255
+
+
+def test_branding_plan_overlay_vs_bookend_padding(tmp_path: Path):
+    """Verify overlay style does not add runtime padding, while bookend style adds card lengths."""
+    # Overlay style -> padding_seconds is 0.0
+    overlay_plan = build_branding_plan(
+        config=BrandingConfig(
+            enabled=True,
+            style="overlay",
+            opacity=0.75,
+            intro_seconds=1.2,
+            outro_seconds=2.0,
+        ),
+        sizes={"landscape": (640, 360)},
+        card_dir=tmp_path / "overlay_cards",
+    )
+    assert overlay_plan is not None
+    assert overlay_plan.padding_seconds == 0.0
+    desc = overlay_plan.describe(total_duration=10.0)
+    assert desc["style"] == "overlay"
+    assert desc["opacity"] == 0.75
+    assert desc["padding_seconds"] == 0.0
+    assert desc["total_duration_seconds"] == 10.0
+
+    # Bookend style -> padding_seconds is 1.2 + 2.0 = 3.2
+    bookend_plan = build_branding_plan(
+        config=BrandingConfig(
+            enabled=True,
+            style="bookend",
+            intro_seconds=1.2,
+            outro_seconds=2.0,
+        ),
+        sizes={"landscape": (640, 360)},
+        card_dir=tmp_path / "bookend_cards",
+    )
+    assert bookend_plan is not None
+    assert bookend_plan.padding_seconds == pytest.approx(3.2)
+
+
+def test_render_overlay_branding_shows_gameplay_behind_cards(
+    brand_assets: dict[str, Path], tmp_path: Path
+):
+    """Verify in-video overlay mode keeps gameplay moving behind translucent cards."""
+    out_dir = tmp_path / "overlay_render"
+    config = RenderConfig(
+        landscape_width=640,
+        landscape_height=360,
+        vertical_width=360,
+        vertical_height=640,
+        modes=["landscape"],
+        preferred_encoder="libx264",
+        output_directory=str(out_dir),
+        branding=BrandingConfig(
+            enabled=True,
+            style="overlay",
+            opacity=0.70,
+            intro=True,
+            outro=True,
+            intro_seconds=1.0,
+            outro_seconds=1.0,
+            intro_title="MATCH HIGHLIGHTS",
+            outro_title="SUBSCRIBE",
+        ),
+    )
+    engine = RenderEngine(config=config)
+    result = engine.render_clip(
+        source_path=brand_assets["video"],
+        output_dir=out_dir,
+        start_seconds=0.0,
+        duration_seconds=3.0,
+        clip_id="overlay_clip",
+    )
+    assert result.clip_id == "overlay_clip"
+    out_file = out_dir / "landscape.mp4"
+    assert out_file.exists()
+
+    # In overlay mode, duration is NOT expanded by 2.0s of bookends
+    duration = _probe_duration(out_file)
+    assert 2.8 <= duration <= 3.2
+
+    # Inspect frames with OpenCV
+    cap_src = cv2.VideoCapture(str(brand_assets["video"]))
+    cap_out = cv2.VideoCapture(str(out_file))
+
+    # At t=0.5s (during intro card):
+    cap_src.set(cv2.CAP_PROP_POS_MSEC, 500)
+    cap_out.set(cv2.CAP_PROP_POS_MSEC, 500)
+    ret1, f_src = cap_src.read()
+    ret2, f_out = cap_out.read()
+    assert ret1 and ret2
+
+    # In background area of intro card (e.g. y in [100, 200], x in [50, 200]):
+    # The output frame is NOT solid dark (#0B0D13 -> [19, 13, 11] in BGR)
+    # The gameplay colors/motion are blended through at 70% opacity
+    region_out = f_out[100:200, 50:200]
+    region_src = f_src[100:200, 50:200]
+    # Check that pixels are not clamped to pure static background color
+    assert np.std(region_out) > 5.0, (
+        "Card background is completely flat/solid, expected gameplay variation"
+    )
+    # Check difference with bare source reflects the overlay presence
+    diff_intro = float(
+        np.mean(np.abs(region_out.astype(float) - region_src.astype(float)))
+    )
+    assert diff_intro > 10.0, "Overlay was not detected during intro window"
+
+    # At t=2.0s (outside intro and outro windows, clip is 3.0s, outro is last 1.0s [2.0-3.0s]):
+    # Sample at t=1.5s (clean middle gameplay):
+    cap_src.set(cv2.CAP_PROP_POS_MSEC, 1500)
+    cap_out.set(cv2.CAP_PROP_POS_MSEC, 1500)
+    ret3, f_src_mid = cap_src.read()
+    ret4, f_out_mid = cap_out.read()
+    assert ret3 and ret4
+    diff_mid = float(
+        np.mean(
+            np.abs(
+                f_out_mid[100:200, 50:200].astype(float)
+                - f_src_mid[100:200, 50:200].astype(float)
+            )
+        )
+    )
+    # In middle window without cards, output matches source
+    assert diff_mid < 1.0, f"Expected clean gameplay at t=1.5s, diff was {diff_mid}"
+
+    cap_src.release()
+    cap_out.release()
+
+    manifest = json.loads((out_dir / "manifest.json").read_text())
+    assert manifest["branding"]["enabled"] is True
+    assert manifest["branding"]["style"] == "overlay"
+    assert manifest["branding"]["opacity"] == 0.70
+    assert manifest["branding"]["padding_seconds"] == 0.0

@@ -89,9 +89,10 @@ export const VideoModal: React.FC<VideoModalProps> = ({
 
   // Stop playback when video changes or unmounts
   useEffect(() => {
+    const el = videoRef.current;
     return () => {
       try {
-        videoRef.current?.pause();
+        el?.pause();
       } catch {}
     };
   }, [video?.id]);

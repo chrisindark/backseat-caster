@@ -62,6 +62,8 @@ class AutoMineService:
             return False, "auto-mine disabled"
         if video is None:
             return False, "video not found"
+        if bool(getattr(video, "is_ignored", False)):
+            return False, "video is tagged as ignored (do not process)"
         if not video.is_downloaded or video.download_status != "completed":
             return False, "video is not locally available"
         if video.highlight_status in _ALREADY_MINED_STATES:

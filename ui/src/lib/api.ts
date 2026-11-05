@@ -27,6 +27,7 @@ import {
   StagedClipsResponse,
   SystemHealthResponse,
   UpdateSetupSettingsPayload,
+  VideoBatchTagResponse,
   VideoItem,
   VideoListResponse,
   VideoStorageCleanupOptions,
@@ -238,6 +239,23 @@ export async function updateVideo(videoId: string, data: Partial<VideoItem>): Pr
     body: JSON.stringify(data),
   });
   return parseResponse<VideoItem>(res, `update video ${videoId}`);
+}
+
+export async function batchTagVideos(
+  videoIds: string[],
+  isIgnored: boolean = true,
+  ignoreReason?: string | null
+): Promise<VideoBatchTagResponse> {
+  const res = await fetch(`${API_BASE}/videos/batch-tag`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      video_ids: videoIds,
+      is_ignored: isIgnored,
+      ignore_reason: ignoreReason,
+    }),
+  });
+  return parseResponse<VideoBatchTagResponse>(res, "batch tag videos");
 }
 
 export async function deleteVideo(videoId: string, deleteFile = true): Promise<{ status: string; message?: string }> {
@@ -722,6 +740,32 @@ export async function deleteChannelWatermark(): Promise<ChannelProfile> {
 
 export function getChannelWatermarkUrl(version?: string | null): string {
   return `${API_BASE}/channel/watermark${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+}
+
+export function getChannelBrandingPreviewUrl(params: {
+  kind: "intro" | "outro" | "overlay";
+  orientation?: "landscape" | "vertical";
+  title?: string;
+  subtitle?: string;
+  accent?: string;
+  background?: string;
+  text_color?: string;
+  t?: number;
+}): string {
+  const q = new URLSearchParams();
+  q.set("kind", params.kind);
+  if (params.orientation) q.set("orientation", params.orientation);
+  if (params.title !== undefined && params.title !== null && params.title.trim() !== "") {
+    q.set("title", params.title.trim());
+  }
+  if (params.subtitle !== undefined && params.subtitle !== null && params.subtitle.trim() !== "") {
+    q.set("subtitle", params.subtitle.trim());
+  }
+  if (params.accent) q.set("accent", params.accent);
+  if (params.background) q.set("background", params.background);
+  if (params.text_color) q.set("text_color", params.text_color);
+  if (params.t !== undefined) q.set("t", String(params.t));
+  return `${API_BASE}/channel/branding/preview?${q.toString()}`;
 }
 
 export async function uploadChannelMusic(

@@ -3,6 +3,7 @@
 import { getStreamUrl } from "@/lib/api";
 import { RenderManifest } from "@/types/video";
 import { YoutubeIcon } from "./icons";
+import { Tooltip, TruncatedText } from "./Tooltip";
 import {
   Check,
   Clock,
@@ -102,9 +103,11 @@ export const RenderCard: React.FC<RenderCardProps> = ({
 
   // Stop playback when switching preview tabs or on unmount
   useEffect(() => {
+    const blurEl = blurVideoRef.current;
+    const cropEl = cropVideoRef.current;
     return () => {
-      blurVideoRef.current?.pause();
-      cropVideoRef.current?.pause();
+      blurEl?.pause();
+      cropEl?.pause();
     };
   }, [activeTab]);
 
@@ -220,35 +223,47 @@ export const RenderCard: React.FC<RenderCardProps> = ({
                   </a>
                 )}
 
-                <span className="text-xs text-slate-400 font-medium">
-                  {render.channel_name || "VOD"}
-                </span>
+                <Tooltip content={`Channel / Source: ${render.channel_name || "Gameplay VOD"}`}>
+                  <span className="text-xs text-slate-400 font-medium truncate max-w-[150px] inline-block">
+                    {render.channel_name || "VOD"}
+                  </span>
+                </Tooltip>
               </div>
-              <h3 className="font-bold text-sm sm:text-base text-slate-100 line-clamp-1 group-hover:text-rose-200 transition-colors">
-                {render.video_title || render.clip_id}
-              </h3>
+              <TruncatedText
+                text={render.video_title || render.clip_id}
+                lines={1}
+                className="font-bold text-sm sm:text-base text-slate-100 group-hover:text-rose-200 transition-colors"
+                tooltipTitle="Full Video Title"
+              />
             </div>
           </div>
 
           {/* Upload Selection Star Badge */}
-          <button
-            type="button"
-            onClick={() => handleToggleUpload()}
-            disabled={isSelecting}
-            title={isSelected ? "Remove from upload staging" : "Choose for upload"}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+          <Tooltip
+            content={
               isSelected
-                ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-950/40 hover:scale-105"
-                : "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 hover:border-rose-500/40"
-            }`}
+                ? "Click to remove this clip from the YouTube upload staging queue"
+                : "Stage this clip for batch publishing to YouTube"
+            }
           >
-            <Star
-              className={`w-3.5 h-3.5 ${
-                isSelected ? "fill-white text-white" : "text-amber-400"
+            <button
+              type="button"
+              onClick={() => handleToggleUpload()}
+              disabled={isSelecting}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                isSelected
+                  ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-950/40 hover:scale-105"
+                  : "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 hover:border-rose-500/40"
               }`}
-            />
-            <span>{isSelected ? "Chosen for Upload" : "Choose for Upload"}</span>
-          </button>
+            >
+              <Star
+                className={`w-3.5 h-3.5 ${
+                  isSelected ? "fill-white text-white" : "text-amber-400"
+                }`}
+              />
+              <span>{isSelected ? "Chosen for Upload" : "Choose for Upload"}</span>
+            </button>
+          </Tooltip>
         </div>
 
         {/* Clip range metadata */}
@@ -260,18 +275,22 @@ export const RenderCard: React.FC<RenderCardProps> = ({
             </span>
           </div>
           <span>•</span>
-          <span className="text-[11px] text-slate-500 truncate max-w-[200px]">
-            {render.clip_id}
-          </span>
+          <Tooltip content={`Clip Identifier: ${render.clip_id}`}>
+            <span className="text-[11px] text-slate-500 truncate max-w-[200px] cursor-help">
+              {render.clip_id}
+            </span>
+          </Tooltip>
           {render.created_at && (
             <>
               <span>•</span>
-              <span className="text-[11px] text-slate-500">
-                {new Date(render.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
+              <Tooltip content={`Rendered on ${new Date(render.created_at).toLocaleString()}`}>
+                <span className="text-[11px] text-slate-500 cursor-help">
+                  {new Date(render.created_at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </Tooltip>
             </>
           )}
         </div>
@@ -440,21 +459,35 @@ export const RenderCard: React.FC<RenderCardProps> = ({
 
         {/* Audio and engine tags */}
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1">
-            <Volume2 className="w-3 h-3 text-slate-400" />
-            <span>
-              {render.audio_config?.has_narration ? "Voiceover Ducked" : "Original Game Audio"}
+          <Tooltip
+            content={
+              render.audio_config?.has_narration
+                ? "Narration voiceover track applied with automatic sidechain ducking of gameplay audio."
+                : "Standard gameplay audio track preserved at 100% volume."
+            }
+          >
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1 cursor-help">
+              <Volume2 className="w-3 h-3 text-slate-400" />
+              <span>
+                {render.audio_config?.has_narration ? "Voiceover Ducked" : "Original Game Audio"}
+              </span>
             </span>
-          </span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-rose-400" />
-            <span>{render.outputs?.landscape?.encoder || "Apple VideoToolbox"}</span>
-          </span>
+          </Tooltip>
+
+          <Tooltip content={`Video Encoder: ${render.outputs?.landscape?.encoder || "Apple VideoToolbox (Hardware Accelerated)"}`}>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/5 flex items-center gap-1 cursor-help">
+              <Sparkles className="w-3 h-3 text-rose-400" />
+              <span>{render.outputs?.landscape?.encoder || "Apple VideoToolbox"}</span>
+            </span>
+          </Tooltip>
+
           {(render.render_stats?.total_render_seconds || render.render_duration_seconds) && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-500/20">
-              Rendered in{" "}
-              {render.render_stats?.total_render_seconds ?? render.render_duration_seconds}s
-            </span>
+            <Tooltip content="Total FFmpeg rendering wall-clock time across all active aspect ratio formats.">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-500/20 cursor-help">
+                Rendered in{" "}
+                {render.render_stats?.total_render_seconds ?? render.render_duration_seconds}s
+              </span>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -464,15 +497,16 @@ export const RenderCard: React.FC<RenderCardProps> = ({
         {/* Download links */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {availableModes.map((mode) => (
-            <a
-              key={mode}
-              href={getStreamUrl(render.clip_id, mode)}
-              download={`${render.clip_id}_${mode}.mp4`}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/5 text-xs font-medium transition-colors"
-            >
-              <Download className="w-3 h-3 text-rose-400" />
-              <span>{mode.replace("_", " ")} (.mp4)</span>
-            </a>
+            <Tooltip key={mode} content={`Download ${MODE_NAMES[mode] || mode} as offline MP4 file`}>
+              <a
+                href={getStreamUrl(render.clip_id, mode)}
+                download={`${render.clip_id}_${mode}.mp4`}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/5 text-xs font-medium transition-colors cursor-pointer"
+              >
+                <Download className="w-3 h-3 text-rose-400" />
+                <span>{mode.replace("_", " ")} (.mp4)</span>
+              </a>
+            </Tooltip>
           ))}
         </div>
 

@@ -30,6 +30,8 @@ class PresentationPresetDefinition(BaseModel):
     branding_enabled: bool = False
     branding_intro: bool = False
     branding_outro: bool = False
+    branding_opacity: float = 0.85
+    branding_style: Literal["overlay", "bookend"] = "overlay"
 
     # Watermark
     watermark_enabled: bool = True

@@ -6,22 +6,27 @@ import { Pagination } from "@/components/Pagination";
 import { StatsBar } from "@/components/StatsBar";
 import { VideoCard } from "@/components/VideoCard";
 import {
+  batchTagVideos,
   checkBackendHealth,
   deleteVideoDownload,
   downloadVideo,
   fetchVideos,
   syncChannel,
+  updateVideo,
 } from "@/lib/api";
 import { getQueryParam, setQueryParams } from "@/lib/modalHistory";
 import { VideoItem } from "@/types/video";
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   Compass,
+  EyeOff,
   Film,
   RefreshCw,
   Sparkles,
   Tv,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -56,6 +61,14 @@ function HomeContent() {
   const [highlightsMinedTotal, setHighlightsMinedTotal] = useState<number>(0);
   const [uploadedTotal, setUploadedTotal] = useState<number>(0);
   const [cleanupReadyTotal, setCleanupReadyTotal] = useState<number>(0);
+  const [ignoredTotal, setIgnoredTotal] = useState<number>(0);
+
+  // Selection & Batch Tagging
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isTagModalOpen, setIsTagModalOpen] = useState<boolean>(false);
+  const [selectedReasonPreset, setSelectedReasonPreset] = useState<string>("Too old or low quality");
+  const [customReasonText, setCustomReasonText] = useState<string>("");
+  const [isBatchUpdating, setIsBatchUpdating] = useState<boolean>(false);
 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -69,13 +82,14 @@ function HomeContent() {
 
   const refreshCounts = useCallback(async () => {
     try {
-      const [dlData, allData, ingData, hlData, upData, clData] = await Promise.all([
+      const [dlData, allData, ingData, hlData, upData, clData, ignData] = await Promise.all([
         fetchVideos({ status: "downloaded", limit: 1 }),
         fetchVideos({ status: "all", limit: 1 }),
         fetchVideos({ status: "downloading", limit: 1 }),
         fetchVideos({ status: "highlights_mined", limit: 1 }),
         fetchVideos({ status: "uploaded", limit: 1 }),
         fetchVideos({ status: "cleanup_ready", limit: 1 }),
+        fetchVideos({ status: "ignored", limit: 1 }),
       ]);
       setDownloadedTotal(dlData.total);
       setCataloguedTotal(allData.total);
@@ -83,6 +97,7 @@ function HomeContent() {
       setHighlightsMinedTotal(hlData.total);
       setUploadedTotal(upData.total);
       setCleanupReadyTotal(clData.total);
+      setIgnoredTotal(ignData.total);
     } catch {
       // ignore
     }
@@ -127,6 +142,8 @@ function HomeContent() {
           setUploadedTotal(data.total);
         } else if (currentFilter === "cleanup_ready" && !currentSearch) {
           setCleanupReadyTotal(data.total);
+        } else if (currentFilter === "ignored" && !currentSearch) {
+          setIgnoredTotal(data.total);
         }
 
         // Check if any video is actively downloading
@@ -307,6 +324,72 @@ function HomeContent() {
     }
   };
 
+  // Selection Handlers
+  const handleToggleSelect = useCallback((videoId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(videoId)) next.delete(videoId);
+      else next.add(videoId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllOnPage = useCallback(() => {
+    setSelectedIds(new Set(videos.map((v) => v.id)));
+  }, [videos]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  // Batch Tag Videos
+  const handleBatchTag = useCallback(
+    async (isIgnored: boolean, reason?: string) => {
+      if (selectedIds.size === 0) return;
+      setIsBatchUpdating(true);
+      try {
+        const ids = Array.from(selectedIds);
+        const res = await batchTagVideos(ids, isIgnored, reason);
+        setSyncMessage(res.message);
+        setSelectedIds(new Set());
+        setIsTagModalOpen(false);
+        await loadVideos(page, limit, activeFilter, searchQuery);
+        await refreshCounts();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        setLoadError(message);
+      } finally {
+        setIsBatchUpdating(false);
+      }
+    },
+    [selectedIds, page, limit, activeFilter, searchQuery, loadVideos, refreshCounts]
+  );
+
+  // Single video quick toggle ignore
+  const handleToggleIgnoreSingle = useCallback(
+    async (video: VideoItem) => {
+      try {
+        const targetIgnored = !video.is_ignored;
+        const reason = targetIgnored ? "Too old or low quality" : undefined;
+        await updateVideo(video.id, {
+          is_ignored: targetIgnored,
+          ignore_reason: reason,
+        });
+        setSyncMessage(
+          targetIgnored
+            ? `Tagged "${video.title.slice(0, 40)}..." as Do Not Process`
+            : `Marked "${video.title.slice(0, 40)}..." as active`
+        );
+        await loadVideos(page, limit, activeFilter, searchQuery);
+        await refreshCounts();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        setLoadError(message);
+      }
+    },
+    [page, limit, activeFilter, searchQuery, loadVideos, refreshCounts]
+  );
+
   // Filter change
   const handleFilterChange = (filter: string) => {
     if (searchTimeoutRef.current) {
@@ -440,12 +523,13 @@ function HomeContent() {
           highlightsMinedCount={highlightsMinedTotal}
           uploadedCount={uploadedTotal}
           cleanupReadyCount={cleanupReadyTotal}
+          ignoredCount={ignoredTotal}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
         />
 
         {/* Video Grid Section */}
-        <section className="mt-6" aria-label="YouTube Gameplay Videos">
+        <section className="mt-6 relative" aria-label="YouTube Gameplay Videos">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <Film className="w-5 h-5 text-rose-500" />
@@ -462,12 +546,30 @@ function HomeContent() {
                   ? "Videos Ready for Disk Cleanup"
                   : activeFilter === "not_downloaded"
                   ? "Videos Ready to Download"
+                  : activeFilter === "ignored"
+                  ? "Videos Tagged as Do Not Process (Ignored)"
                   : "Channel Gameplay Videos"}
               </span>
               <span className="text-xs font-normal text-slate-400 ml-1">
                 ({total} items)
               </span>
             </h1>
+
+            {/* Selection Quick Info if any selected */}
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-rose-300 font-semibold bg-rose-950/40 border border-rose-500/30 px-2.5 py-1 rounded-lg">
+                  {selectedIds.size} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
           </div>
 
           {isLoading ? (
@@ -496,6 +598,9 @@ function HomeContent() {
                   onDownload={handleDownload}
                   onDeleteDownload={handleDeleteDownload}
                   isDownloadingThis={downloadingIds.has(video.id)}
+                  isSelected={selectedIds.has(video.id)}
+                  onToggleSelect={handleToggleSelect}
+                  onToggleIgnore={handleToggleIgnoreSingle}
                 />
               ))}
             </div>
@@ -514,6 +619,8 @@ function HomeContent() {
                   ? "No videos are currently being downloaded."
                   : activeFilter === "not_downloaded"
                   ? "All catalogued videos are already downloaded locally."
+                  : activeFilter === "ignored"
+                  ? "No videos are tagged as Do Not Process. You can select videos in your library and tag them to keep them in your archive without processing clips."
                   : "No videos catalogued yet. Sync your YouTube channel to browse and download gameplay VODs."}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
@@ -539,6 +646,160 @@ function HomeContent() {
                   <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
                   <span>{isSyncing ? "Syncing Videos..." : "Sync Default Channel"}</span>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Floating Batch Action Toolbar */}
+          {selectedIds.size > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-[#161a29]/95 backdrop-blur-md border border-rose-500/40 rounded-2xl px-5 py-3 shadow-2xl shadow-black/80 flex items-center gap-3.5 animate-in fade-in slide-in-from-bottom-4 duration-200">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <span className="w-6 h-6 rounded-full bg-rose-600 text-xs flex items-center justify-center font-mono">
+                  {selectedIds.size}
+                </span>
+                <span className="hidden sm:inline">selected</span>
+              </div>
+
+              <div className="h-4 w-px bg-white/15" />
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTagModalOpen(true)}
+                  disabled={isBatchUpdating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-bold rounded-lg cursor-pointer transition-all disabled:opacity-50"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Tag: Do Not Process</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleBatchTag(false)}
+                  disabled={isBatchUpdating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-semibold rounded-lg cursor-pointer transition-all disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Mark Active</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSelectAllOnPage}
+                  className="hidden md:inline-block px-2.5 py-1.5 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  Select Page ({videos.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Deselect all"
+                  aria-label="Deselect all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Reason Selection Modal when tagging as Do Not Process */}
+          {isTagModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+              <div className="bg-[#12141c] border border-amber-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                      <EyeOff className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-bold text-white">Tag as Do Not Process</h2>
+                      <p className="text-xs text-slate-400">
+                        {selectedIds.size} video{selectedIds.size === 1 ? "" : "s"} selected
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsTagModalOpen(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Tagged videos will be tracked in your library archive, but skipped from
+                  downloads and AI highlight clipping.
+                </p>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-300">
+                    Select a reason (optional):
+                  </label>
+                  <div className="space-y-1.5">
+                    {[
+                      "Too old or obsolete VOD",
+                      "Low gameplay action / not worth clipping",
+                      "Wrong game or off-topic recording",
+                      "Bad audio or technical issues",
+                      "Other (custom reason)",
+                    ].map((reason) => (
+                      <button
+                        key={reason}
+                        type="button"
+                        onClick={() => setSelectedReasonPreset(reason)}
+                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-all cursor-pointer ${
+                          selectedReasonPreset === reason
+                            ? "bg-amber-500/20 border border-amber-500/40 text-amber-200 font-semibold"
+                            : "bg-slate-900/60 border border-white/5 text-slate-300 hover:bg-slate-800"
+                        }`}
+                      >
+                        <span>{reason}</span>
+                        {selectedReasonPreset === reason && (
+                          <Check className="w-3.5 h-3.5 text-amber-400" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedReasonPreset === "Other (custom reason)" && (
+                    <input
+                      type="text"
+                      value={customReasonText}
+                      onChange={(e) => setCustomReasonText(e.target.value)}
+                      placeholder="e.g. Unusable resolution, practice match..."
+                      className="mt-2 w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setIsTagModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const reason =
+                        selectedReasonPreset === "Other (custom reason)"
+                          ? customReasonText.trim() || "Do not process"
+                          : selectedReasonPreset;
+                      handleBatchTag(true, reason);
+                    }}
+                    disabled={isBatchUpdating}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-950/40 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isBatchUpdating
+                      ? "Tagging..."
+                      : `Tag ${selectedIds.size} Video${selectedIds.size === 1 ? "" : "s"}`}
+                  </button>
+                </div>
               </div>
             </div>
           )}

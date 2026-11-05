@@ -757,6 +757,7 @@ def auto_stage_video(
             min_score=request.min_score,
             clipping_mode=request.clipping_mode,
             schedule=request.schedule,
+            same_day_catchup=request.same_day_catchup,
             background_tasks=background_tasks,
         )
     except ValueError as e:

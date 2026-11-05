@@ -27,6 +27,8 @@ from app.schemas.video import (
     DownloadTaskResponse,
     SyncChannelRequest,
     SyncChannelResponse,
+    VideoBatchTagRequest,
+    VideoBatchTagResponse,
     VideoCreateRequest,
     VideoListRequest,
     VideoListResponse,
@@ -213,6 +215,27 @@ def create_video(request: VideoCreateRequest, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create video: {e!s}",
+        )
+
+
+@router.post("/batch-tag", response_model=BaseResponse[VideoBatchTagResponse])
+def batch_tag_videos(request: VideoBatchTagRequest, db: Session = Depends(get_db)):
+    """Batch tag or untag videos as ignored (do not process)."""
+    try:
+        res = VideoService.batch_tag_videos(
+            db=db,
+            video_ids=request.video_ids,
+            is_ignored=request.is_ignored,
+            ignore_reason=request.ignore_reason,
+        )
+        return BaseResponse.success_response(response=res)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to batch tag videos: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to batch tag videos: {e!s}",
         )
 
 

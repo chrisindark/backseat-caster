@@ -1067,3 +1067,66 @@ def test_batch_stage_highlights_endpoint(client, dummy_video, db_session, monkey
     assert data_repeat["staged_count"] == 0
     assert data_repeat["skipped_count"] == 1
     assert "cand_batch_1" in data_repeat["skipped_candidate_ids"]
+
+
+def test_batch_publish_slots_at_5pm_same_day(db_session):
+    """Verify at 5:00 PM on Nov 3, 2026, all missed slots catch up and all 6 clips publish on the same day."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+    from app.services.auto_stage import AutoStageService
+
+    tz = ZoneInfo("Asia/Kolkata")
+    # Simulate Nov 3, 2026, 17:00 IST
+    simulated_now = datetime(2026, 11, 3, 17, 0, tzinfo=tz).astimezone(UTC)
+
+    slots = AutoStageService.compute_batch_publish_slots(
+        db=db_session,
+        count=6,
+        same_day_catchup=True,
+        now=simulated_now,
+    )
+    assert len(slots) == 6
+
+    local_slots = [s.astimezone(tz) for s in slots]
+    target_date = datetime(2026, 11, 3).date()
+
+    # All 6 slots MUST be on Nov 3, 2026
+    for s in local_slots:
+        assert s.date() == target_date
+
+    # The missed slots catch up at 18:00 or 18:30 (first remaining slot)
+    first_hour = local_slots[0].hour
+    assert first_hour in (18, 18)
+    assert local_slots[1].minute == local_slots[0].minute + 3
+    assert local_slots[2].minute == local_slots[0].minute + 6
+    assert local_slots[3].minute == local_slots[0].minute + 9
+
+
+def test_batch_publish_slots_late_evening_same_day_catchup(db_session):
+    """Verify when staging after all regular daily slots have passed, clips still catch up on the same day."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+    from app.services.auto_stage import AutoStageService
+
+    tz = ZoneInfo("Asia/Kolkata")
+    # Simulate Nov 3, 2026, 23:15 IST (after the last 23:00 daily slot has passed)
+    simulated_now = datetime(2026, 11, 3, 23, 15, tzinfo=tz).astimezone(UTC)
+
+    slots = AutoStageService.compute_batch_publish_slots(
+        db=db_session,
+        count=4,
+        same_day_catchup=True,
+        now=simulated_now,
+    )
+    assert len(slots) == 4
+
+    local_slots = [s.astimezone(tz) for s in slots]
+    target_date = datetime(2026, 11, 3).date()
+
+    for s in local_slots:
+        assert s.date() == target_date
+    assert local_slots[0].hour == 23 and local_slots[0].minute == 30
+    assert local_slots[1].hour == 23 and local_slots[1].minute == 33
+    assert local_slots[2].hour == 23 and local_slots[2].minute == 36
+    assert local_slots[3].hour == 23 and local_slots[3].minute == 39
+

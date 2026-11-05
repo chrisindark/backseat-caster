@@ -102,6 +102,12 @@ class HighlightService:
         if not video:
             raise HTTPException(status_code=404, detail=f"Video '{video_id}' not found")
 
+        if video.is_ignored:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video '{video_id}' is tagged as 'Do Not Process' (ignored). Cannot run highlight detection.",
+            )
+
         source_file = RenderService.resolve_source_video_file(db=db, video_id=video_id)
         if not source_file or not source_file.exists():
             raise HTTPException(

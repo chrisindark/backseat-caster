@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
+import { Tooltip, TruncatedText } from "@/components/Tooltip";
 
 export type UploadFormat = string;
 
@@ -796,9 +797,12 @@ export default function StagingPage() {
                           </span>
                         )}
                       </div>
-                      <h3 className="text-sm font-bold text-slate-100 line-clamp-1">
-                        {render.video_title || "Gameplay Highlight"}
-                      </h3>
+                      <TruncatedText
+                        text={render.video_title || "Gameplay Highlight"}
+                        lines={1}
+                        className="text-sm font-bold text-slate-100"
+                        tooltipTitle="VOD Title"
+                      />
                     </div>
 
                     {/* Format Selector Pills */}
@@ -957,10 +961,12 @@ export default function StagingPage() {
                           </button>
 
                           {previousCopies[render.clip_id] && (
-                            <span className="text-[10px] text-slate-400 truncate max-w-xs flex items-center gap-1">
-                              <History className="w-3 h-3 text-slate-500 shrink-0" />
-                              <span>Prev: <span className="line-through">{previousCopies[render.clip_id].title}</span></span>
-                            </span>
+                            <Tooltip content={`Previous title: ${previousCopies[render.clip_id].title || "(empty)"}`}>
+                              <span className="text-[10px] text-slate-400 truncate max-w-xs flex items-center gap-1 cursor-help">
+                                <History className="w-3 h-3 text-slate-500 shrink-0" />
+                                <span>Prev: <span className="line-through">{previousCopies[render.clip_id].title}</span></span>
+                              </span>
+                            </Tooltip>
                           )}
                         </div>
                       </div>

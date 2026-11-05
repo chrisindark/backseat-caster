@@ -81,6 +81,8 @@ class ChannelProfile(Base):
     branding_accent_color = Column(String(16), nullable=True)
     branding_text_color = Column(String(16), nullable=True)
     branding_font_path = Column(String(1024), nullable=True)
+    branding_opacity = Column(Float, default=0.85, nullable=True)
+    branding_style = Column(String(32), default="bookend", nullable=True)
 
     # Upload ceiling for clip + branded bookends
     max_clip_seconds = Column(Float, nullable=True)

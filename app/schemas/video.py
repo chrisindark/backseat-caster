@@ -66,6 +66,10 @@ class VideoResponse(VideoBase):
     can_cleanup_vod: bool = False
     can_cleanup_renders: bool = False
 
+    # Ignored / Do Not Process state
+    is_ignored: bool = False
+    ignore_reason: str | None = None
+
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -118,7 +122,7 @@ class VideoListRequest(BaseModel):
     status_filter: str | None = Field(
         None,
         alias="status",
-        description="Filter: all, downloaded, not_downloaded, downloading, highlights_mined, uploaded, cleanup_ready",
+        description="Filter: all, downloaded, not_downloaded, downloading, highlights_mined, uploaded, cleanup_ready, ignored",
     )
     search: str | None = Field(None, description="Search term in title or channel name")
 
@@ -282,3 +286,29 @@ class VideoUpdateRequest(BaseModel):
         None, ge=0.0, le=100.0, description="Download progress percentage"
     )
     error_message: str | None = Field(None, description="Download or error message")
+    is_ignored: bool | None = Field(
+        None, description="Whether this video is tagged as ignored (do not process)"
+    )
+    ignore_reason: str | None = Field(
+        None, description="Reason why the video is tagged as ignored"
+    )
+
+
+class VideoBatchTagRequest(BaseModel):
+    video_ids: list[str] = Field(
+        ..., min_length=1, description="List of video IDs to tag"
+    )
+    is_ignored: bool = Field(
+        True,
+        description="Whether to mark as ignored (True) or active (False)",
+    )
+    ignore_reason: str | None = Field(
+        None, description="Optional reason (e.g. 'Too old', 'Low quality')"
+    )
+
+
+class VideoBatchTagResponse(BaseModel):
+    updated_count: int
+    video_ids: list[str]
+    is_ignored: bool
+    message: str

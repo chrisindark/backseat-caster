@@ -1,6 +1,7 @@
 "use client";
 
 import { PreflightReportItem } from "@/types/video";
+import { Tooltip } from "./Tooltip";
 import {
   AlertCircle,
   AlertTriangle,
@@ -131,11 +132,19 @@ export const PreflightModal: React.FC<PreflightModalProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-[11px] font-mono text-slate-400 truncate">
-                {ffmpeg?.installed
-                  ? `v${ffmpeg.version || "detected"} • ${ffmpeg.path || ""}`
-                  : "Not found on system PATH"}
-              </p>
+              <Tooltip
+                content={
+                  ffmpeg?.installed
+                    ? `FFmpeg executable path: ${ffmpeg.path || "PATH"} (v${ffmpeg.version || "detected"})`
+                    : "FFmpeg binary missing from system PATH"
+                }
+              >
+                <p className="text-[11px] font-mono text-slate-400 truncate cursor-help">
+                  {ffmpeg?.installed
+                    ? `v${ffmpeg.version || "detected"} • ${ffmpeg.path || ""}`
+                    : "Not found on system PATH"}
+                </p>
+              </Tooltip>
               {ffmpeg?.remedy && !ffmpeg.installed && (
                 <div className="p-2 rounded bg-black/60 border border-rose-500/20 text-[10px] text-rose-300">
                   <p className="font-semibold mb-0.5">Remedy:</p>
@@ -163,11 +172,19 @@ export const PreflightModal: React.FC<PreflightModalProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-[11px] font-mono text-slate-400 truncate">
-                {ffprobe?.installed
-                  ? `v${ffprobe.version || "detected"} • ${ffprobe.path || ""}`
-                  : "Not found on system PATH"}
-              </p>
+              <Tooltip
+                content={
+                  ffprobe?.installed
+                    ? `FFprobe executable path: ${ffprobe.path || "PATH"} (v${ffprobe.version || "detected"})`
+                    : "FFprobe binary missing from system PATH"
+                }
+              >
+                <p className="text-[11px] font-mono text-slate-400 truncate cursor-help">
+                  {ffprobe?.installed
+                    ? `v${ffprobe.version || "detected"} • ${ffprobe.path || ""}`
+                    : "Not found on system PATH"}
+                </p>
+              </Tooltip>
               {ffprobe?.remedy && !ffprobe.installed && (
                 <div className="p-2 rounded bg-black/60 border border-rose-500/20 text-[10px] text-rose-300">
                   <p className="font-semibold mb-0.5">Remedy:</p>
@@ -196,11 +213,19 @@ export const PreflightModal: React.FC<PreflightModalProps> = ({
                 </span>
               )}
             </div>
-            <p className="text-[11px] font-mono text-slate-400 truncate">
-              {ytdlp?.installed
-                ? `v${ytdlp.version || "detected"} (${ytdlp.path || "module"})`
-                : "Neither Python module nor CLI found"}
-            </p>
+            <Tooltip
+              content={
+                ytdlp?.installed
+                  ? `yt-dlp binary/module path: ${ytdlp.path || "module"} (v${ytdlp.version || "detected"})`
+                  : "Neither Python yt-dlp module nor CLI binary found"
+              }
+            >
+              <p className="text-[11px] font-mono text-slate-400 truncate cursor-help">
+                {ytdlp?.installed
+                  ? `v${ytdlp.version || "detected"} (${ytdlp.path || "module"})`
+                  : "Neither Python module nor CLI found"}
+              </p>
+            </Tooltip>
             {ytdlp?.remedy && !ytdlp.installed && (
               <div className="p-2 rounded bg-black/60 border border-rose-500/20 text-[10px] text-rose-300">
                 <p className="font-semibold mb-0.5">Remedy:</p>

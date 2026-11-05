@@ -240,6 +240,14 @@ class AutoStageService:
             if slot_utc >= earliest_allowed:
                 remaining_today.append(slot_utc)
 
+        def _avoid_collision(cand: datetime) -> datetime:
+            target = cand
+            for _ in range(120):
+                if not any(abs((target - b).total_seconds()) < 120 for b in booked):
+                    return target
+                target += timedelta(minutes=3)
+            return target
+
         if same_day_catchup and remaining_today:
             allocated = []
             overflow = max(0, count - len(remaining_today))
@@ -248,21 +256,60 @@ class AutoStageService:
             for i in range(overflow + 1):
                 if len(allocated) < count:
                     target = catchup_slot + timedelta(minutes=i * 3)
-                    allocated.append(target)
+                    safe_target = _avoid_collision(target)
+                    allocated.append(safe_target)
+                    booked.add(safe_target)
             # Remaining today slots get 1 each
             for s_dt in remaining_today[1:]:
                 if len(allocated) < count:
-                    allocated.append(s_dt)
+                    safe_s = _avoid_collision(s_dt)
+                    allocated.append(safe_s)
+                    booked.add(safe_s)
             return allocated
+
+        if same_day_catchup and not remaining_today:
+            # All regular slots for today have already passed (e.g. late evening).
+            # If there is still time before midnight local time, catch up today starting at earliest_allowed.
+            local_end_today = datetime(
+                today.year, today.month, today.day, 23, 59, 0, tzinfo=tz
+            ).astimezone(UTC)
+            if earliest_allowed < local_end_today:
+                allocated = []
+                for i in range(count):
+                    target = earliest_allowed + timedelta(minutes=i * 3)
+                    if target <= local_end_today:
+                        safe_target = _avoid_collision(target)
+                        allocated.append(safe_target)
+                        booked.add(safe_target)
+                    else:
+                        break
+                if len(allocated) == count:
+                    return allocated
+                # If overflow past midnight, roll remaining items over to tomorrow
+                slot = cls.next_publish_slot(
+                    db,
+                    now=current_utc,
+                    after=allocated[-1] if allocated else None,
+                    booked_slots=booked,
+                )
+                while len(allocated) < count:
+                    safe_slot = _avoid_collision(slot)
+                    allocated.append(safe_slot)
+                    booked.add(safe_slot)
+                    slot = cls.next_publish_slot(
+                        db, now=current_utc, after=safe_slot, booked_slots=booked
+                    )
+                return allocated
 
         # Sequential rollover fallback if no remaining slots today or same_day_catchup disabled
         allocated = []
         slot = cls.next_publish_slot(db, now=current_utc, booked_slots=booked)
         for _ in range(count):
-            allocated.append(slot)
-            booked.add(slot)
+            safe_slot = _avoid_collision(slot)
+            allocated.append(safe_slot)
+            booked.add(safe_slot)
             slot = cls.next_publish_slot(
-                db, now=current_utc, after=slot, booked_slots=booked
+                db, now=current_utc, after=safe_slot, booked_slots=booked
             )
         return allocated
 
@@ -286,6 +333,14 @@ class AutoStageService:
         video = db.query(Video).filter(Video.id == video_id).first()
         if not video:
             raise ValueError(f"Video '{video_id}' not found")
+
+        if getattr(video, "is_ignored", False):
+            return {
+                "video_id": video_id,
+                "staged_count": 0,
+                "clips": [],
+                "message": f"Video '{video_id}' is tagged as ignored (do not process).",
+            }
 
         profile = ChannelProfileService.get_or_create(db)
         mode = (
@@ -412,12 +467,21 @@ class AutoStageService:
         min_score: float | None = None,
         clipping_mode: str | None = None,
         schedule: bool = True,
+        same_day_catchup: bool = True,
         background_tasks: Any = None,
     ) -> dict[str, Any]:
         """Stage the top N candidates for a video and return a summary."""
         video = db.query(Video).filter(Video.id == video_id).first()
         if not video:
             raise ValueError(f"Video '{video_id}' not found")
+
+        if getattr(video, "is_ignored", False):
+            return {
+                "video_id": video_id,
+                "staged_count": 0,
+                "clips": [],
+                "message": f"Video '{video_id}' is tagged as ignored (do not process).",
+            }
 
         count = max(0, int(top_n if top_n is not None else settings.AUTO_STAGE_TOP_N))
         threshold = float(
@@ -467,38 +531,33 @@ class AutoStageService:
             if row[0]
         }
 
-        staged: list[dict[str, Any]] = []
-        booked_slots: set[datetime] = set()
+        candidates_to_stage = [c for c in candidates if c.id not in already_staged]
+        if not candidates_to_stage:
+            return {
+                "video_id": video_id,
+                "staged_count": 0,
+                "clips": [],
+                "message": "No candidates met the auto-stage criteria.",
+            }
+
+        slots: list[datetime] = []
         if schedule:
-            existing_scheduled = (
-                db.query(RenderJob.scheduled_publish_at)
-                .filter(RenderJob.scheduled_publish_at.isnot(None))
-                .all()
+            slots = cls.compute_batch_publish_slots(
+                db,
+                count=len(candidates_to_stage),
+                same_day_catchup=same_day_catchup,
             )
-            for row in existing_scheduled:
-                u = as_utc(row[0])
-                if u:
-                    booked_slots.add(u)
 
-        slot = (
-            cls.next_publish_slot(db, booked_slots=booked_slots) if schedule else None
-        )
-
-        for candidate in candidates:
-            if candidate.id in already_staged:
-                logger.info(
-                    "Skipping auto-stage for %s: candidate already staged",
-                    candidate.id,
-                )
-                continue
-
+        staged: list[dict[str, Any]] = []
+        for idx, candidate in enumerate(candidates_to_stage):
+            assigned_slot = slots[idx] if idx < len(slots) else None
             try:
                 summary = cls._stage_candidate(
                     db,
                     video=video,
                     candidate=candidate,
                     mode=mode,
-                    slot=slot,
+                    slot=assigned_slot,
                     background_tasks=background_tasks,
                 )
             except Exception as exc:
@@ -512,9 +571,6 @@ class AutoStageService:
                 continue
 
             staged.append(summary)
-            if slot is not None:
-                booked_slots.add(slot)
-                slot = cls.next_publish_slot(db, after=slot, booked_slots=booked_slots)
 
         message = (
             f"Auto-staged {len(staged)} clip(s) from the top candidates."
@@ -538,6 +594,7 @@ class AutoStageService:
         min_score: float | None = None,
         clipping_mode: str | None = None,
         schedule: bool = True,
+        same_day_catchup: bool = True,
         background_tasks: Any = None,
     ) -> dict[str, Any]:
         """Stage top candidates across every downloaded video.
@@ -573,6 +630,7 @@ class AutoStageService:
                 HighlightCandidate.score >= threshold,
                 ~HighlightCandidate.id.in_(staged_subquery),
                 Video.is_downloaded.is_(True),
+                Video.is_ignored.is_(False),
             )
             .group_by(HighlightCandidate.video_id)
             .order_by(func.max(HighlightCandidate.score).desc())
@@ -592,6 +650,7 @@ class AutoStageService:
                     min_score=threshold,
                     clipping_mode=clipping_mode,
                     schedule=schedule,
+                    same_day_catchup=same_day_catchup,
                     background_tasks=background_tasks,
                 )
             except Exception as exc:

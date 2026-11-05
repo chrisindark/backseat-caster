@@ -280,6 +280,16 @@ class BrandingConfig(BaseModel):
     font_path: str | None = Field(
         None, description="Optional TTF/OTF override for card typography"
     )
+    opacity: float = Field(
+        0.85,
+        ge=0.0,
+        le=1.0,
+        description="Card background opacity (0.0=transparent, 1.0=solid)",
+    )
+    style: Literal["overlay", "bookend"] = Field(
+        "bookend",
+        description="Display style: 'overlay' over gameplay vs 'bookend' concat",
+    )
 
     @property
     def has_intro(self) -> bool:
@@ -313,6 +323,8 @@ class BrandingConfig(BaseModel):
             "intro_title": self.resolved_intro_title() if self.has_intro else None,
             "outro_title": self.outro_title if self.has_outro else None,
             "channel_name": self.channel_name or None,
+            "opacity": self.opacity,
+            "style": self.style,
         }
 
 

@@ -39,6 +39,8 @@ class PresentationPresetResponse(BaseModel):
     branding_enabled: bool
     branding_intro: bool
     branding_outro: bool
+    branding_opacity: float = 0.85
+    branding_style: Literal["overlay", "bookend"] = "overlay"
     watermark_enabled: bool
     watermark_position: str
     watermark_opacity: float
@@ -118,6 +120,8 @@ class ChannelProfileResponse(BaseModel):
     branding_accent_color: str = "#F43F5E"
     branding_text_color: str = "#FFFFFF"
     branding_font_path: str | None = None
+    branding_opacity: float = 0.85
+    branding_style: Literal["overlay", "bookend"] = "bookend"
     max_clip_seconds: float = 90.0
 
     # CTA voiceover (TTS + bell chime)
@@ -134,7 +138,7 @@ class ChannelProfileResponse(BaseModel):
     pinned_hashtags: list[str] = Field(default_factory=list)
     default_privacy: PrivacyStatus = "public"
     upload_slots: list[str] = Field(default_factory=list)
-    upload_timezone: str = "UTC"
+    upload_timezone: str = "Asia/Kolkata"
 
     updated_at: str | None = None
 
@@ -197,6 +201,8 @@ class ChannelProfileUpdate(BaseModel):
     branding_accent_color: str | None = Field(None, max_length=16)
     branding_text_color: str | None = Field(None, max_length=16)
     branding_font_path: str | None = Field(None, max_length=1024)
+    branding_opacity: float | None = Field(None, ge=0.0, le=1.0)
+    branding_style: Literal["overlay", "bookend"] | None = None
     max_clip_seconds: float | None = Field(None, ge=15.0, le=300.0)
 
     cta_enabled: bool | None = None

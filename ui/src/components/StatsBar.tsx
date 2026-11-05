@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Film, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, EyeOff, Film, Sparkles, Trash2 } from "lucide-react";
 import React from "react";
 import { YoutubeIcon } from "./icons";
 
@@ -12,6 +12,7 @@ interface StatsBarProps {
   highlightsMinedCount?: number;
   uploadedCount?: number;
   cleanupReadyCount?: number;
+  ignoredCount?: number;
   activeFilter: string;
   onFilterChange: (filter: string) => void;
 }
@@ -24,6 +25,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
   highlightsMinedCount = 0,
   uploadedCount = 0,
   cleanupReadyCount = 0,
+  ignoredCount = 0,
   activeFilter,
   onFilterChange,
 }) => {
@@ -33,6 +35,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
     { id: "highlights_mined", label: "Highlights Mined", icon: Sparkles, count: highlightsMinedCount },
     { id: "uploaded", label: "Uploaded to YT", icon: YoutubeIcon, count: uploadedCount },
     { id: "cleanup_ready", label: "Ready to Clean", icon: Trash2, count: cleanupReadyCount },
+    { id: "ignored", label: "Do Not Process", icon: EyeOff, count: ignoredCount },
   ];
 
   return (
@@ -54,6 +57,12 @@ export const StatsBar: React.FC<StatsBarProps> = ({
             <>
               <span>•</span>
               <span className="text-amber-400 font-semibold">{downloadingCount} downloading</span>
+            </>
+          )}
+          {ignoredCount > 0 && (
+            <>
+              <span>•</span>
+              <span className="text-amber-300/80 font-semibold">{ignoredCount} ignored</span>
             </>
           )}
         </div>

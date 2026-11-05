@@ -110,6 +110,21 @@ class YouTubeQuotaResponse(BaseModel):
     can_upload: bool
     blocked_reason: str | None = None
     blocked_until: str | None = None
+    upload_budget_units: int = 8000
+    analytics_budget_units: int = 2000
+    upload_units_used: int = 0
+    analytics_units_used: int = 0
+    analytics_units_remaining: int = 2000
+    upload_units_remaining: int = 8000
+    upload_budget_exhausted: bool = False
+    analytics_budget_exhausted: bool = False
+    can_analytics: bool = True
+    analytics_blocked: bool = False
+    usage_fraction: float = 0.0
+    analytics_threshold: float = 0.8
+    analytics_batch_limit: int = 50
+    backoff_max_attempts: int = 3
+    backoff_base_seconds: float = 2.0
     api_quota_exhausted: bool = False
     upload_limit_exceeded: bool = False
     last_error_code: str | None = None
@@ -190,6 +205,8 @@ class SlotPerformanceItem(BaseModel):
     avg_views: float
     avg_velocity_3h: float
     avg_velocity_24h: float
+    avg_velocity_72h: float = 0.0
+    avg_velocity_7d: float = 0.0
     engagement_rate: float
     performance_score: float
     rank: int = 1
@@ -227,6 +244,8 @@ class ClipVelocityTimelineResponse(BaseModel):
     latest_likes: int = 0
     velocity_3h: int = 0
     velocity_24h: int = 0
+    velocity_72h: int = 0
+    velocity_7d: int = 0
     snapshots: list[VelocitySnapshotItem] = Field(default_factory=list)
 
 

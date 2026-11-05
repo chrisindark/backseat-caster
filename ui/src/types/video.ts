@@ -244,6 +244,8 @@ export interface RenderJobResponse {
   latest_comment_count?: number | null;
   velocity_3h?: number | null;
   velocity_24h?: number | null;
+  velocity_72h?: number | null;
+  velocity_7d?: number | null;
   metrics_last_polled_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -376,6 +378,8 @@ export interface RenderManifest {
   latest_comment_count?: number | null;
   velocity_3h?: number | null;
   velocity_24h?: number | null;
+  velocity_72h?: number | null;
+  velocity_7d?: number | null;
   metrics_last_polled_at?: string | null;
   youtube_upload?: {
     video_id: string;
@@ -981,6 +985,8 @@ export interface SlotPerformanceItem {
   avg_views: number;
   avg_velocity_3h: number;
   avg_velocity_24h: number;
+  avg_velocity_72h?: number;
+  avg_velocity_7d?: number;
   performance_score: number;
   is_configured: boolean;
   rank: number;
@@ -1017,6 +1023,8 @@ export interface ClipVelocityTimelineResponse {
   total_views: number;
   velocity_3h?: number | null;
   velocity_24h?: number | null;
+  velocity_72h?: number | null;
+  velocity_7d?: number | null;
   snapshots: VelocitySnapshotItem[];
 }
 

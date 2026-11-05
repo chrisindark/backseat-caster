@@ -36,7 +36,7 @@ from app.services.upload_metadata import (
     build_title,
     merge_pinned_hashtags,
 )
-from app.services.youtube_errors import parse_youtube_api_error
+from app.services.youtube_errors import backoff_delay, parse_youtube_api_error
 from app.services.youtube_quota import YouTubeQuotaService
 from app.worker.celery_app import celery_app
 
@@ -490,6 +490,45 @@ class YouTubeUploaderService:
             )
 
         db = db_session if db_session is not None else get_task_db_session()
+        # Pre-flight quota gate: uploads are blocked locally when YouTube
+        # already rejected us for this quota day (blocked_until), so we
+        # fail fast with a Retry-After hint instead of burning an API call.
+        _gate = YouTubeQuotaService.check_upload_budget(db)
+        if _gate.get("upload_block_reason") in ("api_quota_exceeded", "upload_limit_exceeded"):
+            from app.services.youtube_errors import YouTubeUploadError
+
+            retry_at = None
+            if _gate.get("blocked_until"):
+                try:
+                    retry_at = datetime.fromisoformat(_gate["blocked_until"])
+                except Exception:
+                    retry_at = None
+            code = _gate["upload_block_reason"]
+            msg = (
+                "YouTube Data API daily quota is exhausted. Retry after "
+                + (retry_at.isoformat() if retry_at else "midnight Pacific")
+                + "."
+            ) if code == "api_quota_exceeded" else (
+                "YouTube rejected the upload because this channel has reached its "
+                "video upload limit (uploadLimitExceeded). Retry after "
+                + (retry_at.isoformat() if retry_at else "later")
+                + "."
+            )
+            if retry_at is not None and retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            _gate_error = YouTubeUploadError(
+                msg,
+                error_code=code,
+                http_status=429,
+                retry_at=retry_at or _gate.get("blocked_until"),
+                api_quota_exhausted=code == "api_quota_exhausted",
+                upload_limit_exceeded=code == "upload_limit_exceeded",
+            )
+            try:
+                YouTubeQuotaService.record_upload_failure(db, _gate_error)
+            except Exception:
+                pass
+            raise _gate_error
         job: RenderJob | None = None
 
         try:
@@ -762,15 +801,43 @@ class YouTubeUploaderService:
                                 progress_callback(pct)
                     retry_count = 0  # reset on successful chunk
                 except HttpError as err:
-                    if (
-                        err.resp.status in [500, 502, 503, 504]
-                        and retry_count < max_retries
-                    ):
+                    status = getattr(err.resp, "status", 0)
+                    retryable_status = status in [429, 500, 502, 503, 504] or (
+                        status == 403 and b"rate" in (getattr(err, "content", b"") or b"").lower()
+                    )
+                    max_backoff = max(0, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3)))
+                    max_retries = max(max_retries, max_backoff)
+                    if status == 429:
+                        # Explicit rate-limit signal: use exponential backoff.
+                        parsed_err = parse_youtube_api_error(
+                            err, quota_reset_at=YouTubeQuotaService.resets_at()
+                        )
+                        if parsed_err.retryable and retry_count < max_retries:
+                            retry_count += 1
+                            wait_sec = backoff_delay(
+                                retry_count,
+                                base_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_BASE_SECONDS", 2.0)),
+                                max_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_MAX_SECONDS", 120.0)),
+                            )
+                            logger.warning(
+                                "Recoverable HTTP error %s uploading clip %s. Retrying in %.0fs...",
+                                status,
+                                clip_id,
+                                wait_sec,
+                            )
+                            time.sleep(wait_sec)
+                            continue
+                        raise
+                    if retryable_status and retry_count < max_retries:
                         retry_count += 1
-                        wait_sec = 2**retry_count
+                        wait_sec = backoff_delay(
+                            retry_count,
+                            base_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_BASE_SECONDS", 2.0)),
+                            max_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_MAX_SECONDS", 120.0)),
+                        )
                         logger.warning(
-                            "Recoverable HTTP error %s uploading clip %s. Retrying in %ds...",
-                            err.resp.status,
+                            "Recoverable HTTP error %s uploading clip %s. Retrying in %.0fs...",
+                            status,
                             clip_id,
                             wait_sec,
                         )
@@ -1000,7 +1067,7 @@ class YouTubeUploaderService:
                     db_session.close()
 
 
-@celery_app.task(bind=True, name="upload_clip_celery_task")
+@celery_app.task(bind=True, name="upload_clip_celery_task", rate_limit="1/m")
 def upload_clip_celery_task(
     self,
     clip_id: str,
@@ -1033,7 +1100,7 @@ def upload_clip_celery_task(
     ).model_dump()
 
 
-@celery_app.task(bind=True, name="batch_upload_clips_celery_task")
+@celery_app.task(bind=True, name="batch_upload_clips_celery_task", rate_limit="1/m")
 def batch_upload_clips_celery_task(self):
     """Celery task for uploading all selected clips to YouTube."""
     logger.info("Celery task started: batch uploading selected clips")

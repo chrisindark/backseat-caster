@@ -498,6 +498,8 @@ class RenderService:
             latest_comment_count=job.latest_comment_count or 0,
             velocity_3h=job.velocity_3h or 0,
             velocity_24h=job.velocity_24h or 0,
+            velocity_72h=getattr(job, "velocity_72h", 0) or 0,
+            velocity_7d=getattr(job, "velocity_7d", 0) or 0,
             metrics_last_polled_at=job.metrics_last_polled_at.isoformat()
             if job.metrics_last_polled_at
             else None,
@@ -806,6 +808,8 @@ class RenderService:
                         formatted["latest_comment_count"] = job.latest_comment_count
                         formatted["velocity_3h"] = job.velocity_3h
                         formatted["velocity_24h"] = job.velocity_24h
+                        formatted["velocity_72h"] = getattr(job, "velocity_72h", 0)
+                        formatted["velocity_7d"] = getattr(job, "velocity_7d", 0)
                         formatted["metrics_last_polled_at"] = (
                             job.metrics_last_polled_at.isoformat()
                             if job.metrics_last_polled_at

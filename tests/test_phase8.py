@@ -181,26 +181,32 @@ def test_llm_metadata_falls_back_when_gemini_fails(db_session, monkeypatch):
 def test_quota_reserves_six_uploads_then_allows_overflow(db_session):
     summary = YouTubeQuotaService.get_summary(db_session)
     assert summary["daily_limit_units"] == 10_000
-    assert summary["uploads_remaining"] == 6
+    # Upload budget is 8,000 units (5 uploads); analytics keeps the other 2,000
+    assert summary["upload_budget_units"] == 8_000
+    assert summary["analytics_budget_units"] == 2_000
+    assert summary["uploads_remaining"] == 5
     assert summary["can_upload"] is True
 
-    for index in range(6):
+    for index in range(5):
         YouTubeQuotaService.reserve_upload(db_session)
-        expected = 5 - index
+        expected = 4 - index
         assert (
             YouTubeQuotaService.get_summary(db_session)["uploads_remaining"] == expected
         )
 
     summary = YouTubeQuotaService.get_summary(db_session)
-    assert summary["units_used"] == 9_600
+    assert summary["units_used"] == 8_000
     assert summary["can_upload"] is False
+    # Analytics budget is untouched by uploads
+    assert summary["can_analytics"] is True
+    assert summary["analytics_units_remaining"] == 2_000
 
     # Over-budget uploads are advisory: recording keeps counting beyond the
-    # daily budget so the quota bar stays accurate. YouTube enforces the limit.
+    # budget so the quota bar stays accurate. YouTube enforces the limit.
     summary = YouTubeQuotaService.reserve_upload(db_session)
     assert summary["can_upload"] is False
     assert summary["uploads_remaining"] == 0
-    assert summary["uploads_today"] == 7
+    assert summary["uploads_today"] == 6
 
 
 def test_quota_reset_day_rolls_over(db_session):
@@ -221,7 +227,7 @@ def test_quota_endpoint(client, db_session):
     assert res.status_code == 200
     body = res.json()["response"]
     assert body["units_used"] == 1_600
-    assert body["uploads_remaining"] == 5
+    assert body["uploads_remaining"] == 4
     assert body["resets_at"]
 
 

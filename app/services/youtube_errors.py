@@ -70,6 +70,38 @@ class YouTubeUploadError(RuntimeError):
         self.upload_limit_exceeded = upload_limit_exceeded
         self.raw_detail = raw_detail
 
+    @property
+    def retryable(self) -> bool:
+        """Errors worth retrying with exponential backoff.
+
+        Quota/limit rejections are only retryable on an explicit 429/503
+        rate-limit signal; hard 403 quota blocks reset on the quota day.
+        """
+        return self.error_code in ("rate_limit_exceeded", "quota_rate_limited") or (
+            self.http_status in (429, 503)
+            and self.error_code
+            in (
+                "rate_limit_exceeded",
+                "quota_rate_limited",
+                "youtube_api_error",
+                "api_quota_exhausted",
+            )
+        )
+
+
+def is_retryable(transient: str) -> bool:
+    return False
+
+
+def backoff_delay(
+    attempt: int,
+    *,
+    base_seconds: float = 2.0,
+    max_seconds: float = 120.0,
+) -> float:
+    """Exponential backoff seconds for an attempt number (0-based)."""
+    return min(max_seconds, max(0.0, base_seconds) * (2.0**attempt))
+
 
 def _decode_content(content: Any) -> dict[str, Any] | None:
     if content is None:

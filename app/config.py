@@ -62,6 +62,23 @@ class Settings(BaseSettings):
     YOUTUBE_DAILY_QUOTA_UNITS: int = 10_000
     YOUTUBE_UPLOAD_QUOTA_COST: int = 1_600
     YOUTUBE_QUOTA_TIMEZONE: str = "America/Los_Angeles"
+    # Separate per-feature unit budgets within the shared 10,000 pool.
+    # Uploads are charged against the upload budget (default 8,000 = 5
+    # uploads); analytics polls (1 unit per 50-video batch) against the
+    # analytics budget (default 2,000). Exhausting one does not block the
+    # other. Override via env vars if you want more/less of each.
+    YOUTUBE_UPLOAD_QUOTA_UNITS: int = 8_000
+    YOUTUBE_ANALYTICS_QUOTA_UNITS: int = 2_000
+    # Legacy threshold kept as a soft-warning fraction (analytics usage /
+    # analytics budget). The hard gate is now the separate budget.
+    YOUTUBE_ANALYTICS_QUOTA_THRESHOLD: float = 0.8
+    # Exponential backoff on retryable YouTube errors (429 / 403 rate
+    # limit / 5xx): base seconds * 2**attempt, capped at the max.
+    YOUTUBE_BACKOFF_BASE_SECONDS: float = 2.0
+    YOUTUBE_BACKOFF_MAX_SECONDS: float = 120.0
+    YOUTUBE_BACKOFF_MAX_ATTEMPTS: int = 3
+    # Analytics polling: one videos.list call fetches up to 50 IDs at 1 unit.
+    YOUTUBE_ANALYTICS_BATCH_LIMIT: int = 50
 
     # Phase 8: autonomous auto-stage & scheduling pipeline
     AUTO_STAGE_ENABLED: bool = False

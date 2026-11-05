@@ -19,6 +19,8 @@ class YouTubeQuotaUsage(Base):
     # Quota day formatted as YYYY-MM-DD in the configured quota timezone.
     day = Column(String(10), primary_key=True, index=True)
     units_used = Column(Integer, default=0, nullable=False)
+    upload_units_used = Column(Integer, default=0, nullable=False)
+    analytics_units_used = Column(Integer, default=0, nullable=False)
     uploads_count = Column(Integer, default=0, nullable=False)
     failed_uploads = Column(Integer, default=0, nullable=False)
     # Set only when YouTube has explicitly rejected uploads for the rest of the
@@ -34,6 +36,8 @@ class YouTubeQuotaUsage(Base):
         return {
             "day": self.day,
             "units_used": self.units_used or 0,
+            "upload_units_used": self.upload_units_used or 0,
+            "analytics_units_used": self.analytics_units_used or 0,
             "uploads_count": self.uploads_count or 0,
             "failed_uploads": self.failed_uploads or 0,
             "blocked_reason": self.blocked_reason,

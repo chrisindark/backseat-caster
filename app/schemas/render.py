@@ -130,6 +130,8 @@ class RenderJobResponse(BaseModel):
     latest_comment_count: int = 0
     velocity_3h: int = 0
     velocity_24h: int = 0
+    velocity_72h: int = 0
+    velocity_7d: int = 0
     metrics_last_polled_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None

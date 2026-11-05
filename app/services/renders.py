@@ -493,6 +493,14 @@ class RenderService:
             if job.youtube_uploaded_at
             else None,
             youtube_upload_error=legacy_youtube_error_message(job.youtube_upload_error),
+            latest_view_count=job.latest_view_count or 0,
+            latest_like_count=job.latest_like_count or 0,
+            latest_comment_count=job.latest_comment_count or 0,
+            velocity_3h=job.velocity_3h or 0,
+            velocity_24h=job.velocity_24h or 0,
+            metrics_last_polled_at=job.metrics_last_polled_at.isoformat()
+            if job.metrics_last_polled_at
+            else None,
             created_at=job.created_at.isoformat() if job.created_at else None,
             updated_at=job.updated_at.isoformat() if job.updated_at else None,
             completed_at=job.completed_at.isoformat() if job.completed_at else None,
@@ -791,6 +799,16 @@ class RenderService:
                         formatted["scheduled_publish_at"] = (
                             job.scheduled_publish_at.isoformat()
                             if job.scheduled_publish_at
+                            else None
+                        )
+                        formatted["latest_view_count"] = job.latest_view_count
+                        formatted["latest_like_count"] = job.latest_like_count
+                        formatted["latest_comment_count"] = job.latest_comment_count
+                        formatted["velocity_3h"] = job.velocity_3h
+                        formatted["velocity_24h"] = job.velocity_24h
+                        formatted["metrics_last_polled_at"] = (
+                            job.metrics_last_polled_at.isoformat()
+                            if job.metrics_last_polled_at
                             else None
                         )
 

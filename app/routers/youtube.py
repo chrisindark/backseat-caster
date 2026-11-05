@@ -15,8 +15,12 @@ from app.models.render_job import RenderJob
 from app.models.video import Video
 from app.schemas.render import RenderJobResponse
 from app.schemas.youtube import (
+    AnalyticsSyncResponse,
+    ApplyOptimalSlotsResponse,
     AutoStageRequest,
     AutoStageResponse,
+    ClipVelocityTimelineResponse,
+    SlotAnalyticsResponse,
     StagedClipsResponse,
     YouTubeAuthCallbackRequest,
     YouTubeAuthStatusResponse,
@@ -31,6 +35,7 @@ from app.schemas.youtube import (
 from app.services.auto_stage import AutoStageService, as_utc
 from app.services.llm_metadata import LLMMetadataService
 from app.services.renders import RenderService
+from app.services.youtube_analytics import YouTubeAnalyticsService
 from app.services.youtube_errors import YouTubeUploadError
 from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import (
@@ -769,3 +774,85 @@ def auto_stage_video(
             detail=f"Auto-stage failed: {e!s}",
         )
     return BaseResponse.success_response(response=AutoStageResponse(**result))
+
+
+# -----------------------------------------------------------------------------
+# Phase 11: View Velocity Tracking & Optimal Slot Optimization
+# -----------------------------------------------------------------------------
+
+
+@router.post("/analytics/sync", response_model=BaseResponse[AnalyticsSyncResponse])
+def sync_youtube_statistics(
+    max_age_days: int = 14,
+    db: Session = Depends(get_db),
+):
+    """Poll YouTube Data API v3 for latest views/likes/comments and record velocity snapshots."""
+    try:
+        result = YouTubeAnalyticsService.poll_video_statistics(
+            db, max_age_days=max_age_days
+        )
+        return BaseResponse.success_response(response=AnalyticsSyncResponse(**result))
+    except Exception as e:
+        logger.exception("Failed to sync YouTube statistics: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync YouTube statistics: {e!s}",
+        )
+
+
+@router.get("/analytics/slots", response_model=BaseResponse[SlotAnalyticsResponse])
+def get_slot_analytics(db: Session = Depends(get_db)):
+    """Retrieve historical view velocity and engagement rankings across upload slots."""
+    try:
+        result = YouTubeAnalyticsService.get_slot_analytics(db)
+        return BaseResponse.success_response(response=SlotAnalyticsResponse(**result))
+    except Exception as e:
+        logger.exception("Failed to compute slot analytics: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compute slot analytics: {e!s}",
+        )
+
+
+@router.post(
+    "/analytics/apply-optimal-slots",
+    response_model=BaseResponse[ApplyOptimalSlotsResponse],
+)
+def apply_optimal_slots(
+    top_n: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Automatically apply the highest-velocity time slots to your brand settings."""
+    try:
+        result = YouTubeAnalyticsService.apply_optimal_slots(db, top_n=top_n)
+        return BaseResponse.success_response(
+            response=ApplyOptimalSlotsResponse(**result)
+        )
+    except Exception as e:
+        logger.exception("Failed to apply optimal slots: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to apply optimal slots: {e!s}",
+        )
+
+
+@router.get(
+    "/analytics/timeline/{clip_id}",
+    response_model=BaseResponse[ClipVelocityTimelineResponse],
+)
+def get_clip_velocity_timeline(
+    clip_id: str,
+    db: Session = Depends(get_db),
+):
+    """Fetch time-series velocity snapshots for a single clip."""
+    try:
+        result = YouTubeAnalyticsService.get_clip_velocity_timeline(db, clip_id)
+        return BaseResponse.success_response(
+            response=ClipVelocityTimelineResponse(**result)
+        )
+    except Exception as e:
+        logger.exception("Failed to fetch clip velocity timeline: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch clip velocity timeline: {e!s}",
+        )

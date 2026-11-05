@@ -1059,7 +1059,7 @@ export const HighlightCandidatesDrawer: React.FC<HighlightCandidatesDrawerProps>
                       </div>
 
                       {/* Main Content Layout: Thumbnail + Highlights Metadata */}
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 min-w-0">
                         {/* Thumbnail Viewport (5 cols) */}
                         <div className="sm:col-span-5 relative aspect-video bg-black rounded-xl overflow-hidden border border-white/10 group-hover:border-rose-500/40 transition-colors shrink-0 shadow-inner">
                           <img

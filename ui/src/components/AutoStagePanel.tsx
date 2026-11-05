@@ -297,7 +297,7 @@ export const AutoStagePanel: React.FC<AutoStagePanelProps> = ({ onStagedChange }
       {/* Auto-staged notification banner + quota bar */}
       <section className="grid gap-3 lg:grid-cols-[1fr_320px]">
         <div
-          className={`relative overflow-hidden rounded-2xl border p-4 shadow-xl backdrop-blur-xl transition-colors ${
+          className={`relative overflow-hidden min-w-0 rounded-2xl border p-4 shadow-xl backdrop-blur-xl transition-colors ${
             items.length > 0
               ? "bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-slate-900/90 border-amber-500/30"
               : "bg-slate-900/80 border-white/10"

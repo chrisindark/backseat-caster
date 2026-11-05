@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
 
 from app.database import Base
 
@@ -75,6 +75,14 @@ class RenderJob(Base):
     youtube_uploaded_at = Column(DateTime, nullable=True)
     youtube_upload_error = Column(Text, nullable=True)
 
+    # Phase 11: View Velocity Tracking & Analytics
+    latest_view_count = Column(Integer, default=0)
+    latest_like_count = Column(Integer, default=0)
+    latest_comment_count = Column(Integer, default=0)
+    velocity_3h = Column(Integer, default=0)
+    velocity_24h = Column(Integer, default=0)
+    metrics_last_polled_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     completed_at = Column(DateTime, nullable=True)
@@ -125,6 +133,14 @@ class RenderJob(Base):
             if self.youtube_uploaded_at
             else None,
             "youtube_upload_error": self.youtube_upload_error,
+            "latest_view_count": self.latest_view_count or 0,
+            "latest_like_count": self.latest_like_count or 0,
+            "latest_comment_count": self.latest_comment_count or 0,
+            "velocity_3h": self.velocity_3h or 0,
+            "velocity_24h": self.velocity_24h or 0,
+            "metrics_last_polled_at": self.metrics_last_polled_at.isoformat()
+            if self.metrics_last_polled_at
+            else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat()

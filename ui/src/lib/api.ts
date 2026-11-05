@@ -1,8 +1,11 @@
 import {
+  AnalyticsSyncResponse,
+  ApplyOptimalSlotsResponse,
   BatchStageHighlightsRequest,
   BatchStageHighlightsResponse,
   ChannelProfile,
   ChannelProfileUpdate,
+  ClipVelocityTimelineResponse,
   DeleteHighlightsResponse,
   DemoProjectResponse,
   DetectHighlightsRequest,
@@ -22,6 +25,7 @@ import {
   RenderRequest,
   SetupSettings,
   SetupStatusResponse,
+  SlotAnalyticsResponse,
   SyncResponse,
   UploadSelectionPayload,
   StagedClipsResponse,
@@ -868,4 +872,43 @@ export async function revokeYouTubeCredentials(): Promise<{ message: string }> {
     method: "POST",
   });
   return parseResponse<{ message: string }>(res, "revoke YouTube credentials");
+}
+
+// -----------------------------------------------------------------------------
+// YouTube Short View Velocity Tracker & Optimal Slot Optimizer Helpers
+// -----------------------------------------------------------------------------
+
+export async function fetchSlotAnalytics(): Promise<SlotAnalyticsResponse> {
+  const res = await fetch(`${API_BASE}/youtube/analytics/slots`, {
+    cache: "no-store",
+  });
+  return parseResponse<SlotAnalyticsResponse>(res, "fetch slot performance analytics");
+}
+
+export async function syncYouTubeAnalytics(): Promise<AnalyticsSyncResponse> {
+  const res = await fetch(`${API_BASE}/youtube/analytics/sync`, {
+    method: "POST",
+  });
+  return parseResponse<AnalyticsSyncResponse>(res, "sync YouTube video analytics");
+}
+
+export async function applyOptimalSlots(
+  topN: number = 3
+): Promise<ApplyOptimalSlotsResponse> {
+  const res = await fetch(
+    `${API_BASE}/youtube/analytics/apply-optimal-slots?top_n=${encodeURIComponent(topN)}`,
+    {
+      method: "POST",
+    }
+  );
+  return parseResponse<ApplyOptimalSlotsResponse>(res, "apply optimal upload slots");
+}
+
+export async function fetchClipVelocityTimeline(
+  clipId: string
+): Promise<ClipVelocityTimelineResponse> {
+  const res = await fetch(`${API_BASE}/youtube/analytics/timeline/${encodeURIComponent(clipId)}`, {
+    cache: "no-store",
+  });
+  return parseResponse<ClipVelocityTimelineResponse>(res, `fetch velocity timeline for clip ${clipId}`);
 }

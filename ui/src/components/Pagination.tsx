@@ -51,7 +51,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           <select
             value={itemsPerPage}
             onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
-            className="bg-slate-900 border border-white/10 rounded-md px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-rose-500"
+            className="bg-slate-900 border border-white/10 rounded-lg px-3 py-2 min-h-[44px] text-sm text-slate-200 focus:outline-none focus:border-rose-500"
           >
             <option value={10}>10</option>
             <option value={20}>20</option>
@@ -63,11 +63,11 @@ export const Pagination: React.FC<PaginationProps> = ({
       </div>
 
       {/* Page Navigation */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide max-w-full pb-1">
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage <= 1}
-          className="p-2 rounded-lg bg-slate-900 border border-white/10 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          className="min-w-[44px] min-h-[44px] p-2.5 rounded-lg bg-slate-900 border border-white/10 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
           title="Previous Page"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -82,7 +82,7 @@ export const Pagination: React.FC<PaginationProps> = ({
               {showEllipsisBefore && <span className="px-1 text-slate-600">...</span>}
               <button
                 onClick={() => onPageChange(p)}
-                className={`min-w-9 h-9 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`min-w-[44px] min-h-[44px] px-3 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
                   isCurrent
                     ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                     : "bg-slate-900 border border-white/10 text-slate-300 hover:bg-slate-800"
@@ -97,7 +97,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage >= totalPages}
-          className="p-2 rounded-lg bg-slate-900 border border-white/10 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          className="min-w-[44px] min-h-[44px] p-2.5 rounded-lg bg-slate-900 border border-white/10 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
           title="Next Page"
         >
           <ChevronRight className="w-4 h-4" />

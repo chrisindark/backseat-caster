@@ -118,10 +118,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const activeJobs = controlledJobsCount !== undefined ? controlledJobsCount : internalActiveJobs;
 
   return (
-    <header className="sticky top-0 z-50 glass-nav border-b border-white/10 px-4 lg:px-8 py-3 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 glass-nav border-b border-white/10 px-4 lg:px-8 py-3 backdrop-blur-xl overflow-x-clip">
       {/* Preflight Dependency Failure Alert Banner */}
       {preflightReport && !preflightReport.ready && !bannerDismissed && (
-        <div className="max-w-7xl mx-auto mb-2 p-2 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-between text-xs text-rose-200 gap-3 animate-in fade-in">
+        <div className="max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto mb-2 w-full p-2 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-between text-xs text-rose-200 gap-3 animate-in fade-in">
           <div className="flex items-center gap-2 min-w-0">
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
             <span className="truncate">
@@ -148,16 +148,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         {/* Brand & Nav Links */}
-        <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-start">
+        <div className="flex flex-wrap items-center gap-3 lg:gap-4 w-full lg:w-auto justify-start min-w-0">
           <Link href="/" className="flex items-center gap-2.5 group">
             <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-rose-900/30 group-hover:scale-105 transition-transform">
               <Radio className="w-4 h-4 text-white animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-slate-400">
+                <span className="font-extrabold text-base sm:text-lg tracking-tight whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-slate-400">
                   BackseatCaster
                 </span>
                 <Badge color="crimson" variant="surface" size="1">
@@ -169,10 +169,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           </Link>
 
           {/* Navigation Tabs - Refined Information Architecture */}
-          <nav className="flex items-center p-1 bg-slate-900/90 border border-white/10 rounded-xl" aria-label="Main Navigation">
+          <nav className="flex items-center gap-1 p-1 bg-slate-900/90 border border-white/10 rounded-xl overflow-x-auto scrollbar-hide max-w-full sm:max-w-[560px] lg:max-w-none -mx-1 px-1" aria-label="Main Navigation">
             <Link
               href="/"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname === "/" || pathname?.startsWith("/videos")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -184,7 +184,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               href="/studio"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname?.startsWith("/studio")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -196,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               href="/renders"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname === "/renders" || (pathname?.startsWith("/renders") && !pathname?.startsWith("/renders/staging"))
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -206,7 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>Renders & Jobs</span>
               {activeJobs > 0 && (
                 <Tooltip content={`${activeJobs} render job${activeJobs > 1 ? "s" : ""} actively processing in background`}>
-                  <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-400/30 animate-pulse cursor-help">
+                  <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-400/30 animate-pulse cursor-help">
                     {activeJobs}
                   </span>
                 </Tooltip>
@@ -215,7 +215,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               href="/staging"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname?.startsWith("/staging")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -227,7 +227,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               href="/channel"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname?.startsWith("/channel")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -239,7 +239,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               href="/youtube"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname?.startsWith("/youtube")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -251,7 +251,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               href="/setup"
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] min-h-[44px] shrink-0 font-semibold rounded-lg transition-all ${
                 pathname?.startsWith("/setup")
                   ? "bg-rose-600 text-white shadow-md shadow-rose-900/40"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
@@ -277,7 +277,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => setIsPreflightModalOpen(true)}
-              className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-white/10 text-xs text-slate-300 transition-colors cursor-pointer"
+              className="hidden sm:flex items-center gap-2 px-3.5 py-2 min-h-[44px] rounded-full shrink-0 bg-slate-900/80 hover:bg-slate-800 border border-white/10 text-xs text-slate-300 transition-colors cursor-pointer"
             >
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -306,7 +306,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Search Input (if callback provided) */}
         {onSearchChange && (
-          <div className="flex-1 max-w-sm w-full">
+          <div className="flex-1 min-w-[200px] max-w-md w-full">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
@@ -314,7 +314,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 value={searchQuery ?? ""}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search video titles or keywords..."
-                className="w-full pl-9 pr-4 py-1.5 bg-slate-900/90 border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
+                className="w-full pl-9 pr-4 py-2.5 min-h-[44px] bg-slate-900/90 border border-white/10 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
               />
             </div>
           </div>
@@ -322,21 +322,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Channel Selector & Sync Button (if provided) */}
         {onChannelInputChange && (
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:w-48">
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto min-w-0">
+            <div className="relative flex-1 min-w-[160px] lg:w-48">
               <input
                 type="text"
                 value={channelInput}
                 onChange={(e) => onChannelInputChange(e.target.value)}
                 placeholder="@Channel or URL"
-                className="w-full pl-3 pr-2.5 py-1.5 bg-slate-900/90 border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
+                className="w-full pl-3 pr-3 py-2.5 min-h-[44px] bg-slate-900/90 border border-white/10 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
               />
             </div>
             {onSync && (
               <button
                 onClick={onSync}
                 disabled={isSyncing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-800 disabled:opacity-70 text-white text-xs font-semibold rounded-lg shadow-md shadow-rose-900/40 transition-all cursor-pointer whitespace-nowrap active:scale-95"
+                className="flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] bg-rose-600 hover:bg-rose-500 disabled:bg-rose-800 disabled:opacity-70 text-white text-xs font-semibold rounded-lg shadow-md shadow-rose-900/40 transition-all cursor-pointer whitespace-nowrap active:scale-95"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
                 <span>{isSyncing ? "Syncing..." : "Sync"}</span>

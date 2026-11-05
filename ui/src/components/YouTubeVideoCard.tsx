@@ -39,7 +39,7 @@ export const YouTubeVideoCard: React.FC<YouTubeVideoCardProps> = ({
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.3) }}
-      className={`group relative flex flex-col bg-[#12141c] rounded-2xl overflow-hidden shadow-lg transition-all duration-200 border ${
+      className={`group relative flex flex-col min-w-0 bg-[#12141c] rounded-2xl overflow-hidden shadow-lg transition-all duration-200 border ${
         isSelected
           ? "border-rose-500 ring-2 ring-rose-500/30 bg-[#171a26] shadow-rose-950/30"
           : isInLibrary
@@ -93,7 +93,7 @@ export const YouTubeVideoCard: React.FC<YouTubeVideoCardProps> = ({
           className="absolute top-2.5 right-2.5 z-10 cursor-pointer"
         >
           <div
-            className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all shadow-md ${
+            className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-all shadow-md ${
               isSelected
                 ? "bg-rose-600 border-rose-500 text-white shadow-rose-900/50"
                 : "bg-slate-900/85 hover:bg-slate-800 border-white/20 text-transparent"
@@ -155,7 +155,7 @@ export const YouTubeVideoCard: React.FC<YouTubeVideoCardProps> = ({
 
           <button
             onClick={() => onToggleSelect(video)}
-            className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1 ${
+            className={`px-3 py-2.5 min-h-[40px] rounded-lg font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1 ${
               isSelected
                 ? "bg-rose-600/30 text-rose-300 border border-rose-500/40 hover:bg-rose-600/40"
                 : isInLibrary

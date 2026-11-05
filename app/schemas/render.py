@@ -125,6 +125,12 @@ class RenderJobResponse(BaseModel):
     youtube_upload_url: str | None = None
     youtube_uploaded_at: str | None = None
     youtube_upload_error: str | None = None
+    latest_view_count: int = 0
+    latest_like_count: int = 0
+    latest_comment_count: int = 0
+    velocity_3h: int = 0
+    velocity_24h: int = 0
+    metrics_last_polled_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     completed_at: str | None = None

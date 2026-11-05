@@ -614,7 +614,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-5xl bg-[#10121a] border border-rose-500/20 rounded-2xl shadow-2xl shadow-rose-950/20 overflow-hidden z-10 my-auto flex flex-col max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)]"
+            className="relative w-full w-[calc(100%-2rem)] max-w-5xl bg-[#10121a] border border-rose-500/20 rounded-2xl shadow-2xl shadow-rose-950/20 overflow-hidden z-10 my-auto flex flex-col max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)]"
           >
             {/* Header */}
             <div className="p-5 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-rose-950/40 via-purple-950/20 to-transparent shrink-0">
@@ -654,7 +654,7 @@ export const ClipStudioModal: React.FC<ClipStudioModalProps> = ({ video, initial
                       </button>
                     )}
                   </div>
-                <p className="text-xs text-slate-400 truncate max-w-xl">
+                <p className="text-xs text-slate-400 truncate w-[calc(100%-2rem)] sm:w-full max-w-xl">
                   {video.title} ({video.duration_formatted})
                 </p>
               </div>

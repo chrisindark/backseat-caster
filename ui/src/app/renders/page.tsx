@@ -608,7 +608,7 @@ function RendersContent() {
       <Navbar backendHealthy={backendHealthy} />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-8">
+      <main className="flex-1 w-full max-w-[1280px] xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
         {/* Toast Alert Notice */}
         {toastMessage && (
           <div className="p-3 bg-slate-900 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center justify-between shadow-xl animate-in fade-in">
@@ -652,7 +652,7 @@ function RendersContent() {
             </div>
 
             {/* Quick KPI stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0 max-w-full">
               <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-white/10 shadow-lg">
                 <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
                   Completed Renders
@@ -975,7 +975,7 @@ function RendersContent() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-2 gap-6 min-w-0">
               {filteredRenders.map((render) => (
                 <RenderCard
                   key={render.clip_id}
@@ -1027,7 +1027,7 @@ function RendersContent() {
       {selectedClipIds.size > 0 && (
         <aside
           aria-label="Bulk actions"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-xl px-4 animate-in slide-in-from-bottom-5 duration-200"
+          className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] sm:w-full max-w-xl px-0 sm:px-4 animate-in slide-in-from-bottom-5 duration-200"
         >
           <div className="flex items-center justify-between gap-3 p-3 bg-slate-900/95 border border-rose-500/40 rounded-2xl shadow-2xl shadow-black/80 backdrop-blur-xl">
             <div className="flex items-center gap-2.5 pl-1.5">

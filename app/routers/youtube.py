@@ -335,8 +335,30 @@ def upload_selected_queue(
             )
         )
 
-    # Quota usage is advisory: uploads are never blocked locally so an
-    # exhausted budget surfaces as YouTube's own quotaExceeded error instead.
+    # Quota gate (batch): if YouTube already blocked this quota day, fail
+    # fast with 429 instead of dispatching uploads that will all fail.
+    _batch_gate = YouTubeQuotaService.get_summary(db)
+    if sync and _batch_gate.get("blocked_reason") in (
+        "api_quota_exceeded",
+        "upload_limit_exceeded",
+    ):
+        _blocked_until = _batch_gate.get("blocked_until")
+        retry_at = None
+        headers = None
+        if _blocked_until:
+            try:
+                retry_at = datetime.fromisoformat(_blocked_until)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=UTC)
+                headers = {"Retry-After": str(max(0, int((retry_at - datetime.now(UTC)).total_seconds())))}
+            except Exception:
+                retry_at = None
+        raise APIException(
+            status_code=429,
+            detail=f"YouTube uploads are blocked for this quota day ({_batch_gate['blocked_reason']}). Retry after {_blocked_until or 'midnight Pacific'}.",
+            error_code=_batch_gate["blocked_reason"],
+            headers=headers,
+        )
 
     if sync:
         results = YouTubeUploaderService.upload_selected_clips(db=db)
@@ -506,6 +528,29 @@ def upload_clip(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"YouTube upload failed: {e!s}",
             )
+
+    # Quota pre-flight gate (uploads): fail fast locally when YouTube
+    # already blocked this quota day, so we return 429 with Retry-After
+    # instead of dispatching a task that would fail at the API.
+    _quota = YouTubeQuotaService.get_summary(db)
+    if _quota.get("blocked_reason") in ("api_quota_exceeded", "upload_limit_exceeded"):
+        _blocked_until = _quota.get("blocked_until")
+        retry_at = None
+        headers = None
+        if _blocked_until:
+            try:
+                retry_at = datetime.fromisoformat(_blocked_until)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=UTC)
+                headers = {"Retry-After": str(max(0, int((retry_at - datetime.now(UTC)).total_seconds())))}
+            except Exception:
+                retry_at = None
+        raise APIException(
+            status_code=429,
+            detail=f"YouTube uploads are blocked for this quota day ({_quota['blocked_reason']}). Retry after {_blocked_until or 'midnight Pacific'}.",
+            error_code=_quota["blocked_reason"],
+            headers=headers,
+        )
 
     # Asynchronous execution
     if job:
@@ -791,7 +836,16 @@ def sync_youtube_statistics(
         result = YouTubeAnalyticsService.poll_video_statistics(
             db, max_age_days=max_age_days
         )
+        if result.get("skipped"):
+            quota = result.get("quota") if isinstance(result.get("quota"), dict) else {}
+            raise APIException(
+                status_code=429,
+                detail=result.get("message", "YouTube quota gate blocked analytics sync."),
+                error_code=quota.get("analytics_block_reason", "analytics_threshold_exceeded"),
+            )
         return BaseResponse.success_response(response=AnalyticsSyncResponse(**result))
+    except APIException:
+        raise
     except Exception as e:
         logger.exception("Failed to sync YouTube statistics: %s", e)
         raise HTTPException(

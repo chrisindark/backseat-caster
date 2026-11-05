@@ -81,6 +81,8 @@ class RenderJob(Base):
     latest_comment_count = Column(Integer, default=0)
     velocity_3h = Column(Integer, default=0)
     velocity_24h = Column(Integer, default=0)
+    velocity_72h = Column(Integer, default=0)
+    velocity_7d = Column(Integer, default=0)
     metrics_last_polled_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=utc_now)
@@ -138,6 +140,8 @@ class RenderJob(Base):
             "latest_comment_count": self.latest_comment_count or 0,
             "velocity_3h": self.velocity_3h or 0,
             "velocity_24h": self.velocity_24h or 0,
+            "velocity_72h": getattr(self, "velocity_72h", 0) or 0,
+            "velocity_7d": getattr(self, "velocity_7d", 0) or 0,
             "metrics_last_polled_at": self.metrics_last_polled_at.isoformat()
             if self.metrics_last_polled_at
             else None,

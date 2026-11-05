@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.services.videos",
         "app.services.renders",
         "app.services.youtube_uploader",
+        "app.services.youtube_analytics",
         "app.services.highlight.service",
         "app.services.auto_pipeline",
         "app.services.watch_folder",
@@ -32,6 +33,15 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=3,
     worker_pool="solo",
+    # Rate limits protect the YouTube 10,000 units/day budget
+    task_default_rate_limit="10/m",
+    task_annotations={
+        "upload_clip_celery_task": {"rate_limit": "1/m"},
+        "batch_upload_clips_celery_task": {"rate_limit": "1/m"},
+        "app.services.youtube_analytics.sync_video_analytics_task": {
+            "rate_limit": "10/m"
+        },
+    },
 )
 
 # Avoid spawn/forkserver-specific fast trace failures on Python 3.14.

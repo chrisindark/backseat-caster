@@ -1199,7 +1199,7 @@ export default function ChannelProfilePage() {
                       Optimal Slot Performance &amp; View Velocity
                     </h2>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Calculates initial view velocity (+3h and +24h) for published Shorts via lightweight stats polling, ranking slots by audience engagement.
+                      Calculates view velocity over 7 days for published Shorts via lightweight stats polling, ranking slots by audience engagement.
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1305,7 +1305,7 @@ export default function ChannelProfilePage() {
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-white/5">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 text-[11px] pt-1 border-t border-white/5">
                               <div>
                                 <span className="text-[10px] text-slate-500 block">Avg Views</span>
                                 <span className="font-semibold text-slate-200">
@@ -1316,6 +1316,18 @@ export default function ChannelProfilePage() {
                                 <span className="text-[10px] text-slate-500 block">+3h Vel.</span>
                                 <span className="font-semibold text-emerald-400">
                                   +{s.avg_velocity_3h.toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">+72h Vel.</span>
+                                <span className="font-semibold text-emerald-400">
+                                  +{(s.avg_velocity_72h ?? 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">+7d Vel.</span>
+                                <span className="font-semibold text-emerald-400">
+                                  +{(s.avg_velocity_7d ?? 0).toLocaleString()}
                                 </span>
                               </div>
                               <div>

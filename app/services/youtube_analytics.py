@@ -12,11 +12,12 @@ from zoneinfo import ZoneInfo
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_task_db_session
-from app.models.channel_profile import ChannelProfile
 from app.models.render_job import RenderJob
 from app.models.video_analytics_snapshot import VideoAnalyticsSnapshot
 from app.services.channel_profile import ChannelProfileService
+from app.services.youtube_errors import parse_youtube_api_error
 from app.services.youtube_quota import YouTubeQuotaService
 from app.services.youtube_uploader import YouTubeUploaderService
 from app.worker.celery_app import celery_app
@@ -57,6 +58,8 @@ class YouTubeAnalyticsService:
         """Poll YouTube Data API v3 for latest statistics on recently uploaded clips.
 
         Batches up to 50 video IDs per call, costing only 1 quota unit per batch.
+        Default 14-day lookback covers the full 7-day velocity window so
+        slowly-accumulating (quiet-day) views are captured.
         """
         creds = YouTubeUploaderService.get_credentials()
         if not creds:
@@ -66,6 +69,24 @@ class YouTubeAnalyticsService:
                 "updated_count": 0,
                 "snapshots_created": 0,
                 "message": "YouTube credentials not connected or expired.",
+            }
+
+        # Quota gate (analytics budget, default 2,000 units — independent of
+        # the upload budget): only stops analytics when its own budget is spent.
+        gate = YouTubeQuotaService.check_analytics_budget(db)
+        if not gate["can_analytics"]:
+            logger.warning(
+                "YouTube analytics skipped: %s (%s units used today)",
+                gate["analytics_block_reason"],
+                gate["units_used"],
+            )
+            return {
+                "polled_count": 0,
+                "updated_count": 0,
+                "snapshots_created": 0,
+                "skipped": True,
+                "message": f"Analytics skipped: YouTube quota budget gated ({gate['analytics_block_reason']}, {gate['units_used']}/{gate['daily_limit_units']} units used).",
+                "quota": gate,
             }
 
         now_utc = datetime.now(UTC)
@@ -94,8 +115,8 @@ class YouTubeAnalyticsService:
         job_map: dict[str, RenderJob] = {j.youtube_video_id: j for j in jobs if j.youtube_video_id}
         video_ids = list(job_map.keys())
 
-        # Batch into chunks of 50
-        batch_size = 50
+        # Batch into chunks of 50 (YouTube API cap, 1 unit per batch)
+        batch_size = max(1, int(getattr(settings, "YOUTUBE_ANALYTICS_BATCH_LIMIT", 50)))
         batches = [video_ids[i : i + batch_size] for i in range(0, len(video_ids), batch_size)]
 
         total_snapshots = 0
@@ -114,9 +135,34 @@ class YouTubeAnalyticsService:
             }
 
         for batch in batches:
+            response: dict | None = None
+            for attempt in range(
+                max(1, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3))) + 1
+            ):
+                try:
+                    request = youtube.videos().list(part="statistics", id=",".join(batch))
+                    response = request.execute()
+                    break
+                except Exception as exc:
+                    parsed = parse_youtube_api_error(
+                        exc, quota_reset_at=YouTubeQuotaService.resets_at()
+                    )
+                    max_attempts = max(1, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3)))
+                    if parsed.retryable and attempt < max_attempts:
+                        YouTubeQuotaService.backoff_sleep(attempt)
+                        continue
+                    if parsed.api_quota_exhausted:
+                        try:
+                            YouTubeQuotaService.record_upload_failure(db, parsed)
+                        except Exception:
+                            db.rollback()
+                    logger.warning("Failed to fetch statistics batch: %s", exc)
+                    db.rollback()
+                    response = None
+                    break
+            if response is None:
+                continue
             try:
-                request = youtube.videos().list(part="statistics", id=",".join(batch))
-                response = request.execute()
                 # Charge 1 quota unit for this batch
                 YouTubeQuotaService.record_units_used(db, 1)
 
@@ -200,6 +246,41 @@ class YouTubeAnalyticsService:
                         if s24:
                             job.velocity_24h = s24.view_count
 
+                    # 72h window: catches uploads on quiet days (audience may
+                    # not be active for 1-2 days after publish).
+                    if hours_elapsed <= 73.0:
+                        job.velocity_72h = views
+                    elif not job.velocity_72h:
+                        s72 = (
+                            db.query(VideoAnalyticsSnapshot)
+                            .filter(
+                                VideoAnalyticsSnapshot.job_id == job.id,
+                                VideoAnalyticsSnapshot.hours_since_publish >= 70.0,
+                                VideoAnalyticsSnapshot.hours_since_publish <= 76.0,
+                            )
+                            .order_by(VideoAnalyticsSnapshot.hours_since_publish.asc())
+                            .first()
+                        )
+                        if s72:
+                            job.velocity_72h = s72.view_count
+
+                    # 7d window: primary ranking signal for optimal slots.
+                    if hours_elapsed <= 169.0:
+                        job.velocity_7d = views
+                    elif not job.velocity_7d:
+                        s7d = (
+                            db.query(VideoAnalyticsSnapshot)
+                            .filter(
+                                VideoAnalyticsSnapshot.job_id == job.id,
+                                VideoAnalyticsSnapshot.hours_since_publish >= 166.0,
+                                VideoAnalyticsSnapshot.hours_since_publish <= 172.0,
+                            )
+                            .order_by(VideoAnalyticsSnapshot.hours_since_publish.asc())
+                            .first()
+                        )
+                        if s7d:
+                            job.velocity_7d = s7d.view_count
+
                     updated_jobs += 1
 
                 db.commit()
@@ -268,6 +349,8 @@ class YouTubeAnalyticsService:
                 "total_views": 0,
                 "total_velocity_3h": 0,
                 "total_velocity_24h": 0,
+                "total_velocity_72h": 0,
+                "total_velocity_7d": 0,
                 "total_likes": 0,
                 "total_comments": 0,
             }
@@ -293,6 +376,12 @@ class YouTubeAnalyticsService:
             data["total_views"] += int(job.latest_view_count or 0)
             data["total_velocity_3h"] += int(job.velocity_3h or job.latest_view_count or 0)
             data["total_velocity_24h"] += int(job.velocity_24h or job.latest_view_count or 0)
+            data["total_velocity_72h"] += int(
+                getattr(job, "velocity_72h", 0) or job.latest_view_count or 0
+            )
+            data["total_velocity_7d"] += int(
+                getattr(job, "velocity_7d", 0) or job.latest_view_count or 0
+            )
             data["total_likes"] += int(job.latest_like_count or 0)
             data["total_comments"] += int(job.latest_comment_count or 0)
 
@@ -302,14 +391,24 @@ class YouTubeAnalyticsService:
             avg_views = round(data["total_views"] / cnt, 1) if cnt > 0 else 0.0
             avg_vel_3h = round(data["total_velocity_3h"] / cnt, 1) if cnt > 0 else 0.0
             avg_vel_24h = round(data["total_velocity_24h"] / cnt, 1) if cnt > 0 else 0.0
+            avg_vel_72h = round(data["total_velocity_72h"] / cnt, 1) if cnt > 0 else 0.0
+            avg_vel_7d = round(data["total_velocity_7d"] / cnt, 1) if cnt > 0 else 0.0
             eng_rate = (
                 round((data["total_likes"] + data["total_comments"]) / max(1, data["total_views"]), 4)
                 if data["total_views"] > 0
                 else 0.0
             )
 
-            # Score formula: 60% 24h velocity + 30% 3h velocity + 10% engagement rate
-            perf_score = round(0.6 * avg_vel_24h + 0.3 * avg_vel_3h + 0.1 * (eng_rate * 1000.0), 1)
+            # Score formula (7d-primary): 50% 7d velocity + 25% 72h velocity
+            # + 15% 24h velocity + 10% engagement rate. 3h is still reported
+            # for early diagnostics but no longer drives the rank.
+            perf_score = round(
+                0.5 * avg_vel_7d
+                + 0.25 * avg_vel_72h
+                + 0.15 * avg_vel_24h
+                + 0.1 * (eng_rate * 1000.0),
+                1,
+            )
 
             slot_results.append(
                 {
@@ -318,6 +417,8 @@ class YouTubeAnalyticsService:
                     "avg_views": avg_views,
                     "avg_velocity_3h": avg_vel_3h,
                     "avg_velocity_24h": avg_vel_24h,
+                    "avg_velocity_72h": avg_vel_72h,
+                    "avg_velocity_7d": avg_vel_7d,
                     "engagement_rate": eng_rate,
                     "performance_score": perf_score,
                 }
@@ -396,6 +497,8 @@ class YouTubeAnalyticsService:
             "latest_likes": job.latest_like_count or 0,
             "velocity_3h": job.velocity_3h or 0,
             "velocity_24h": job.velocity_24h or 0,
+            "velocity_72h": getattr(job, "velocity_72h", 0) or 0,
+            "velocity_7d": getattr(job, "velocity_7d", 0) or 0,
             "snapshots": [
                 {
                     "hours": round(s.hours_since_publish, 2),
@@ -415,7 +518,7 @@ def execute_sync_analytics_job(max_age_days: int = 14) -> dict[str, Any]:
         return YouTubeAnalyticsService.poll_video_statistics(db, max_age_days=max_age_days)
 
 
-@celery_app.task(name="app.services.youtube_analytics.sync_video_analytics_task")
+@celery_app.task(name="app.services.youtube_analytics.sync_video_analytics_task", rate_limit="10/m")
 def sync_video_analytics_celery_task(max_age_days: int = 14) -> dict[str, Any]:
     """Celery task entry point for YouTube view statistics polling."""
     return execute_sync_analytics_job(max_age_days=max_age_days)

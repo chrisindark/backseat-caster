@@ -290,3 +290,83 @@ def test_analytics_api_endpoints(client, db_session, sample_uploaded_jobs, monke
     assert res_timeline.status_code == 200
     timeline_data = res_timeline.json()["response"]
     assert timeline_data["clip_id"] == "clip_1"
+
+
+# --- Quota throttle tests ---
+
+from app.services.youtube_errors import backoff_delay as _backoff_delay
+from app.services.youtube_quota import YouTubeQuotaService as _QuotaService
+
+
+def test_analytics_quota_gate_blocks_at_threshold(db_session):
+    # Analytics budget is 2,000 units by default — exhausting it blocks sync
+    _QuotaService.record_units_used(db_session, 2000)
+    gate = _QuotaService.check_analytics_budget(db_session)
+    assert gate["can_analytics"] is False
+    assert gate["analytics_block_reason"] == "analytics_budget_exceeded"
+
+    result = YouTubeAnalyticsService.poll_video_statistics(db_session)
+    assert result.get("skipped") is True
+    assert result["polled_count"] == 0
+
+
+def test_upload_and_analytics_have_separate_gates(db_session):
+    # 6 uploads (9,600 total units) exhaust the 8,000 upload budget
+    for _ in range(6):
+        _QuotaService.record_upload_success(db_session)
+    summary = _QuotaService.get_summary(db_session)
+    assert summary["uploads_remaining"] == 0
+    assert summary["can_upload"] is False
+    # ...but analytics (2,000 budget, 0 used) is still open
+    assert summary["can_analytics"] is True
+    assert summary["analytics_units_remaining"] == 2000
+    # Analytics still fails the shared pool — 9,600/10,000 leaves 400 units
+    assert summary["units_used"] == 9600
+
+
+def test_analytics_quota_gate_allows_upload_limit_block(db_session):
+    # uploadLimitExceeded should NOT block analytics reads
+    from datetime import datetime, timedelta, UTC
+
+    usage = _QuotaService.get_or_create_usage(db_session)
+    usage.blocked_reason = "upload_limit_exceeded"
+    usage.blocked_until = datetime.now(UTC) + timedelta(hours=1)
+    db_session.commit()
+    gate = _QuotaService.check_analytics_budget(db_session)
+    # uploads blocked, analytics NOT blocked by upload limit
+    assert gate["can_upload"] is False
+    assert gate["can_analytics"] is True
+    assert gate["analytics_block_reason"] is None
+
+
+def test_backoff_delay_exponential():
+    assert _backoff_delay(0) == 2.0
+    assert _backoff_delay(1) == 4.0
+    assert _backoff_delay(2) == 8.0
+    # capped
+    assert _backoff_delay(20, base_seconds=2.0, max_seconds=120.0) == 120.0
+
+
+def test_celery_rate_limits_configured():
+    from app.worker.celery_app import celery_app
+
+    assert celery_app.conf.task_default_rate_limit == "10/m"
+    annotations = celery_app.conf.task_annotations or {}
+    assert annotations.get("upload_clip_celery_task", {}).get("rate_limit") == "1/m"
+    assert annotations.get("batch_upload_clips_celery_task", {}).get("rate_limit") == "1/m"
+    from app.services.youtube_analytics import sync_video_analytics_celery_task
+
+    assert sync_video_analytics_celery_task.rate_limit == "10/m"
+    from app.services.youtube_uploader import upload_clip_celery_task
+
+    assert upload_clip_celery_task.rate_limit == "1/m"
+
+
+def test_quota_summary_exposes_throttle_fields(db_session):
+    summary = _QuotaService.get_summary(db_session)
+    assert summary["can_analytics"] is True
+    assert summary["analytics_threshold"] == 0.8
+    assert summary["analytics_batch_limit"] == 50
+    assert summary["usage_fraction"] == 0.0
+    assert summary["upload_budget_units"] == 8000
+    assert summary["analytics_budget_units"] == 2000

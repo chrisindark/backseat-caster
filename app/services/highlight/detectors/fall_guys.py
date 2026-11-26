@@ -31,6 +31,12 @@ from app.services.highlight.detectors.base import (
 from app.services.highlight.ocr import OCRReader
 from app.services.highlight.roi_extractor import BatchROIExtractionResult
 from app.services.highlight.speech_mining import snap_to_speech_boundaries
+from app.services.upload_metadata import (
+    TIER_HIGH_ADJECTIVES,
+    TIER_PEAK_ADJECTIVES,
+    TIER_PRECISION_ADJECTIVES,
+    pick_adjective,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -324,13 +330,15 @@ class FallGuysDetector(BaseHighlightDetector):
                 max_duration=45.0,
             )
 
-            # Title & tags generation
-            title, tags = self._generate_title_and_tags(event_type, event_score)
-
             cid_hash = hashlib.md5(
                 f"{video_id}_{snapped_start:.1f}_{snapped_end:.1f}_{event_type}".encode()
             ).hexdigest()[:6]
             candidate_id = f"cand_fg_{cid_hash}"
+
+            # Title & tags generation with deterministic seed
+            title, tags = self._generate_title_and_tags(
+                event_type, event_score, seed=candidate_id
+            )
 
             trigger_events_list = [
                 TriggerEvent(
@@ -411,16 +419,22 @@ class FallGuysDetector(BaseHighlightDetector):
         return retained
 
     def _generate_title_and_tags(
-        self, event_type: str, score: float
+        self, event_type: str, score: float, seed: Any = None
     ) -> tuple[str, list[str]]:
         """Generate high-CTR YouTube Shorts titles and tags for Fall Guys."""
         base_tags = ["Fall Guys", "FallGuysGame", "Gaming", "Shorts", "Viral"]
+        seed_val = seed or f"{event_type}_{score}"
+        peak_adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed_val, "fg_crown")
+        high_adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed_val, "fg_qual")
+        chaos_adj = pick_adjective(
+            TIER_HIGH_ADJECTIVES + TIER_PRECISION_ADJECTIVES, seed_val, "fg_chaos"
+        )
 
         if event_type == "crown_victory":
-            title = "UNREAL FALL GUYS CROWN VICTORY! 👑 #FallGuys #Shorts"
+            title = f"{peak_adj.upper()} FALL GUYS CROWN VICTORY! 👑 #FallGuys #Shorts"
             tags = ["Crown", "Winner", "Champion", "Clutch"] + base_tags
         elif event_type == "round_qualified":
-            title = "INSANE Fall Guys Round Qualification! ⚡ #FallGuys #Shorts"
+            title = f"{high_adj} Fall Guys Round Qualification! ⚡ #FallGuys #Shorts"
             tags = ["Qualified", "Speedrun", "ObstacleCourse"] + base_tags
         elif event_type == "final_round":
             title = "FALL GUYS FINAL ROUND INTENSITY! 🔥 #FallGuys #Shorts"
@@ -429,10 +443,10 @@ class FallGuysDetector(BaseHighlightDetector):
             title = "Heartbreaking Fall Guys Elimination! 💀 #FallGuys #Shorts"
             tags = ["Eliminated", "Fail", "SlimeClimb", "Funny"] + base_tags
         elif event_type == "round_over":
-            title = "Fall Guys Chaos & Clutch Highlights! 🏃 #FallGuys #Shorts"
+            title = f"Fall Guys {chaos_adj} Highlights! 🏃 #FallGuys #Shorts"
             tags = ["RoundOver", "Highlights", "Chaos"] + base_tags
         else:
-            title = "Unbelievable Fall Guys Physics Chaos! 🏃 #FallGuys #Shorts"
+            title = f"{peak_adj} Fall Guys Physics Chaos! 🏃 #FallGuys #Shorts"
             tags = ["Chaos", "FunnyMoments", "Clutch"] + base_tags
 
         return title, tags

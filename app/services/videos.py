@@ -906,7 +906,11 @@ class VideoService:
         ):
             video.duration_formatted = format_duration(video.duration)
 
-        if "is_ignored" in update_data and not update_data["is_ignored"] and "ignore_reason" not in update_data:
+        if (
+            "is_ignored" in update_data
+            and not update_data["is_ignored"]
+            and "ignore_reason" not in update_data
+        ):
             video.ignore_reason = None
 
         video.updated_at = datetime.now(UTC)

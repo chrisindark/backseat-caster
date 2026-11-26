@@ -99,7 +99,8 @@ class YouTubeQuotaService:
         upload_units_used = int(getattr(usage, "upload_units_used", 0) or 0)
         analytics_units_used = int(getattr(usage, "analytics_units_used", 0) or 0)
         upload_budget = max(
-            upload_cost, int(getattr(settings, "YOUTUBE_UPLOAD_QUOTA_UNITS", 8000) or 8000)
+            upload_cost,
+            int(getattr(settings, "YOUTUBE_UPLOAD_QUOTA_UNITS", 8000) or 8000),
         )
         analytics_budget = max(
             1,
@@ -168,7 +169,9 @@ class YouTubeQuotaService:
         usage = cls.get_or_create_usage(db, summary["quota_day"])
         usage.units_used = int(usage.units_used or 0) + cost
         try:
-            usage.upload_units_used = int(getattr(usage, "upload_units_used", 0) or 0) + cost
+            usage.upload_units_used = (
+                int(getattr(usage, "upload_units_used", 0) or 0) + cost
+            )
         except Exception:
             pass
         usage.uploads_count = int(usage.uploads_count or 0) + 1
@@ -204,9 +207,13 @@ class YouTubeQuotaService:
         usage.units_used = int(usage.units_used or 0) + units
         try:
             if kind == "upload":
-                usage.upload_units_used = int(getattr(usage, "upload_units_used", 0) or 0) + units
+                usage.upload_units_used = (
+                    int(getattr(usage, "upload_units_used", 0) or 0) + units
+                )
             else:
-                usage.analytics_units_used = int(getattr(usage, "analytics_units_used", 0) or 0) + units
+                usage.analytics_units_used = (
+                    int(getattr(usage, "analytics_units_used", 0) or 0) + units
+                )
         except Exception:
             pass
         db.commit()
@@ -240,7 +247,9 @@ class YouTubeQuotaService:
                 )
                 usage.analytics_units_used = max(
                     int(getattr(usage, "analytics_units_used", 0) or 0),
-                    int(getattr(settings, "YOUTUBE_ANALYTICS_QUOTA_UNITS", 2000) or 2000),
+                    int(
+                        getattr(settings, "YOUTUBE_ANALYTICS_QUOTA_UNITS", 2000) or 2000
+                    ),
                 )
             except Exception:
                 pass
@@ -290,7 +299,9 @@ class YouTubeQuotaService:
         return summary
 
     @classmethod
-    def check_upload_budget(cls, db: Session, now: datetime | None = None) -> dict[str, Any]:
+    def check_upload_budget(
+        cls, db: Session, now: datetime | None = None
+    ) -> dict[str, Any]:
         """Pre-flight gate for a single upload (advisory, non-raising).
 
         Considers only the upload unit budget (default 8,000); analytics
@@ -319,6 +330,8 @@ class YouTubeQuotaService:
             float(settings.YOUTUBE_BACKOFF_MAX_SECONDS),
             float(settings.YOUTUBE_BACKOFF_BASE_SECONDS) * (2.0**attempt),
         )
-        logger.warning("YouTube quota throttle: backing off %.1fs (attempt %d)", delay, attempt + 1)
+        logger.warning(
+            "YouTube quota throttle: backing off %.1fs (attempt %d)", delay, attempt + 1
+        )
         time.sleep(delay)
         return delay

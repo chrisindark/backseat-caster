@@ -80,6 +80,10 @@ class SettingsManager:
             "watch_dir": "WATCH_DIR",
             "watch_poll_interval_minutes": "WATCH_POLL_INTERVAL_MINUTES",
             "watch_delete_after_ingest": "WATCH_DELETE_AFTER_INGEST",
+            "highlight_min_clip_duration": "HIGHLIGHT_MIN_CLIP_DURATION",
+            "highlight_max_clip_duration": "HIGHLIGHT_MAX_CLIP_DURATION",
+            "highlight_pre_roll_seconds": "HIGHLIGHT_PRE_ROLL_SECONDS",
+            "highlight_post_roll_seconds": "HIGHLIGHT_POST_ROLL_SECONDS",
         }
 
         for api_key, attr_name in mapping.items():

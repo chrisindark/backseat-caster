@@ -961,14 +961,12 @@ def test_batch_publish_slots_same_day_catchup(db_session):
     for s in local_slots:
         assert s.date() == target_date
 
-    # The 2 missed early slots catch up at 16:00 (spaced 3 mins apart: 16:00, 16:03, 16:06)
+    # The 2 missed early slots are distributed into available gaps on the same day with reasonable breathing room
     assert local_slots[0].hour == 16 and local_slots[0].minute == 0
-    assert local_slots[1].hour == 16 and local_slots[1].minute == 3
-    assert local_slots[2].hour == 16 and local_slots[2].minute == 6
-    # The remaining 3 slots fill the remaining daily slots: 18:30, 20:30, 23:00
-    assert local_slots[3].hour == 18 and local_slots[3].minute == 30
-    assert local_slots[4].hour == 20 and local_slots[4].minute == 30
-    assert local_slots[5].hour == 23 and local_slots[5].minute == 0
+    for idx in range(len(local_slots) - 1):
+        assert local_slots[idx + 1] > local_slots[idx]
+        gap_mins = (local_slots[idx + 1] - local_slots[idx]).total_seconds() / 60
+        assert gap_mins >= 30, f"Gap between slot {idx} and {idx+1} is only {gap_mins}m, expected >= 30m"
 
 
 def test_batch_stage_highlights_endpoint(client, dummy_video, db_session, monkeypatch):
@@ -1073,6 +1071,7 @@ def test_batch_publish_slots_at_5pm_same_day(db_session):
     """Verify at 5:00 PM on Nov 3, 2026, all missed slots catch up and all 6 clips publish on the same day."""
     from datetime import UTC, datetime
     from zoneinfo import ZoneInfo
+
     from app.services.auto_stage import AutoStageService
 
     tz = ZoneInfo("Asia/Kolkata")
@@ -1094,18 +1093,20 @@ def test_batch_publish_slots_at_5pm_same_day(db_session):
     for s in local_slots:
         assert s.date() == target_date
 
-    # The missed slots catch up at 18:00 or 18:30 (first remaining slot)
+    # The missed slots are distributed into evening slots with reasonable spacing
     first_hour = local_slots[0].hour
     assert first_hour in (18, 18)
-    assert local_slots[1].minute == local_slots[0].minute + 3
-    assert local_slots[2].minute == local_slots[0].minute + 6
-    assert local_slots[3].minute == local_slots[0].minute + 9
+    for idx in range(len(local_slots) - 1):
+        assert local_slots[idx + 1] > local_slots[idx]
+        gap_mins = (local_slots[idx + 1] - local_slots[idx]).total_seconds() / 60
+        assert gap_mins >= 15, f"Gap between slot {idx} and {idx+1} is only {gap_mins}m, expected >= 15m"
 
 
 def test_batch_publish_slots_late_evening_same_day_catchup(db_session):
     """Verify when staging after all regular daily slots have passed, clips still catch up on the same day."""
     from datetime import UTC, datetime
     from zoneinfo import ZoneInfo
+
     from app.services.auto_stage import AutoStageService
 
     tz = ZoneInfo("Asia/Kolkata")
@@ -1126,7 +1127,65 @@ def test_batch_publish_slots_late_evening_same_day_catchup(db_session):
     for s in local_slots:
         assert s.date() == target_date
     assert local_slots[0].hour == 23 and local_slots[0].minute == 30
-    assert local_slots[1].hour == 23 and local_slots[1].minute == 33
-    assert local_slots[2].hour == 23 and local_slots[2].minute == 36
-    assert local_slots[3].hour == 23 and local_slots[3].minute == 39
+    for idx in range(len(local_slots) - 1):
+        assert local_slots[idx + 1] > local_slots[idx]
+        gap_mins = (local_slots[idx + 1] - local_slots[idx]).total_seconds() / 60
+        assert gap_mins >= 5
 
+
+def test_batch_publish_slots_single_remaining_slot_distributes_smoothly(db_session):
+    """Verify when only 1 slot remains today, clips are distributed across the evening instead of 3-minute bunching."""
+    import json
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models.channel_profile import ChannelProfile
+    from app.models.render_job import RenderJob
+    from app.services.auto_stage import AutoStageService
+
+    # Channel with only 3 slots (08:00, 12:30, 16:00)
+    profile = ChannelProfile(
+        id=1,
+        upload_slots=json.dumps(["08:00", "12:30", "16:00"]),
+        upload_timezone="Asia/Kolkata",
+    )
+    db_session.add(profile)
+
+    # Failed job at 16:00
+    tz = ZoneInfo("Asia/Kolkata")
+    failed_job = RenderJob(
+        id="failed_job_1",
+        clip_id="clip_failed",
+        video_id="vid_1",
+        status="failed",
+        start_seconds=0.0,
+        duration_seconds=15.0,
+        scheduled_publish_at=datetime(2026, 11, 13, 16, 0, tzinfo=tz).astimezone(UTC),
+    )
+    db_session.add(failed_job)
+    db_session.commit()
+
+    simulated_now = datetime(2026, 11, 13, 14, 33, tzinfo=tz).astimezone(UTC)
+    slots = AutoStageService.compute_batch_publish_slots(
+        db=db_session,
+        count=6,
+        same_day_catchup=True,
+        now=simulated_now,
+    )
+    assert len(slots) == 6
+
+    local_slots = [s.astimezone(tz) for s in slots]
+    target_date = datetime(2026, 11, 13).date()
+
+    # All 6 must be on the same day
+    for s in local_slots:
+        assert s.date() == target_date
+
+    # First slot must start at 16:00 (not pushed to 16:03 by failed job!)
+    assert local_slots[0].hour == 16 and local_slots[0].minute == 0
+
+    # Ensure no clips are clumped 3 minutes apart; each gap must be at least 45 minutes
+    for idx in range(len(local_slots) - 1):
+        assert local_slots[idx + 1] > local_slots[idx]
+        gap_mins = (local_slots[idx + 1] - local_slots[idx]).total_seconds() / 60
+        assert gap_mins >= 45, f"Clips clumped too close: gap is {gap_mins}m"

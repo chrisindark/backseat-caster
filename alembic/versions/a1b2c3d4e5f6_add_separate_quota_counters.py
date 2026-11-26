@@ -10,8 +10,10 @@ Revises: f8b1c2d3e4a5
 Create Date: 2026-11-05
 
 """
-from alembic import op
+
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "a1b2c3d4e5f6"
 down_revision = "f8b1c2d3e4a5"
@@ -22,10 +24,14 @@ depends_on = None
 def upgrade() -> None:
     with op.batch_alter_table("youtube_quota_usage") as batch_op:
         batch_op.add_column(
-            sa.Column("upload_units_used", sa.Integer(), nullable=False, server_default="0")
+            sa.Column(
+                "upload_units_used", sa.Integer(), nullable=False, server_default="0"
+            )
         )
         batch_op.add_column(
-            sa.Column("analytics_units_used", sa.Integer(), nullable=False, server_default="0")
+            sa.Column(
+                "analytics_units_used", sa.Integer(), nullable=False, server_default="0"
+            )
         )
     # Backfill: existing totals are all upload charges.
     op.execute(

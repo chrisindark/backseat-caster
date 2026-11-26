@@ -494,7 +494,10 @@ class YouTubeUploaderService:
         # already rejected us for this quota day (blocked_until), so we
         # fail fast with a Retry-After hint instead of burning an API call.
         _gate = YouTubeQuotaService.check_upload_budget(db)
-        if _gate.get("upload_block_reason") in ("api_quota_exceeded", "upload_limit_exceeded"):
+        if _gate.get("upload_block_reason") in (
+            "api_quota_exceeded",
+            "upload_limit_exceeded",
+        ):
             from app.services.youtube_errors import YouTubeUploadError
 
             retry_at = None
@@ -505,14 +508,18 @@ class YouTubeUploaderService:
                     retry_at = None
             code = _gate["upload_block_reason"]
             msg = (
-                "YouTube Data API daily quota is exhausted. Retry after "
-                + (retry_at.isoformat() if retry_at else "midnight Pacific")
-                + "."
-            ) if code == "api_quota_exceeded" else (
-                "YouTube rejected the upload because this channel has reached its "
-                "video upload limit (uploadLimitExceeded). Retry after "
-                + (retry_at.isoformat() if retry_at else "later")
-                + "."
+                (
+                    "YouTube Data API daily quota is exhausted. Retry after "
+                    + (retry_at.isoformat() if retry_at else "midnight Pacific")
+                    + "."
+                )
+                if code == "api_quota_exceeded"
+                else (
+                    "YouTube rejected the upload because this channel has reached its "
+                    "video upload limit (uploadLimitExceeded). Retry after "
+                    + (retry_at.isoformat() if retry_at else "later")
+                    + "."
+                )
             )
             if retry_at is not None and retry_at.tzinfo is None:
                 retry_at = retry_at.replace(tzinfo=UTC)
@@ -803,9 +810,12 @@ class YouTubeUploaderService:
                 except HttpError as err:
                     status = getattr(err.resp, "status", 0)
                     retryable_status = status in [429, 500, 502, 503, 504] or (
-                        status == 403 and b"rate" in (getattr(err, "content", b"") or b"").lower()
+                        status == 403
+                        and b"rate" in (getattr(err, "content", b"") or b"").lower()
                     )
-                    max_backoff = max(0, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3)))
+                    max_backoff = max(
+                        0, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3))
+                    )
                     max_retries = max(max_retries, max_backoff)
                     if status == 429:
                         # Explicit rate-limit signal: use exponential backoff.
@@ -816,8 +826,16 @@ class YouTubeUploaderService:
                             retry_count += 1
                             wait_sec = backoff_delay(
                                 retry_count,
-                                base_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_BASE_SECONDS", 2.0)),
-                                max_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_MAX_SECONDS", 120.0)),
+                                base_seconds=float(
+                                    getattr(
+                                        settings, "YOUTUBE_BACKOFF_BASE_SECONDS", 2.0
+                                    )
+                                ),
+                                max_seconds=float(
+                                    getattr(
+                                        settings, "YOUTUBE_BACKOFF_MAX_SECONDS", 120.0
+                                    )
+                                ),
                             )
                             logger.warning(
                                 "Recoverable HTTP error %s uploading clip %s. Retrying in %.0fs...",
@@ -832,8 +850,12 @@ class YouTubeUploaderService:
                         retry_count += 1
                         wait_sec = backoff_delay(
                             retry_count,
-                            base_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_BASE_SECONDS", 2.0)),
-                            max_seconds=float(getattr(settings, "YOUTUBE_BACKOFF_MAX_SECONDS", 120.0)),
+                            base_seconds=float(
+                                getattr(settings, "YOUTUBE_BACKOFF_BASE_SECONDS", 2.0)
+                            ),
+                            max_seconds=float(
+                                getattr(settings, "YOUTUBE_BACKOFF_MAX_SECONDS", 120.0)
+                            ),
                         )
                         logger.warning(
                             "Recoverable HTTP error %s uploading clip %s. Retrying in %.0fs...",

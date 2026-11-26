@@ -8,8 +8,10 @@ Revises: 863e196d8b97
 Create Date: 2026-11-05
 
 """
-from alembic import op
+
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "b2c3d4e5f6a7"
 down_revision = "863e196d8b97"
@@ -19,8 +21,12 @@ depends_on = None
 
 def upgrade() -> None:
     with op.batch_alter_table("render_jobs") as batch_op:
-        batch_op.add_column(sa.Column("velocity_72h", sa.Integer(), nullable=True, server_default="0"))
-        batch_op.add_column(sa.Column("velocity_7d", sa.Integer(), nullable=True, server_default="0"))
+        batch_op.add_column(
+            sa.Column("velocity_72h", sa.Integer(), nullable=True, server_default="0")
+        )
+        batch_op.add_column(
+            sa.Column("velocity_7d", sa.Integer(), nullable=True, server_default="0")
+        )
 
 
 def downgrade() -> None:

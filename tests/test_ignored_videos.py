@@ -152,8 +152,12 @@ def test_batch_tag_videos(client: TestClient, db_session):
 
 def test_list_videos_ignored_status_filter(client: TestClient, db_session):
     _create_test_video(db_session, "active_vid_1", is_ignored=False)
-    _create_test_video(db_session, "ignored_vid_1", is_ignored=True, ignore_reason="Old VOD")
-    _create_test_video(db_session, "ignored_vid_2", is_ignored=True, ignore_reason="Boring match")
+    _create_test_video(
+        db_session, "ignored_vid_1", is_ignored=True, ignore_reason="Old VOD"
+    )
+    _create_test_video(
+        db_session, "ignored_vid_2", is_ignored=True, ignore_reason="Boring match"
+    )
 
     # Filter status=ignored
     resp = client.get(f"{settings.API_PREFIX}/videos?status=ignored")
@@ -174,7 +178,9 @@ def test_list_videos_ignored_status_filter(client: TestClient, db_session):
 
 
 def test_cannot_download_ignored_video(client: TestClient, db_session):
-    vid = _create_test_video(db_session, "dl_block_vid", is_ignored=True, ignore_reason="Too old")
+    vid = _create_test_video(
+        db_session, "dl_block_vid", is_ignored=True, ignore_reason="Too old"
+    )
 
     resp = client.post(f"{settings.API_PREFIX}/videos/{vid.id}/download", json={})
     assert resp.status_code == 400
@@ -184,20 +190,28 @@ def test_cannot_download_ignored_video(client: TestClient, db_session):
 
 
 def test_cannot_detect_highlights_on_ignored_video(client: TestClient, db_session):
-    vid = _create_test_video(db_session, "hl_block_vid", is_downloaded=True, is_ignored=True)
+    vid = _create_test_video(
+        db_session, "hl_block_vid", is_downloaded=True, is_ignored=True
+    )
 
-    resp = client.post(f"{settings.API_PREFIX}/videos/{vid.id}/highlights/detect", json={})
+    resp = client.post(
+        f"{settings.API_PREFIX}/videos/{vid.id}/highlights/detect", json={}
+    )
     assert resp.status_code == 400
     data = resp.json()
     error_msg = data.get("error_message") or ""
     assert "Do Not Process" in error_msg or "ignored" in error_msg
 
 
-def test_cannot_create_render_for_ignored_video(client: TestClient, db_session, tmp_path):
+def test_cannot_create_render_for_ignored_video(
+    client: TestClient, db_session, tmp_path
+):
     dummy_file = tmp_path / "render_block_vid.mp4"
     dummy_file.write_bytes(b"dummy")
 
-    vid = _create_test_video(db_session, "render_block_vid", is_downloaded=True, is_ignored=True)
+    vid = _create_test_video(
+        db_session, "render_block_vid", is_downloaded=True, is_ignored=True
+    )
     vid.local_file_path = str(dummy_file)
     db_session.commit()
 
@@ -219,7 +233,9 @@ def test_auto_mine_skips_ignored_video(db_session, tmp_path):
     dummy_file = tmp_path / "mine_ignored.mp4"
     dummy_file.write_bytes(b"dummy")
 
-    vid = _create_test_video(db_session, "mine_ignored", is_downloaded=True, is_ignored=True)
+    vid = _create_test_video(
+        db_session, "mine_ignored", is_downloaded=True, is_ignored=True
+    )
     vid.local_file_path = str(dummy_file)
     db_session.commit()
 
@@ -229,7 +245,9 @@ def test_auto_mine_skips_ignored_video(db_session, tmp_path):
 
 
 def test_auto_stage_skips_ignored_video(db_session):
-    vid = _create_test_video(db_session, "stage_ignored", is_downloaded=True, is_ignored=True)
+    vid = _create_test_video(
+        db_session, "stage_ignored", is_downloaded=True, is_ignored=True
+    )
     cand = HighlightCandidate(
         id="cand_ign_1",
         video_id=vid.id,

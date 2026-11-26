@@ -28,12 +28,16 @@ def upgrade() -> None:
     if "branding_opacity" not in existing:
         op.add_column(
             "channel_profiles",
-            sa.Column("branding_opacity", sa.Float(), nullable=True, server_default="0.85"),
+            sa.Column(
+                "branding_opacity", sa.Float(), nullable=True, server_default="0.85"
+            ),
         )
     if "branding_style" not in existing:
         op.add_column(
             "channel_profiles",
-            sa.Column("branding_style", sa.String(32), nullable=True, server_default="bookend"),
+            sa.Column(
+                "branding_style", sa.String(32), nullable=True, server_default="bookend"
+            ),
         )
 
 

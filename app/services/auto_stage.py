@@ -112,7 +112,10 @@ class AutoStageService:
                 return as_utc(after) + interval
             latest = (
                 db.query(func.max(RenderJob.scheduled_publish_at))
-                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .filter(
+                    RenderJob.scheduled_publish_at.isnot(None),
+                    RenderJob.status != "failed",
+                )
                 .scalar()
             )
             latest_utc = as_utc(latest)
@@ -126,7 +129,10 @@ class AutoStageService:
         if not booked:
             rows = (
                 db.query(RenderJob.scheduled_publish_at)
-                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .filter(
+                    RenderJob.scheduled_publish_at.isnot(None),
+                    RenderJob.status != "failed",
+                )
                 .all()
             )
             for r in rows:
@@ -218,7 +224,10 @@ class AutoStageService:
         if not booked:
             rows = (
                 db.query(RenderJob.scheduled_publish_at)
-                .filter(RenderJob.scheduled_publish_at.isnot(None))
+                .filter(
+                    RenderJob.scheduled_publish_at.isnot(None),
+                    RenderJob.status != "failed",
+                )
                 .all()
             )
             for r in rows:
@@ -242,50 +251,125 @@ class AutoStageService:
 
         def _avoid_collision(cand: datetime) -> datetime:
             target = cand
-            for _ in range(120):
-                if not any(abs((target - b).total_seconds()) < 120 for b in booked):
+            for _ in range(60):
+                if not any(abs((target - b).total_seconds()) < 300 for b in booked):
                     return target
-                target += timedelta(minutes=3)
+                target += timedelta(minutes=15)
             return target
 
-        if same_day_catchup and remaining_today:
-            allocated = []
-            overflow = max(0, count - len(remaining_today))
-            catchup_slot = remaining_today[0]
-            # Catchup items for missed slots placed at the first available slot, offset by 3 mins
-            for i in range(overflow + 1):
-                if len(allocated) < count:
-                    target = catchup_slot + timedelta(minutes=i * 3)
-                    safe_target = _avoid_collision(target)
-                    allocated.append(safe_target)
-                    booked.add(safe_target)
-            # Remaining today slots get 1 each
-            for s_dt in remaining_today[1:]:
-                if len(allocated) < count:
-                    safe_s = _avoid_collision(s_dt)
-                    allocated.append(safe_s)
-                    booked.add(safe_s)
-            return allocated
+        MIN_INTERVAL_MINUTES = 5
 
-        if same_day_catchup and not remaining_today:
-            # All regular slots for today have already passed (e.g. late evening).
-            # If there is still time before midnight local time, catch up today starting at earliest_allowed.
-            local_end_today = datetime(
-                today.year, today.month, today.day, 23, 59, 0, tzinfo=tz
+        if same_day_catchup:
+            # Determine end of today's publishing window in local timezone
+            end_h, end_m = 23, 0
+            if remaining_today:
+                last_slot_local = remaining_today[-1].astimezone(tz)
+                if (last_slot_local.hour, last_slot_local.minute) > (end_h, end_m):
+                    end_h = min(23, last_slot_local.hour)
+                    end_m = min(55, last_slot_local.minute)
+            elif local_ref.hour >= 23:
+                end_h, end_m = 23, 55
+            elif local_ref.hour >= 22:
+                end_h, end_m = 23, 30
+
+            local_day_end = datetime(
+                today.year, today.month, today.day, end_h, end_m, 0, tzinfo=tz
             ).astimezone(UTC)
-            if earliest_allowed < local_end_today:
-                allocated = []
-                for i in range(count):
-                    target = earliest_allowed + timedelta(minutes=i * 3)
-                    if target <= local_end_today:
-                        safe_target = _avoid_collision(target)
-                        allocated.append(safe_target)
-                        booked.add(safe_target)
+
+            window_start = remaining_today[0] if remaining_today else earliest_allowed
+            if window_start.second > 0 or window_start.microsecond > 0:
+                window_start = window_start.replace(second=0, microsecond=0) + timedelta(minutes=1)
+
+            if window_start < local_day_end:
+                available_today_candidates: list[datetime] = []
+
+                if count <= len(remaining_today):
+                    # Ample daily slots remaining today: use the first `count` slots directly
+                    available_today_candidates = list(remaining_today[:count])
+                elif len(remaining_today) <= 1:
+                    # At most 1 slot remaining: evenly distribute across [window_start, local_day_end]
+                    total_seconds = (local_day_end - window_start).total_seconds()
+                    max_fit = max(1, int(total_seconds // (MIN_INTERVAL_MINUTES * 60)) + 1)
+                    num_today = min(count, max_fit)
+                    if num_today == 1:
+                        available_today_candidates = [window_start]
                     else:
-                        break
+                        step_sec = total_seconds / (num_today - 1)
+                        for i in range(num_today):
+                            t = window_start + timedelta(seconds=i * step_sec)
+                            local_t = t.astimezone(tz)
+                            rounded_min = round(local_t.minute / 5.0) * 5
+                            if rounded_min == 60:
+                                rounded_local_t = (
+                                    local_t.replace(minute=0, second=0, microsecond=0)
+                                    + timedelta(hours=1)
+                                )
+                            else:
+                                rounded_local_t = local_t.replace(
+                                    minute=rounded_min, second=0, microsecond=0
+                                )
+                            t_utc = rounded_local_t.astimezone(UTC)
+                            t_utc = max(window_start, min(local_day_end, t_utc))
+                            available_today_candidates.append(t_utc)
+
+                        # Deduplicate & ensure strictly increasing
+                        available_today_candidates = sorted(list(set(available_today_candidates)))
+                        for idx in range(1, len(available_today_candidates)):
+                            min_prev = available_today_candidates[idx - 1] + timedelta(minutes=MIN_INTERVAL_MINUTES)
+                            if available_today_candidates[idx] < min_prev:
+                                available_today_candidates[idx] = min_prev
+                else:
+                    # Multiple slots remain (e.g. 16:00, 18:30, 20:30, 23:00) but count > len(remaining_today).
+                    # Use remaining_today as anchors and interpolate extra slots in the largest gaps.
+                    slots_pool = list(remaining_today)
+                    if (local_day_end - slots_pool[-1]).total_seconds() >= MIN_INTERVAL_MINUTES * 60 * 2:
+                        endpoints = slots_pool + [local_day_end]
+                    else:
+                        endpoints = list(slots_pool)
+
+                    needed = count - len(slots_pool)
+                    for _ in range(needed):
+                        best_gap = 0.0
+                        best_idx = -1
+                        for idx in range(len(endpoints) - 1):
+                            gap = (endpoints[idx + 1] - endpoints[idx]).total_seconds()
+                            if gap > best_gap:
+                                best_gap = gap
+                                best_idx = idx
+
+                        if best_gap < MIN_INTERVAL_MINUTES * 60 * 2 or best_idx == -1:
+                            break
+
+                        midpoint = endpoints[best_idx] + timedelta(seconds=best_gap / 2.0)
+                        mid_local = midpoint.astimezone(tz)
+                        rounded_min = round(mid_local.minute / 5.0) * 5
+                        if rounded_min == 60:
+                            rounded_mid = (
+                                mid_local.replace(minute=0, second=0, microsecond=0)
+                                + timedelta(hours=1)
+                            )
+                        else:
+                            rounded_mid = mid_local.replace(
+                                minute=rounded_min, second=0, microsecond=0
+                            )
+                        mid_utc = rounded_mid.astimezone(UTC)
+                        endpoints.insert(best_idx + 1, mid_utc)
+
+                    final_slots = [s for s in endpoints if s != local_day_end]
+                    if len(final_slots) < count and endpoints[-1] == local_day_end:
+                        final_slots.append(local_day_end)
+                    available_today_candidates = sorted(list(set(final_slots)))[:count]
+
+                allocated = []
+                for cand in available_today_candidates:
+                    safe = _avoid_collision(cand)
+                    allocated.append(safe)
+                    booked.add(safe)
+
                 if len(allocated) == count:
                     return allocated
-                # If overflow past midnight, roll remaining items over to tomorrow
+
+                # If overflow past end of day, roll remaining items over to tomorrow
                 slot = cls.next_publish_slot(
                     db,
                     now=current_utc,

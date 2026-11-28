@@ -350,7 +350,11 @@ def upload_selected_queue(
                 retry_at = datetime.fromisoformat(_blocked_until)
                 if retry_at.tzinfo is None:
                     retry_at = retry_at.replace(tzinfo=UTC)
-                headers = {"Retry-After": str(max(0, int((retry_at - datetime.now(UTC)).total_seconds())))}
+                headers = {
+                    "Retry-After": str(
+                        max(0, int((retry_at - datetime.now(UTC)).total_seconds()))
+                    )
+                }
             except Exception:
                 retry_at = None
         raise APIException(
@@ -542,7 +546,11 @@ def upload_clip(
                 retry_at = datetime.fromisoformat(_blocked_until)
                 if retry_at.tzinfo is None:
                     retry_at = retry_at.replace(tzinfo=UTC)
-                headers = {"Retry-After": str(max(0, int((retry_at - datetime.now(UTC)).total_seconds())))}
+                headers = {
+                    "Retry-After": str(
+                        max(0, int((retry_at - datetime.now(UTC)).total_seconds()))
+                    )
+                }
             except Exception:
                 retry_at = None
         raise APIException(
@@ -840,8 +848,12 @@ def sync_youtube_statistics(
             quota = result.get("quota") if isinstance(result.get("quota"), dict) else {}
             raise APIException(
                 status_code=429,
-                detail=result.get("message", "YouTube quota gate blocked analytics sync."),
-                error_code=quota.get("analytics_block_reason", "analytics_threshold_exceeded"),
+                detail=result.get(
+                    "message", "YouTube quota gate blocked analytics sync."
+                ),
+                error_code=quota.get(
+                    "analytics_block_reason", "analytics_threshold_exceeded"
+                ),
             )
         return BaseResponse.success_response(response=AnalyticsSyncResponse(**result))
     except APIException:

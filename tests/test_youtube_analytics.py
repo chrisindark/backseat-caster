@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -11,14 +11,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.config import settings
 from app.database import Base, get_db
 from app.main import app
-from app.models.channel_profile import ChannelProfile
 from app.models.render_job import RenderJob
 from app.models.video_analytics_snapshot import VideoAnalyticsSnapshot
 from app.services.channel_profile import ChannelProfileService
 from app.services.youtube_analytics import YouTubeAnalyticsService
+from app.services.youtube_errors import backoff_delay as _backoff_delay
+from app.services.youtube_quota import YouTubeQuotaService as _QuotaService
 
 TEST_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
@@ -57,7 +57,9 @@ def client(db_session):
 @pytest.fixture
 def sample_channel_profile(db_session):
     profile = ChannelProfileService.get_or_create(db_session)
-    profile.upload_slots = json.dumps(["08:00", "12:30", "16:00", "18:00", "20:00", "22:00"])
+    profile.upload_slots = json.dumps(
+        ["08:00", "12:30", "16:00", "18:00", "20:00", "22:00"]
+    )
     profile.upload_timezone = "Asia/Kolkata"
     db_session.commit()
     db_session.refresh(profile)
@@ -273,29 +275,26 @@ def test_get_clip_velocity_timeline(db_session, sample_uploaded_jobs):
 
 def test_analytics_api_endpoints(client, db_session, sample_uploaded_jobs, monkeypatch):
     # 1. GET /youtube/analytics/slots
-    res = client.get(f"/api/v1/youtube/analytics/slots")
+    res = client.get("/api/v1/youtube/analytics/slots")
     assert res.status_code == 200
     data = res.json()["response"]
     assert data["timezone"] == "Asia/Kolkata"
     assert len(data["slots"]) > 0
 
     # 2. POST /youtube/analytics/apply-optimal-slots
-    res_apply = client.post(f"/api/v1/youtube/analytics/apply-optimal-slots?top_n=3")
+    res_apply = client.post("/api/v1/youtube/analytics/apply-optimal-slots?top_n=3")
     assert res_apply.status_code == 200
     applied_data = res_apply.json()["response"]
     assert len(applied_data["applied_slots"]) >= 2
 
     # 3. GET /youtube/analytics/timeline/clip_1
-    res_timeline = client.get(f"/api/v1/youtube/analytics/timeline/clip_1")
+    res_timeline = client.get("/api/v1/youtube/analytics/timeline/clip_1")
     assert res_timeline.status_code == 200
     timeline_data = res_timeline.json()["response"]
     assert timeline_data["clip_id"] == "clip_1"
 
 
 # --- Quota throttle tests ---
-
-from app.services.youtube_errors import backoff_delay as _backoff_delay
-from app.services.youtube_quota import YouTubeQuotaService as _QuotaService
 
 
 def test_analytics_quota_gate_blocks_at_threshold(db_session):
@@ -326,7 +325,7 @@ def test_upload_and_analytics_have_separate_gates(db_session):
 
 def test_analytics_quota_gate_allows_upload_limit_block(db_session):
     # uploadLimitExceeded should NOT block analytics reads
-    from datetime import datetime, timedelta, UTC
+    from datetime import UTC, datetime, timedelta
 
     usage = _QuotaService.get_or_create_usage(db_session)
     usage.blocked_reason = "upload_limit_exceeded"
@@ -353,7 +352,9 @@ def test_celery_rate_limits_configured():
     assert celery_app.conf.task_default_rate_limit == "10/m"
     annotations = celery_app.conf.task_annotations or {}
     assert annotations.get("upload_clip_celery_task", {}).get("rate_limit") == "1/m"
-    assert annotations.get("batch_upload_clips_celery_task", {}).get("rate_limit") == "1/m"
+    assert (
+        annotations.get("batch_upload_clips_celery_task", {}).get("rate_limit") == "1/m"
+    )
     from app.services.youtube_analytics import sync_video_analytics_celery_task
 
     assert sync_video_analytics_celery_task.rate_limit == "10/m"

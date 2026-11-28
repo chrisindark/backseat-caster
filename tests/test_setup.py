@@ -45,37 +45,57 @@ def test_setup_status_returns_expected_checks():
 
 
 def test_get_and_patch_runtime_settings(tmp_path, monkeypatch):
+    from app.config import settings
+
     test_settings_file = tmp_path / "settings.json"
     monkeypatch.setattr(
         SettingsManager, "get_persisted_settings_path", lambda: test_settings_file
     )
+    old_base_url = settings.LLM_BASE_URL
+    old_model = settings.LLM_MODEL
+    old_enabled = settings.LLM_METADATA_ENABLED
+    old_min_dur = settings.HIGHLIGHT_MIN_CLIP_DURATION
+    old_max_dur = settings.HIGHLIGHT_MAX_CLIP_DURATION
 
-    # 1. Get current settings
-    res = client.get("/api/v1/setup/settings")
-    assert res.status_code == 200
-    initial = res.json()["response"]
-    assert "llm_enabled" in initial
-    assert "default_clipping_mode" in initial
+    try:
+        # 1. Get current settings
+        res = client.get("/api/v1/setup/settings")
+        assert res.status_code == 200
+        initial = res.json()["response"]
+        assert "llm_enabled" in initial
+        assert "default_clipping_mode" in initial
+        assert "highlight_min_clip_duration" in initial
+        assert "highlight_max_clip_duration" in initial
 
-    # 2. Update settings via PATCH
-    update_payload = {
-        "llm_enabled": True,
-        "llm_model": "test-model-4b",
-        "llm_base_url": "http://127.0.0.1:11434/v1",
-        "default_clipping_mode": "cinematic",
-        "auto_stage_top_n": 5,
-    }
-    patch_res = client.patch("/api/v1/setup/settings", json=update_payload)
-    assert patch_res.status_code == 200
-    updated = patch_res.json()["response"]
-    assert updated["llm_enabled"] is True
-    assert updated["llm_model"] == "test-model-4b"
-    assert updated["llm_base_url"] == "http://127.0.0.1:11434/v1"
-    assert updated["default_clipping_mode"] == "cinematic"
-    assert updated["auto_stage_top_n"] == 5
+        # 2. Update settings via PATCH
+        update_payload = {
+            "llm_enabled": True,
+            "llm_model": "test-model-4b",
+            "llm_base_url": "http://127.0.0.1:11434/v1",
+            "default_clipping_mode": "cinematic",
+            "auto_stage_top_n": 5,
+            "highlight_min_clip_duration": 48.0,
+            "highlight_max_clip_duration": 75.0,
+        }
+        patch_res = client.patch("/api/v1/setup/settings", json=update_payload)
+        assert patch_res.status_code == 200
+        updated = patch_res.json()["response"]
+        assert updated["llm_enabled"] is True
+        assert updated["llm_model"] == "test-model-4b"
+        assert updated["llm_base_url"] == "http://127.0.0.1:11434/v1"
+        assert updated["default_clipping_mode"] == "cinematic"
+        assert updated["auto_stage_top_n"] == 5
+        assert updated["highlight_min_clip_duration"] == 48.0
+        assert updated["highlight_max_clip_duration"] == 75.0
 
-    # Verify persisted on disk
-    assert test_settings_file.exists()
+        # Verify persisted on disk
+        assert test_settings_file.exists()
+    finally:
+        settings.LLM_BASE_URL = old_base_url
+        settings.LLM_MODEL = old_model
+        settings.LLM_METADATA_ENABLED = old_enabled
+        settings.HIGHLIGHT_MIN_CLIP_DURATION = old_min_dur
+        settings.HIGHLIGHT_MAX_CLIP_DURATION = old_max_dur
 
 
 def test_setup_settings_do_not_own_branding(tmp_path, monkeypatch):

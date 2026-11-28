@@ -9,6 +9,7 @@ Create Date: 2026-11-03 12:00:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -27,7 +28,9 @@ def upgrade() -> None:
     with op.batch_alter_table("videos") as batch_op:
         if "is_ignored" not in existing:
             batch_op.add_column(
-                sa.Column("is_ignored", sa.Boolean(), nullable=False, server_default="0")
+                sa.Column(
+                    "is_ignored", sa.Boolean(), nullable=False, server_default="0"
+                )
             )
             batch_op.create_index("ix_videos_is_ignored", ["is_ignored"], unique=False)
         if "ignore_reason" not in existing:

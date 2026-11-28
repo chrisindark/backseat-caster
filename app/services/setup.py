@@ -26,6 +26,7 @@ from app.services.llm_metadata import LLMMetadataService
 from app.services.preflight import check_disk_space, check_ffmpeg, check_ffprobe
 from app.services.renders import RenderService
 from app.services.settings_manager import SettingsManager
+from app.services.upload_metadata import TIER_PEAK_ADJECTIVES, pick_adjective
 from app.services.youtube_uploader import YouTubeUploaderService
 
 logger = logging.getLogger(__name__)
@@ -252,6 +253,12 @@ class SetupService:
             watch_dir=settings.WATCH_DIR,
             watch_poll_interval_minutes=int(settings.WATCH_POLL_INTERVAL_MINUTES),
             watch_delete_after_ingest=bool(settings.WATCH_DELETE_AFTER_INGEST),
+            highlight_min_clip_duration=float(
+                getattr(settings, "HIGHLIGHT_MIN_CLIP_DURATION", 45.0)
+            ),
+            highlight_max_clip_duration=float(
+                getattr(settings, "HIGHLIGHT_MAX_CLIP_DURATION", 60.0)
+            ),
         )
 
     @classmethod
@@ -434,7 +441,10 @@ class SetupService:
                     game=cd["game"],
                     details_json=json.dumps(cd["details"]),
                     peak_timestamp=(cd["start"] + cd["end"]) / 2,
-                    suggested_title=f"{cd['hero_name']} {cd['details']['multi_kill_chain'].replace('_', ' ').title()}",
+                    suggested_title=(
+                        f"{pick_adjective(TIER_PEAK_ADJECTIVES, cd['id'], 'demo')} "
+                        f"{cd['hero_name']} {cd['details']['multi_kill_chain'].replace('_', ' ').title()}! 🔥 #MarvelRivals"
+                    ),
                 )
                 db.add(cand)
 

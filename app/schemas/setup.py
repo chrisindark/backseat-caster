@@ -57,6 +57,8 @@ class SetupSettingsResponse(BaseModel):
     watch_dir: str | None = None
     watch_poll_interval_minutes: int = 0
     watch_delete_after_ingest: bool = False
+    highlight_min_clip_duration: float = 45.0
+    highlight_max_clip_duration: float = 60.0
 
 
 class UpdateSetupSettingsRequest(BaseModel):
@@ -76,6 +78,8 @@ class UpdateSetupSettingsRequest(BaseModel):
     watch_dir: str | None = None
     watch_poll_interval_minutes: int | None = None
     watch_delete_after_ingest: bool | None = None
+    highlight_min_clip_duration: float | None = None
+    highlight_max_clip_duration: float | None = None
 
 
 class DemoProjectRequest(BaseModel):

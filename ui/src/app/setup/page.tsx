@@ -68,6 +68,8 @@ export default function SetupWizardPage() {
   const [formLlmApiKey, setFormLlmApiKey] = useState<string>("");
   const [formClippingMode, setFormClippingMode] = useState<string>("third_person");
   const [formTopN, setFormTopN] = useState<number>(3);
+  const [formMinClipDuration, setFormMinClipDuration] = useState<number>(45);
+  const [formMaxClipDuration, setFormMaxClipDuration] = useState<number>(60);
   const [formCleanupRenders, setFormCleanupRenders] = useState<boolean>(true);
   const [formCleanupVod, setFormCleanupVod] = useState<boolean>(false);
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
@@ -98,6 +100,8 @@ export default function SetupWizardPage() {
       setFormLlmModel(settingsRes.llm_model || "llama3.2");
       setFormClippingMode(settingsRes.default_clipping_mode || "third_person");
       setFormTopN(settingsRes.auto_stage_top_n ?? 3);
+      setFormMinClipDuration(settingsRes.highlight_min_clip_duration ?? 45);
+      setFormMaxClipDuration(settingsRes.highlight_max_clip_duration ?? 60);
       setFormCleanupRenders(settingsRes.auto_cleanup_uploaded_renders ?? true);
       setFormCleanupVod(settingsRes.auto_cleanup_vod ?? false);
       setFormAutoMine(settingsRes.auto_mine_on_ingest ?? false);
@@ -217,6 +221,8 @@ export default function SetupWizardPage() {
         llm_api_key: formLlmApiKey.trim() || undefined,
         default_clipping_mode: formClippingMode,
         auto_stage_top_n: formTopN,
+        highlight_min_clip_duration: formMinClipDuration,
+        highlight_max_clip_duration: formMaxClipDuration,
         auto_cleanup_uploaded_renders: formCleanupRenders,
         auto_cleanup_vod: formCleanupVod,
         auto_mine_on_ingest: formAutoMine,
@@ -867,7 +873,7 @@ export default function SetupWizardPage() {
                 <span>Video Rendering & Staging Defaults</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-300">Default Crop Layout</label>
                   <select
@@ -892,6 +898,39 @@ export default function SetupWizardPage() {
                     onChange={(e) => setFormTopN(parseInt(e.target.value, 10) || 3)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-rose-500 focus:outline-none text-slate-200 text-xs"
                   />
+                  <span className="text-[10px] text-slate-500">
+                    Clips to stage per processed video
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300">Min Clip Length (Seconds)</label>
+                  <input
+                    type="number"
+                    min={15}
+                    max={120}
+                    value={formMinClipDuration}
+                    onChange={(e) => setFormMinClipDuration(parseFloat(e.target.value) || 45)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-rose-500 focus:outline-none text-slate-200 text-xs"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Floor duration for highlight clips (default: 45s)
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300">Max Clip Length (Seconds)</label>
+                  <input
+                    type="number"
+                    min={30}
+                    max={180}
+                    value={formMaxClipDuration}
+                    onChange={(e) => setFormMaxClipDuration(parseFloat(e.target.value) || 60)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 focus:border-rose-500 focus:outline-none text-slate-200 text-xs"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Ceiling duration for YouTube Shorts (default: 60s)
+                  </span>
                 </div>
 
                 <div className="space-y-2 flex flex-col justify-end">

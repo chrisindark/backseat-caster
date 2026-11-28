@@ -56,7 +56,7 @@ function toLocalInputValue(iso: string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return "";
   const pad = (n: number) => `${n}`.padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
+    date.getHours(),
   )}:${pad(date.getMinutes())}`;
 }
 
@@ -79,15 +79,22 @@ function getDefaultMetadata(item: RenderManifest) {
     (item.outputs && Object.keys(item.outputs)[0]) ||
     "vertical_blur";
   const start = item.clip?.start_seconds ?? item.request?.start_seconds ?? 0;
-  const dur = item.clip?.duration_seconds ?? item.request?.duration_seconds ?? 15;
+  const dur =
+    item.clip?.duration_seconds ?? item.request?.duration_seconds ?? 15;
   const defaultTitle =
     item.upload_selection?.title ||
     `${item.video_title ? `${item.video_title.slice(0, 50)} - ` : ""}Highlight (${Math.round(start)}s-${Math.round(start + dur)}s)`;
   const defaultDesc =
     item.upload_selection?.description ||
     `Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight`;
-  const defaultTags =
-    (item.upload_selection?.tags || ["Gaming", "MarvelRivals", "Highlights", "Shorts"]).join(", ");
+  const defaultTags = (
+    item.upload_selection?.tags || [
+      "Gaming",
+      "MarvelRivals",
+      "Highlights",
+      "Shorts",
+    ]
+  ).join(", ");
   const privacyVal: UploadPrivacy =
     item.upload_selection?.privacy === "private" ||
     item.upload_selection?.privacy === "unlisted"
@@ -131,13 +138,19 @@ export default function StagingPage() {
   // YouTube auth and quota states
   const [ytAuth, setYtAuth] = useState<YouTubeAuthStatus | null>(null);
   const [quota, setQuota] = useState<YouTubeQuota | null>(null);
-  const [uploadingClipIds, setUploadingClipIds] = useState<Set<string>>(new Set());
+  const [uploadingClipIds, setUploadingClipIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [isUploadingBatch, setIsUploadingBatch] = useState<boolean>(false);
-  const [uploadedClips, setUploadedClips] = useState<Record<string, YouTubeUploadResult>>({});
+  const [uploadedClips, setUploadedClips] = useState<
+    Record<string, YouTubeUploadResult>
+  >({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
   // Scheduled publish slot draft state
-  const [draftSchedules, setDraftSchedules] = useState<Record<string, string>>({});
+  const [draftSchedules, setDraftSchedules] = useState<Record<string, string>>(
+    {},
+  );
   const [savingScheduleId, setSavingScheduleId] = useState<string | null>(null);
 
   // AI vs deterministic regeneration
@@ -146,7 +159,11 @@ export default function StagingPage() {
   const [previousCopies, setPreviousCopies] = useState<
     Record<
       string,
-      { title?: string | null; description?: string | null; metadata_source?: string }
+      {
+        title?: string | null;
+        description?: string | null;
+        metadata_source?: string;
+      }
     >
   >({});
 
@@ -163,7 +180,7 @@ export default function StagingPage() {
       if (rendersRes.status === "fulfilled" && rendersRes.value?.items) {
         // Filter renders selected for upload or auto-staged
         const staged = rendersRes.value.items.filter(
-          (r) => r.upload_selection?.is_selected || r.auto_staged
+          (r) => r.upload_selection?.is_selected || r.auto_staged,
         );
         setRenders(staged);
 
@@ -188,7 +205,9 @@ export default function StagingPage() {
       }
     } catch (err: unknown) {
       console.warn("Error loading staging page:", err);
-      setErrorMessage(err instanceof Error ? err.message : "Failed to load staging data");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to load staging data",
+      );
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -214,20 +233,31 @@ export default function StagingPage() {
 
   const handleFieldChange = (
     clipId: string,
-    field: "title" | "description" | "tags" | "privacy" | "format" | "hero_name" | "clip_context",
-    value: string
+    field:
+      | "title"
+      | "description"
+      | "tags"
+      | "privacy"
+      | "format"
+      | "hero_name"
+      | "clip_context",
+    value: string,
   ) => {
     setClipMetadata((prev) => {
       const renderItem = renders.find((r) => r.clip_id === clipId);
-      const existing = prev[clipId] || (renderItem ? getDefaultMetadata(renderItem) : {
-        title: clipId,
-        description: "",
-        tags: "Gaming, Highlights, Shorts",
-        privacy: "public" as UploadPrivacy,
-        format: "vertical_blur" as UploadFormat,
-        hero_name: "",
-        clip_context: "",
-      });
+      const existing =
+        prev[clipId] ||
+        (renderItem
+          ? getDefaultMetadata(renderItem)
+          : {
+              title: clipId,
+              description: "",
+              tags: "Gaming, Highlights, Shorts",
+              privacy: "public" as UploadPrivacy,
+              format: "vertical_blur" as UploadFormat,
+              hero_name: "",
+              clip_context: "",
+            });
 
       return {
         ...prev,
@@ -263,7 +293,9 @@ export default function StagingPage() {
       setSuccessMessage(`Saved staging details for ${clipId}`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed saving staging");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed saving staging",
+      );
     } finally {
       setSavingId(null);
     }
@@ -277,11 +309,17 @@ export default function StagingPage() {
     try {
       const publishAt = draft ? new Date(draft).toISOString() : null;
       await scheduleStagedClip(clipId, publishAt);
-      setSuccessMessage(publishAt ? `Publish slot updated for ${clipId}` : `Publish slot cleared for ${clipId}`);
+      setSuccessMessage(
+        publishAt
+          ? `Publish slot updated for ${clipId}`
+          : `Publish slot cleared for ${clipId}`,
+      );
       setTimeout(() => setSuccessMessage(null), 3000);
       await loadStagingData();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to update publish slot");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to update publish slot",
+      );
     } finally {
       setSavingScheduleId(null);
     }
@@ -297,7 +335,9 @@ export default function StagingPage() {
       setTimeout(() => setSuccessMessage(null), 3000);
       await loadStagingData();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to clear publish slot");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to clear publish slot",
+      );
     } finally {
       setSavingScheduleId(null);
     }
@@ -335,10 +375,16 @@ export default function StagingPage() {
             title: res.upload_selection.title || base.title,
             description: res.upload_selection.description || base.description,
             tags: (res.upload_selection.tags || []).join(", "),
-            privacy: (res.upload_selection.privacy as UploadPrivacy) || base.privacy,
-            format: (res.upload_selection.preferred_format as UploadFormat) || base.format,
-            hero_name: (res.upload_selection.hero_name as string) || base.hero_name,
-            clip_context: (res.upload_selection.clip_context as string) || base.clip_context,
+            privacy:
+              (res.upload_selection.privacy as UploadPrivacy) || base.privacy,
+            format:
+              (res.upload_selection.preferred_format as UploadFormat) ||
+              base.format,
+            hero_name:
+              (res.upload_selection.hero_name as string) || base.hero_name,
+            clip_context:
+              (res.upload_selection.clip_context as string) ||
+              base.clip_context,
           },
         };
       });
@@ -346,11 +392,13 @@ export default function StagingPage() {
       setSuccessMessage(
         res.used_llm
           ? `AI copy generated for ${clipId}!`
-          : `Deterministic copy refreshed for ${clipId}.`
+          : `Deterministic copy refreshed for ${clipId}.`,
       );
       setTimeout(() => setSuccessMessage(null), 3500);
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Regeneration failed");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Regeneration failed",
+      );
     } finally {
       setRegeneratingId(null);
     }
@@ -363,7 +411,9 @@ export default function StagingPage() {
       setSuccessMessage(`Removed ${clipId} from upload staging`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to remove clip");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to remove clip",
+      );
     }
   };
 
@@ -371,13 +421,17 @@ export default function StagingPage() {
     if (!confirm("Remove all clips from the upload staging queue?")) return;
     try {
       await Promise.all(
-        renders.map((r) => updateUploadSelection(r.clip_id, { is_selected: false }))
+        renders.map((r) =>
+          updateUploadSelection(r.clip_id, { is_selected: false }),
+        ),
       );
       setRenders([]);
       setSuccessMessage("Cleared upload staging queue");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed clearing queue");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed clearing queue",
+      );
     }
   };
 
@@ -431,7 +485,10 @@ export default function StagingPage() {
           preferred_format: meta.format,
           title: meta.title,
           description: meta.description,
-          tags: meta.tags.split(",").map((t) => t.trim()).filter(Boolean),
+          tags: meta.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
           privacy: meta.privacy,
           hero_name: meta.hero_name,
           clip_context: meta.clip_context,
@@ -443,10 +500,16 @@ export default function StagingPage() {
       setUploadedClips((prev) => ({ ...prev, [clipId]: res }));
       setSuccessMessage(`Successfully uploaded "${res.title}" to YouTube!`);
       // Refresh quota after upload
-      fetchYouTubeQuota().then(setQuota).catch(() => {});
+      fetchYouTubeQuota()
+        .then(setQuota)
+        .catch(() => {});
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : `Failed uploading ${clipId}`);
-      fetchYouTubeQuota().then(setQuota).catch(() => {});
+      setErrorMessage(
+        err instanceof Error ? err.message : `Failed uploading ${clipId}`,
+      );
+      fetchYouTubeQuota()
+        .then(setQuota)
+        .catch(() => {});
     } finally {
       setUploadingClipIds((prev) => {
         const next = new Set(prev);
@@ -462,7 +525,7 @@ export default function StagingPage() {
       return;
     }
     const eligibleClips = renders.filter(
-      (r) => !uploadedClips[r.clip_id] && !r.youtube_upload
+      (r) => !uploadedClips[r.clip_id] && !r.youtube_upload,
     );
     if (eligibleClips.length === 0) {
       setErrorMessage("All clips in this queue have already been uploaded.");
@@ -490,7 +553,10 @@ export default function StagingPage() {
             preferred_format: meta.format,
             title: meta.title,
             description: meta.description,
-            tags: meta.tags.split(",").map((t) => t.trim()).filter(Boolean),
+            tags: meta.tags
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean),
             privacy: meta.privacy,
             hero_name: meta.hero_name,
             clip_context: meta.clip_context,
@@ -509,16 +575,21 @@ export default function StagingPage() {
       if (firstFailure) {
         setErrorMessage(
           `${res.total_failed} upload${res.total_failed === 1 ? "" : "s"} failed. ` +
-            (firstFailure.error_message || "Check the clip details for the YouTube error.")
+            (firstFailure.error_message ||
+              "Check the clip details for the YouTube error."),
         );
       } else {
         setSuccessMessage(
-          `Batch upload complete: ${res.total_succeeded} succeeded.`
+          `Batch upload complete: ${res.total_succeeded} succeeded.`,
         );
       }
-      fetchYouTubeQuota().then(setQuota).catch(() => {});
+      fetchYouTubeQuota()
+        .then(setQuota)
+        .catch(() => {});
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Batch upload failed");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Batch upload failed",
+      );
     } finally {
       setIsUploadingBatch(false);
     }
@@ -554,7 +625,11 @@ export default function StagingPage() {
         window.location.href = auth.auth_url;
       }
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "Could not initialize YouTube OAuth");
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : "Could not initialize YouTube OAuth",
+      );
     }
   };
 
@@ -582,7 +657,8 @@ export default function StagingPage() {
               <span>Publishing Staging Queue</span>
             </h1>
             <p className="text-xs lg:text-sm text-slate-400">
-              Watch clips, verify hero identity & play context, generate AI copy, and publish to YouTube Shorts.
+              Watch clips, verify hero identity & play context, generate AI
+              copy, and publish to YouTube Shorts.
             </p>
           </div>
 
@@ -595,7 +671,9 @@ export default function StagingPage() {
               className="p-2 rounded-xl bg-slate-900 border border-white/10 hover:border-white/20 text-slate-300 hover:text-white transition-all text-xs"
               title="Refresh Queue"
             >
-              <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
+              />
             </button>
 
             {renders.length > 0 && (
@@ -633,7 +711,9 @@ export default function StagingPage() {
                 <YoutubeIcon className="w-4 h-4" />
               )}
               <span>
-                {isUploadingBatch ? "Uploading Batch..." : `Upload All Selected (${renders.length})`}
+                {isUploadingBatch
+                  ? "Uploading Batch..."
+                  : `Upload All Selected (${renders.length})`}
               </span>
             </button>
           </div>
@@ -673,7 +753,9 @@ export default function StagingPage() {
                 <span>YouTube API Daily Quota</span>
               </span>
               <span className="font-mono text-[11px] text-slate-400">
-                {quota ? `${quota.units_used.toLocaleString()} / ${quota.daily_limit_units.toLocaleString()}` : "10,000 units"}
+                {quota
+                  ? `${quota.units_used.toLocaleString()} / ${quota.daily_limit_units.toLocaleString()}`
+                  : "10,000 units"}
               </span>
             </div>
             {quota && (
@@ -733,7 +815,10 @@ export default function StagingPage() {
                 )}
               </p>
               <p className="text-[11px] text-slate-500 font-mono">
-                {ytAuth?.channel_handle || (ytAuth?.is_authenticated ? "OAuth Active" : "OAuth Required")}
+                {ytAuth?.channel_handle ||
+                  (ytAuth?.is_authenticated
+                    ? "OAuth Active"
+                    : "OAuth Required")}
               </p>
             </div>
 
@@ -761,7 +846,8 @@ export default function StagingPage() {
                 <span>AI Copy Engine</span>
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Conditions on hero identity, kill streaks, and gameplay context notes.
+                Conditions on hero identity, kill streaks, and gameplay context
+                notes.
               </p>
             </div>
             <label className="inline-flex items-center gap-2 text-xs text-slate-200 cursor-pointer select-none">
@@ -780,8 +866,12 @@ export default function StagingPage() {
         {isLoading ? (
           <div className="py-24 flex flex-col items-center justify-center space-y-3 text-center">
             <Loader2 className="w-8 h-8 text-rose-500 animate-spin" />
-            <p className="text-sm font-semibold text-white">Loading Staged Clips...</p>
-            <p className="text-xs text-slate-500">Checking pending renders and staged upload metadata</p>
+            <p className="text-sm font-semibold text-white">
+              Loading Staged Clips...
+            </p>
+            <p className="text-xs text-slate-500">
+              Checking pending renders and staged upload metadata
+            </p>
           </div>
         ) : renders.length === 0 ? (
           <div className="py-20 text-center space-y-4 rounded-3xl bg-slate-900/40 border border-white/5 p-8 max-w-xl mx-auto">
@@ -789,9 +879,13 @@ export default function StagingPage() {
               <UploadCloud className="w-8 h-8" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-white">No Clips Staged for Publishing Yet</h3>
+              <h3 className="text-lg font-bold text-white">
+                No Clips Staged for Publishing Yet
+              </h3>
               <p className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-                Stage clips from the Renders Gallery or Studio timeline to review them with live video previews, tag hero identities, and publish to YouTube.
+                Stage clips from the Renders Gallery or Studio timeline to
+                review them with live video previews, tag hero identities, and
+                publish to YouTube.
               </p>
             </div>
             <div className="flex items-center justify-center gap-3 pt-2">
@@ -814,15 +908,26 @@ export default function StagingPage() {
         ) : (
           <div className="space-y-6">
             <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-              <span>Showing {renders.length} clip{renders.length === 1 ? "" : "s"} staged for upload</span>
-              <span className="text-[11px] text-slate-500 font-mono">Changes save automatically on blur or via Save</span>
+              <span>
+                Showing {renders.length} clip{renders.length === 1 ? "" : "s"}{" "}
+                staged for upload
+              </span>
+              <span className="text-[11px] text-slate-500 font-mono">
+                Changes save automatically on blur or via Save
+              </span>
             </div>
 
             {renders.map((render) => {
-              const meta = clipMetadata[render.clip_id] || getDefaultMetadata(render);
+              const meta =
+                clipMetadata[render.clip_id] || getDefaultMetadata(render);
               const chosenFormat = meta.format;
               const streamUrl = getStreamUrl(render.clip_id, chosenFormat);
-              const isShort = chosenFormat === "vertical_blur" || chosenFormat === "vertical_crop" || chosenFormat === "third_person" || chosenFormat === "direct_crop" || chosenFormat === "cinematic";
+              const isShort =
+                chosenFormat === "vertical_blur" ||
+                chosenFormat === "vertical_crop" ||
+                chosenFormat === "third_person" ||
+                chosenFormat === "direct_crop" ||
+                chosenFormat === "cinematic";
               const isUploading = uploadingClipIds.has(render.clip_id);
               const uploadResult = uploadedClips[render.clip_id];
               const uploadFailed =
@@ -831,7 +936,8 @@ export default function StagingPage() {
               const uploadError =
                 uploadResult?.error_message || render.youtube_upload_error;
               const isAlreadyUploaded =
-                uploadResult?.status === "completed" || Boolean(render.youtube_upload);
+                uploadResult?.status === "completed" ||
+                Boolean(render.youtube_upload);
 
               return (
                 <div
@@ -846,7 +952,10 @@ export default function StagingPage() {
                           {render.clip_id}
                         </span>
                         <span className="text-xs text-slate-400 font-mono">
-                          {render.clip?.duration_seconds ?? render.request?.duration_seconds ?? 15}s duration
+                          {render.clip?.duration_seconds ??
+                            render.request?.duration_seconds ??
+                            15}
+                          s duration
                         </span>
                         {isAlreadyUploaded && (
                           <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -862,8 +971,8 @@ export default function StagingPage() {
                         )}
                         {render.velocity_3h != null && (
                           <span className="text-[10px] font-bold text-teal-300 bg-teal-500/10 border border-teal-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <TrendingUp className="w-3 h-3" />
-                            +{render.velocity_3h.toLocaleString()} / 3h
+                            <TrendingUp className="w-3 h-3" />+
+                            {render.velocity_3h.toLocaleString()} / 3h
                           </span>
                         )}
                         {render.scheduled_publish_at && !isAlreadyUploaded && (
@@ -893,7 +1002,8 @@ export default function StagingPage() {
                         const list: string[] = [];
                         if (render.outputs) {
                           for (const k of Object.keys(render.outputs)) {
-                            if (render.outputs[k] && !list.includes(k)) list.push(k);
+                            if (render.outputs[k] && !list.includes(k))
+                              list.push(k);
                           }
                         }
                         if (render.modes) {
@@ -902,10 +1012,20 @@ export default function StagingPage() {
                           }
                         }
                         const hasSpecialCrop = list.some((m) =>
-                          ["third_person", "direct_crop", "cinematic", "custom"].includes(m)
+                          [
+                            "third_person",
+                            "direct_crop",
+                            "cinematic",
+                            "custom",
+                          ].includes(m),
                         );
-                        const filtered = hasSpecialCrop ? list.filter((m) => m !== "vertical_crop") : list;
-                        const formats = filtered.length > 0 ? filtered : ["vertical_blur", "third_person", "landscape"];
+                        const filtered = hasSpecialCrop
+                          ? list.filter((m) => m !== "vertical_crop")
+                          : list;
+                        const formats =
+                          filtered.length > 0
+                            ? filtered
+                            : ["vertical_blur", "third_person", "landscape"];
 
                         return formats.map((fmt) => (
                           <button
@@ -921,8 +1041,14 @@ export default function StagingPage() {
                                 : "text-slate-400 hover:text-white hover:bg-white/5"
                             }`}
                           >
-                            {fmt === "landscape" ? <Tv className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
-                            <span className="capitalize">{fmt.replace("_", " ")}</span>
+                            {fmt === "landscape" ? (
+                              <Tv className="w-3 h-3" />
+                            ) : (
+                              <Smartphone className="w-3 h-3" />
+                            )}
+                            <span className="capitalize">
+                              {fmt.replace("_", " ")}
+                            </span>
                           </button>
                         ));
                       })()}
@@ -972,7 +1098,11 @@ export default function StagingPage() {
                         </div>
                       </div>
                       <span className="text-[11px] text-slate-500 text-center">
-                        Playing: <code className="text-slate-400 font-mono capitalize">{chosenFormat.replace("_", " ")}</code> format
+                        Playing:{" "}
+                        <code className="text-slate-400 font-mono capitalize">
+                          {chosenFormat.replace("_", " ")}
+                        </code>{" "}
+                        format
                       </span>
                     </div>
 
@@ -985,7 +1115,9 @@ export default function StagingPage() {
                             <Sparkles className="w-3.5 h-3.5 text-violet-400" />
                             <span>Hero Identity & Play Context</span>
                           </span>
-                          <span className="text-[10px] text-violet-400/80">Context for AI Title & Tags</span>
+                          <span className="text-[10px] text-violet-400/80">
+                            Context for AI Title & Tags
+                          </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -998,8 +1130,16 @@ export default function StagingPage() {
                               type="text"
                               list="marvel-rivals-heroes-list"
                               value={meta.hero_name || ""}
-                              onChange={(e) => handleFieldChange(render.clip_id, "hero_name", e.target.value)}
-                              onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                              onChange={(e) =>
+                                handleFieldChange(
+                                  render.clip_id,
+                                  "hero_name",
+                                  e.target.value,
+                                )
+                              }
+                              onBlur={() =>
+                                handleSaveClipMetadata(render.clip_id)
+                              }
                               placeholder="e.g. Magneto, Luna Snow, Spider-Man..."
                               className="w-full px-3 py-1.5 bg-slate-950 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 text-xs"
                             />
@@ -1013,8 +1153,16 @@ export default function StagingPage() {
                             <input
                               type="text"
                               value={meta.clip_context || ""}
-                              onChange={(e) => handleFieldChange(render.clip_id, "clip_context", e.target.value)}
-                              onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                              onChange={(e) =>
+                                handleFieldChange(
+                                  render.clip_id,
+                                  "clip_context",
+                                  e.target.value,
+                                )
+                              }
+                              onBlur={() =>
+                                handleSaveClipMetadata(render.clip_id)
+                              }
                               placeholder="e.g. 5K streak holding point B..."
                               className="w-full px-3 py-1.5 bg-slate-950 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 text-xs"
                             />
@@ -1043,10 +1191,17 @@ export default function StagingPage() {
                           </button>
 
                           {previousCopies[render.clip_id] && (
-                            <Tooltip content={`Previous title: ${previousCopies[render.clip_id].title || "(empty)"}`}>
+                            <Tooltip
+                              content={`Previous title: ${previousCopies[render.clip_id].title || "(empty)"}`}
+                            >
                               <span className="text-[10px] text-slate-400 truncate max-w-xs flex items-center gap-1 cursor-help">
                                 <History className="w-3 h-3 text-slate-500 shrink-0" />
-                                <span>Prev: <span className="line-through">{previousCopies[render.clip_id].title}</span></span>
+                                <span>
+                                  Prev:{" "}
+                                  <span className="line-through">
+                                    {previousCopies[render.clip_id].title}
+                                  </span>
+                                </span>
                               </span>
                             </Tooltip>
                           )}
@@ -1061,7 +1216,13 @@ export default function StagingPage() {
                         <input
                           type="text"
                           value={meta.title}
-                          onChange={(e) => handleFieldChange(render.clip_id, "title", e.target.value)}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              render.clip_id,
+                              "title",
+                              e.target.value,
+                            )
+                          }
                           onBlur={() => handleSaveClipMetadata(render.clip_id)}
                           placeholder="Video or Shorts title..."
                           className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 text-xs"
@@ -1076,7 +1237,13 @@ export default function StagingPage() {
                         <textarea
                           rows={2}
                           value={meta.description}
-                          onChange={(e) => handleFieldChange(render.clip_id, "description", e.target.value)}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              render.clip_id,
+                              "description",
+                              e.target.value,
+                            )
+                          }
                           onBlur={() => handleSaveClipMetadata(render.clip_id)}
                           placeholder="Video description with hashtags..."
                           className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 text-xs resize-none"
@@ -1092,8 +1259,16 @@ export default function StagingPage() {
                           <input
                             type="text"
                             value={meta.tags}
-                            onChange={(e) => handleFieldChange(render.clip_id, "tags", e.target.value)}
-                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                            onChange={(e) =>
+                              handleFieldChange(
+                                render.clip_id,
+                                "tags",
+                                e.target.value,
+                              )
+                            }
+                            onBlur={() =>
+                              handleSaveClipMetadata(render.clip_id)
+                            }
                             placeholder="Gaming, MarvelRivals, Shorts..."
                             className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 text-xs"
                           />
@@ -1106,7 +1281,11 @@ export default function StagingPage() {
                           <select
                             value={meta.privacy}
                             onChange={(e) => {
-                              handleFieldChange(render.clip_id, "privacy", e.target.value);
+                              handleFieldChange(
+                                render.clip_id,
+                                "privacy",
+                                e.target.value,
+                              );
                               handleSaveClipMetadata(render.clip_id);
                             }}
                             className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 focus:outline-none focus:border-rose-500 text-xs cursor-pointer"
@@ -1129,7 +1308,9 @@ export default function StagingPage() {
                         disabled={savingId === render.clip_id}
                         className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-white/10 transition-colors disabled:opacity-50"
                       >
-                        {savingId === render.clip_id ? "Saving..." : "Save Staging"}
+                        {savingId === render.clip_id
+                          ? "Saving..."
+                          : "Save Staging"}
                       </button>
 
                       {/* Schedule slot editor */}
@@ -1157,9 +1338,12 @@ export default function StagingPage() {
                           disabled={savingScheduleId === render.clip_id}
                           className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold disabled:opacity-50 transition-colors"
                         >
-                          {savingScheduleId === render.clip_id ? "Saving..." : "Set Slot"}
+                          {savingScheduleId === render.clip_id
+                            ? "Saving..."
+                            : "Set Slot"}
                         </button>
-                        {(draftSchedules[render.clip_id] || render.scheduled_publish_at) && (
+                        {(draftSchedules[render.clip_id] ||
+                          render.scheduled_publish_at) && (
                           <button
                             type="button"
                             onClick={() => handleClearSchedule(render.clip_id)}
@@ -1175,17 +1359,23 @@ export default function StagingPage() {
 
                     <div className="flex items-center gap-2">
                       {/* Watch on YouTube if uploaded */}
-                      {isAlreadyUploaded && (uploadResult?.youtube_url || render.youtube_upload?.url) && (
-                        <a
-                          href={uploadResult?.youtube_url || render.youtube_upload?.url || "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-rose-400 hover:text-rose-300 text-xs font-semibold border border-rose-500/20 transition-colors"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>Watch on YouTube</span>
-                        </a>
-                      )}
+                      {isAlreadyUploaded &&
+                        (uploadResult?.youtube_url ||
+                          render.youtube_upload?.url) && (
+                          <a
+                            href={
+                              uploadResult?.youtube_url ||
+                              render.youtube_upload?.url ||
+                              "#"
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-rose-400 hover:text-rose-300 text-xs font-semibold border border-rose-500/20 transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Watch on YouTube</span>
+                          </a>
+                        )}
 
                       {/* Upload Single Button */}
                       <button
@@ -1199,7 +1389,15 @@ export default function StagingPage() {
                         ) : (
                           <YoutubeIcon className="w-3.5 h-3.5" />
                         )}
-                        <span>{isUploading ? "Uploading..." : uploadFailed ? "Retry Upload" : isAlreadyUploaded ? "Re-Upload" : "Upload to YouTube"}</span>
+                        <span>
+                          {isUploading
+                            ? "Uploading..."
+                            : uploadFailed
+                              ? "Retry Upload"
+                              : isAlreadyUploaded
+                                ? "Re-Upload"
+                                : "Upload to YouTube"}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -1213,14 +1411,61 @@ export default function StagingPage() {
       {/* Marvel Rivals Heroes Autocomplete Datalist */}
       <datalist id="marvel-rivals-heroes-list">
         {[
-          "Adam Warlock", "Angela", "Black Cat", "Black Panther", "Black Widow", "Blade",
-          "Captain America", "Cloak & Dagger", "Cyclops", "Daredevil", "Deadpool",
-          "Doctor Strange", "Emma Frost", "Groot", "Hawkeye", "Hela", "Hulk",
-          "Human Torch", "Invisible Woman", "Iron Fist", "Iron Man", "Jeff the Land Shark",
-          "Loki", "Luna Snow", "Magik", "Magneto", "Mantis", "Mister Fantastic",
-          "Moon Knight", "Namor", "Peni Parker", "Psylocke", "Punisher", "Rocket Raccoon",
-          "Scarlet Witch", "Spider-Man", "Star-Lord", "Storm", "The Thing", "Thor",
-          "Venom", "Winter Soldier", "Wolverine",
+          "Adam Warlock",
+          "Angela",
+          "Black Cat",
+          "Black Panther",
+          "Black Widow",
+          "Blade",
+          "Captain America",
+          "Cloak & Dagger",
+          "Cyclops",
+          "Daredevil",
+          "Deadpool",
+          "Devil Dinosaur",
+          "Doctor Strange",
+          "Elsa Bloodstone",
+          "Emma Frost",
+          "Gambit",
+          "Gorr The God Butcher",
+          "Groot",
+          "Hawkeye",
+          "Hela",
+          "Hulk",
+          "Human Torch",
+          "Invisible Woman",
+          "Iron Fist",
+          "Iron Man",
+          "Jeff the Land Shark",
+          "Jubilee",
+          "Loki",
+          "Luna Snow",
+          "Magik",
+          "Magneto",
+          "Mantis",
+          "Mister Fantastic",
+          "Moon Knight",
+          "Namor",
+          "Nightcrawler",
+          "Peni Parker",
+          "Phoenix",
+          "Psylocke",
+          "Punisher",
+          "Rocket Raccoon",
+          "Rogue",
+          "Scarlet Witch",
+          "Spider-Man",
+          "Squirrel Girl",
+          "Star-Lord",
+          "Storm",
+          "The Hood",
+          "The Thing",
+          "Thor",
+          "Ultron",
+          "Venom",
+          "White Fox",
+          "Winter Soldier",
+          "Wolverine",
         ].map((hero) => (
           <option key={hero} value={hero} />
         ))}

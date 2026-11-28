@@ -14,9 +14,11 @@ import logging
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.config import settings
 from app.rendering.probe import probe_media
 from app.services.highlight.audio_scanner import AudioCandidateWindow
 from app.services.highlight.killfeed import (
@@ -27,6 +29,12 @@ from app.services.highlight.ultimate_meter import UltimateCast
 from app.services.highlight.visual_matcher import (
     BatchVisualMatchResult,
     VisualDetectionEvent,
+)
+from app.services.upload_metadata import (
+    TIER_HIGH_ADJECTIVES,
+    TIER_PEAK_ADJECTIVES,
+    TIER_PRECISION_ADJECTIVES,
+    pick_adjective,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,19 +150,27 @@ class ClusterConfig(BaseModel):
         description="Merge events occurring within this interval into a single chain",
     )
     pre_roll_seconds: float = Field(
-        default=10.0,
+        default_factory=lambda: float(
+            getattr(settings, "HIGHLIGHT_PRE_ROLL_SECONDS", 10.0)
+        ),
         description="Cinematic pre-roll before first action event (captures neutral zone setup/flank approach)",
     )
     post_roll_seconds: float = Field(
-        default=8.0,
+        default_factory=lambda: float(
+            getattr(settings, "HIGHLIGHT_POST_ROLL_SECONDS", 8.0)
+        ),
         description="Cinematic post-roll after last action event (captures aftermath, reaction, emote)",
     )
     min_clip_duration: float = Field(
-        default=35.0,
+        default_factory=lambda: float(
+            getattr(settings, "HIGHLIGHT_MIN_CLIP_DURATION", 45.0)
+        ),
         description="Minimum candidate clip duration (provides narrative context for LLM/Gemini trimming)",
     )
     max_clip_duration: float = Field(
-        default=60.0,
+        default_factory=lambda: float(
+            getattr(settings, "HIGHLIGHT_MAX_CLIP_DURATION", 60.0)
+        ),
         description="Maximum clip duration for YouTube Shorts (clamped ceiling)",
     )
     thumbnails_dir: str = Field(
@@ -174,84 +190,90 @@ def generate_suggested_title(
     is_team_wipe: bool = False,
     character_name: str | None = None,
     streak_count: int | None = None,
+    seed: Any = None,
 ) -> str:
     """Generate a catchy, high-engagement YouTube Shorts title with gaming emojis."""
     hero_prefix = f"{character_name} " if character_name else ""
     is_ot = game_phase.lower() == "overtime"
+    seed_val = (
+        seed
+        or f"{character_name}_{event_type}_{kill_count}_{streak_count}_{game_phase}"
+    )
+
+    peak_adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed_val, "wipe")
+    high_adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed_val, "streak")
+    prec_adj = pick_adjective(TIER_PRECISION_ADJECTIVES, seed_val, "clutch")
 
     if is_team_wipe or event_type == "team_wipe":
         if is_ot:
-            return f"Insane {hero_prefix}Team Wipe in Overtime! 💥 #MarvelRivals"
-        return f"Insane {hero_prefix}Team Wipe Ultimate! 💥 #MarvelRivals"
+            return f"{peak_adj} {hero_prefix}Team Wipe in Overtime! 💥 #MarvelRivals"
+        return f"{peak_adj} {hero_prefix}Team Wipe Ultimate! 💥 #MarvelRivals"
 
     if event_type == "penta_ko":
         return (
-            f"Unreal {hero_prefix}Penta KO in Overtime! 🔥 #MarvelRivals"
+            f"{peak_adj} {hero_prefix}Penta KO in Overtime! 🔥 #MarvelRivals"
             if is_ot
-            else f"Unreal {hero_prefix}Penta KO Climax! 🔥 #MarvelRivals"
+            else f"{peak_adj} {hero_prefix}Penta KO Climax! 🔥 #MarvelRivals"
         )
 
     if event_type == "quad_ko":
         return (
-            f"Crazy {hero_prefix}Quad KO in Overtime! ⚡️ #MarvelRivals"
+            f"{high_adj} {hero_prefix}Quad KO in Overtime! ⚡️ #MarvelRivals"
             if is_ot
-            else f"Crazy {hero_prefix}Quad KO Chain! ⚡️ #MarvelRivals"
+            else f"{high_adj} {hero_prefix}Quad KO Chain! ⚡️ #MarvelRivals"
         )
 
     if event_type == "shutdown":
-        return f"Huge {hero_prefix}Ultimate Shutdown Denied! 🛑 #MarvelRivals"
+        return f"{prec_adj} {hero_prefix}Ultimate Shutdown Denied! 🛑 #MarvelRivals"
 
     if event_type == "kill_streak" or streak_count:
         if streak_count == 5:
             return (
-                f"Unreal {hero_prefix}5-Player KO Streak! 🔥 #MarvelRivals"
+                f"{peak_adj} {hero_prefix}5-Player KO Streak! 🔥 #MarvelRivals"
                 if not is_ot
-                else f"Unreal {hero_prefix}5-Player KO Streak in Overtime! 🔥 #MarvelRivals"
+                else f"{peak_adj} {hero_prefix}5-Player KO Streak in Overtime! 🔥 #MarvelRivals"
             )
         elif streak_count == 4:
             return (
-                f"Crazy {hero_prefix}4-Player KO Streak! ⚡️ #MarvelRivals"
+                f"{high_adj} {hero_prefix}4-Player KO Streak! ⚡️ #MarvelRivals"
                 if not is_ot
-                else f"Crazy {hero_prefix}4-Player KO Streak in Overtime! ⚡️ #MarvelRivals"
+                else f"{high_adj} {hero_prefix}4-Player KO Streak in Overtime! ⚡️ #MarvelRivals"
             )
         elif streak_count == 3:
             return (
-                f"Clean {hero_prefix}3-Player KO Streak! 🔥 #MarvelRivals"
+                f"{prec_adj} {hero_prefix}3-Player KO Streak! 🔥 #MarvelRivals"
                 if not is_ot
-                else f"Clean {hero_prefix}3-Player KO Streak in Overtime! 🔥 #MarvelRivals"
+                else f"{prec_adj} {hero_prefix}3-Player KO Streak in Overtime! 🔥 #MarvelRivals"
             )
         elif is_ot:
-            return f"Unstoppable {hero_prefix}Kill Streak in Overtime! 🚀 #MarvelRivals"
-        return f"Unstoppable {hero_prefix}Kill Streak Unleashed! 🚀 #MarvelRivals"
+            return f"{high_adj} {hero_prefix}Kill Streak in Overtime! 🚀 #MarvelRivals"
+        return f"{high_adj} {hero_prefix}Kill Streak Unleashed! 🚀 #MarvelRivals"
 
     if event_type == "triple_ko":
         if is_ot:
-            return f"Clean {hero_prefix}Triple KO in Overtime! 🔥 #MarvelRivals"
-        return f"Clean {hero_prefix}Triple KO Highlight! 🔥 #MarvelRivals"
+            return f"{prec_adj} {hero_prefix}Triple KO in Overtime! 🔥 #MarvelRivals"
+        return f"{prec_adj} {hero_prefix}Triple KO Highlight! 🔥 #MarvelRivals"
 
     if event_type == "double_ko":
+        fast_adj = pick_adjective(
+            ["Fast", "Smooth", "Clean", "Crisp"], seed_val, "double"
+        )
         if is_ot:
-            return f"Fast {hero_prefix}Double KO in Overtime! ⚡️ #MarvelRivals"
-        return f"Fast {hero_prefix}Double KO Highlight! ⚡️ #MarvelRivals"
+            return f"{fast_adj} {hero_prefix}Double KO in Overtime! ⚡️ #MarvelRivals"
+        return f"{fast_adj} {hero_prefix}Double KO Highlight! ⚡️ #MarvelRivals"
 
     if event_type == "objective_clutch":
         return (
-            f"Clutch {hero_prefix}Overtime Victory! 🏆 #MarvelRivals"
+            f"{prec_adj} {hero_prefix}Overtime Victory! 🏆 #MarvelRivals"
             if is_ot
-            else f"Clutch {hero_prefix}Objective Defense! 🏆 #MarvelRivals"
-        )
-
-    if event_type == "double_ko":
-        return (
-            f"Smooth {hero_prefix}Double KO in Overtime! ⚡️ #MarvelRivals"
-            if is_ot
-            else f"Smooth {hero_prefix}Double KO Climax! ⚡️ #MarvelRivals"
+            else f"{prec_adj} {hero_prefix}Objective Defense! 🏆 #MarvelRivals"
         )
 
     if event_type == "single_ko":
-        return f"Clean {hero_prefix}Elimination Highlight! 🎯 #MarvelRivals"
+        return f"{prec_adj} {hero_prefix}Elimination Highlight! 🎯 #MarvelRivals"
 
-    return f"Insane {hero_prefix}Marvel Rivals Highlight! 🔥 #MarvelRivals"
+    fallback_adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed_val, "fallback")
+    return f"{fallback_adj} {hero_prefix}Marvel Rivals Highlight! 🔥 #MarvelRivals"
 
 
 def generate_suggested_tags(event_type: str, game_phase: str = "regular") -> list[str]:
@@ -558,6 +580,7 @@ class ClusterEngine:
                 is_team_wipe=is_team_wipe,
                 character_name=hero_name,
                 streak_count=detected_streak,
+                seed=candidate_id,
             )
             tags = generate_suggested_tags(peak_type, game_phase=game_phase)
 

@@ -40,7 +40,10 @@ export type UploadPrivacy = "private" | "unlisted" | "public";
 
 interface UploadQueueModalProps {
   selectedRenders: RenderManifest[];
-  onUpdateSelection: (clipId: string, payload: UploadSelectionPayload) => Promise<void>;
+  onUpdateSelection: (
+    clipId: string,
+    payload: UploadSelectionPayload,
+  ) => Promise<void>;
   onClose: () => void;
   onClearAll: () => Promise<void>;
 }
@@ -52,15 +55,22 @@ function getDefaultMetadata(item: RenderManifest) {
     (item.outputs && Object.keys(item.outputs)[0]) ||
     "vertical_blur";
   const start = item.clip?.start_seconds ?? item.request?.start_seconds ?? 0;
-  const dur = item.clip?.duration_seconds ?? item.request?.duration_seconds ?? 15;
+  const dur =
+    item.clip?.duration_seconds ?? item.request?.duration_seconds ?? 15;
   const defaultTitle =
     item.upload_selection?.title ||
     `${item.video_title ? `${item.video_title.slice(0, 50)} - ` : ""}Highlight (${Math.round(start)}s-${Math.round(start + dur)}s)`;
   const defaultDesc =
     item.upload_selection?.description ||
     `Gameplay highlight rendered with BackseatCaster AI Clip Engine.\n#MarvelRivals #Gaming #Shorts #Highlight`;
-  const defaultTags =
-    (item.upload_selection?.tags || ["Gaming", "MarvelRivals", "Highlights", "Shorts"]).join(", ");
+  const defaultTags = (
+    item.upload_selection?.tags || [
+      "Gaming",
+      "MarvelRivals",
+      "Highlights",
+      "Shorts",
+    ]
+  ).join(", ");
   const privacyVal: UploadPrivacy =
     item.upload_selection?.privacy === "private" ||
     item.upload_selection?.privacy === "unlisted"
@@ -124,9 +134,13 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   // YouTube integration state
   const [ytAuth, setYtAuth] = useState<YouTubeAuthStatus | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
-  const [uploadingClipIds, setUploadingClipIds] = useState<Set<string>>(new Set());
+  const [uploadingClipIds, setUploadingClipIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [isUploadingBatch, setIsUploadingBatch] = useState<boolean>(false);
-  const [uploadedClips, setUploadedClips] = useState<Record<string, YouTubeUploadResult>>({});
+  const [uploadedClips, setUploadedClips] = useState<
+    Record<string, YouTubeUploadResult>
+  >({});
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Metadata regeneration: AI vs deterministic copy for the same clip.
@@ -135,7 +149,11 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
   const [previousCopies, setPreviousCopies] = useState<
     Record<
       string,
-      { title?: string | null; description?: string | null; metadata_source?: string }
+      {
+        title?: string | null;
+        description?: string | null;
+        metadata_source?: string;
+      }
     >
   >({});
 
@@ -169,17 +187,23 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
             title: res.upload_selection.title || base.title,
             description: res.upload_selection.description || base.description,
             tags: (res.upload_selection.tags || []).join(", "),
-            privacy: (res.upload_selection.privacy as UploadPrivacy) || base.privacy,
-            format: (res.upload_selection.preferred_format as UploadFormat) || base.format,
-            hero_name: (res.upload_selection.hero_name as string) || base.hero_name,
-            clip_context: (res.upload_selection.clip_context as string) || base.clip_context,
+            privacy:
+              (res.upload_selection.privacy as UploadPrivacy) || base.privacy,
+            format:
+              (res.upload_selection.preferred_format as UploadFormat) ||
+              base.format,
+            hero_name:
+              (res.upload_selection.hero_name as string) || base.hero_name,
+            clip_context:
+              (res.upload_selection.clip_context as string) ||
+              base.clip_context,
           },
         };
       });
       setSuccessMessage(
         res.used_llm
           ? `AI copy generated for ${clipId}.`
-          : `${res.message} (${clipId})`
+          : `${res.message} (${clipId})`,
       );
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: unknown) {
@@ -254,7 +278,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
       });
       setUploadedClips((prev) => ({ ...prev, [clipId]: result }));
       setSuccessMessage(
-        `Successfully uploaded ${clipId} to YouTube as ${isShort ? "Short" : "Video"}!`
+        `Successfully uploaded ${clipId} to YouTube as ${isShort ? "Short" : "Video"}!`,
       );
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: unknown) {
@@ -292,7 +316,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
               privacy: meta.privacy,
             });
           }
-        })
+        }),
       );
 
       const batchRes = await uploadSelectedClipsToYouTube(true);
@@ -304,7 +328,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         setUploadedClips((prev) => ({ ...prev, ...resultMap }));
       }
       setSuccessMessage(
-        batchRes.message || `Uploaded ${batchRes.total_succeeded} clips to YouTube!`
+        batchRes.message ||
+          `Uploaded ${batchRes.total_succeeded} clips to YouTube!`,
       );
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err: unknown) {
@@ -326,20 +351,31 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
 
   const handleFieldChange = (
     clipId: string,
-    field: "title" | "description" | "tags" | "privacy" | "format" | "hero_name" | "clip_context",
-    value: string
+    field:
+      | "title"
+      | "description"
+      | "tags"
+      | "privacy"
+      | "format"
+      | "hero_name"
+      | "clip_context",
+    value: string,
   ) => {
     setClipMetadata((prev) => {
       const renderItem = selectedRenders.find((r) => r.clip_id === clipId);
-      const existing = prev[clipId] || (renderItem ? getDefaultMetadata(renderItem) : {
-        title: clipId,
-        description: "",
-        tags: "Gaming, Highlights, Shorts",
-        privacy: "public" as UploadPrivacy,
-        format: "vertical_blur" as UploadFormat,
-        hero_name: "",
-        clip_context: "",
-      });
+      const existing =
+        prev[clipId] ||
+        (renderItem
+          ? getDefaultMetadata(renderItem)
+          : {
+              title: clipId,
+              description: "",
+              tags: "Gaming, Highlights, Shorts",
+              privacy: "public" as UploadPrivacy,
+              format: "vertical_blur" as UploadFormat,
+              hero_name: "",
+              clip_context: "",
+            });
 
       return {
         ...prev,
@@ -399,7 +435,9 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
         stream_url: downloadUrl,
         title: meta?.title || r.upload_selection?.title,
         description: meta?.description || r.upload_selection?.description,
-        tags: meta?.tags.split(",").map((t) => t.trim()) || r.upload_selection?.tags,
+        tags:
+          meta?.tags.split(",").map((t) => t.trim()) ||
+          r.upload_selection?.tags,
         privacy: meta?.privacy || r.upload_selection?.privacy,
         duration_seconds: r.clip?.duration_seconds,
         created_at: r.created_at,
@@ -419,7 +457,7 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
 
   const handleDownloadAll = () => {
     setSuccessMessage(
-      "Starting downloads sequentially. If your browser asks for permission to download multiple files, please click 'Allow'."
+      "Starting downloads sequentially. If your browser asks for permission to download multiple files, please click 'Allow'.",
     );
     selectedRenders.forEach((r, idx) => {
       const meta = clipMetadata[r.clip_id];
@@ -462,7 +500,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Review chosen highlight renders, customize upload titles/tags, and stage for YouTube publication.
+                Review chosen highlight renders, customize upload titles/tags,
+                and stage for YouTube publication.
               </p>
               <label className="mt-2 inline-flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none w-fit">
                 <input
@@ -489,7 +528,9 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                 title={`Connected to channel: ${ytAuth.channel_title || "YouTube"}`}
               >
                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="font-semibold">{ytAuth.channel_title || "Connected Channel"}</span>
+                <span className="font-semibold">
+                  {ytAuth.channel_title || "Connected Channel"}
+                </span>
               </div>
             ) : (
               <button
@@ -544,18 +585,24 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
               <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto text-slate-500">
                 <Radio className="w-6 h-6" />
               </div>
-              <p className="text-sm font-semibold text-slate-300">No Renders Chosen for Upload Yet</p>
+              <p className="text-sm font-semibold text-slate-300">
+                No Renders Chosen for Upload Yet
+              </p>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Go to the Renders Gallery and click &quot;Choose for Upload&quot; on any rendered clip to queue it here.
+                Go to the Renders Gallery and click &quot;Choose for
+                Upload&quot; on any rendered clip to queue it here.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
               {selectedRenders.map((render) => {
-                const meta = clipMetadata[render.clip_id] || getDefaultMetadata(render);
+                const meta =
+                  clipMetadata[render.clip_id] || getDefaultMetadata(render);
                 const chosenFormat = meta.format;
                 const streamUrl = getStreamUrl(render.clip_id, chosenFormat);
-                const isShort = chosenFormat === "vertical_blur" || chosenFormat === "vertical_crop";
+                const isShort =
+                  chosenFormat === "vertical_blur" ||
+                  chosenFormat === "vertical_crop";
 
                 return (
                   <div
@@ -592,14 +639,19 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             tooltipTitle="Video Title"
                           />
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-400">
-                            <Tooltip content={`Full Clip ID: ${render.clip_id}`}>
+                            <Tooltip
+                              content={`Full Clip ID: ${render.clip_id}`}
+                            >
                               <span className="font-mono text-[11px] text-slate-300 truncate max-w-[180px] cursor-help">
                                 {render.clip_id}
                               </span>
                             </Tooltip>
                             <span>•</span>
                             <span>
-                              {render.clip?.duration_seconds ?? render.request?.duration_seconds ?? 0}s duration
+                              {render.clip?.duration_seconds ??
+                                render.request?.duration_seconds ??
+                                0}
+                              s duration
                             </span>
                           </div>
                         </div>
@@ -611,7 +663,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           const list: string[] = [];
                           if (render.outputs) {
                             for (const k of Object.keys(render.outputs)) {
-                              if (render.outputs[k] && !list.includes(k)) list.push(k);
+                              if (render.outputs[k] && !list.includes(k))
+                                list.push(k);
                             }
                           }
                           if (render.modes) {
@@ -620,23 +673,40 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             }
                           }
                           const hasSpecialCrop = list.some((m) =>
-                            ["third_person", "direct_crop", "cinematic", "custom"].includes(m)
+                            [
+                              "third_person",
+                              "direct_crop",
+                              "cinematic",
+                              "custom",
+                            ].includes(m),
                           );
-                          const filtered = hasSpecialCrop ? list.filter((m) => m !== "vertical_crop") : list;
-                          const formats = filtered.length > 0 ? filtered : ["vertical_blur", "vertical_crop", "landscape"];
+                          const filtered = hasSpecialCrop
+                            ? list.filter((m) => m !== "vertical_crop")
+                            : list;
+                          const formats =
+                            filtered.length > 0
+                              ? filtered
+                              : ["vertical_blur", "vertical_crop", "landscape"];
 
                           return formats.map((fmt) => (
                             <button
                               key={fmt}
                               type="button"
                               onClick={() => {
-                                handleFieldChange(render.clip_id, "format", fmt);
+                                handleFieldChange(
+                                  render.clip_id,
+                                  "format",
+                                  fmt,
+                                );
                                 onUpdateSelection(render.clip_id, {
                                   is_selected: true,
                                   preferred_format: fmt,
                                   title: meta.title,
                                   description: meta.description,
-                                  tags: meta.tags.split(",").map((t) => t.trim()).filter(Boolean),
+                                  tags: meta.tags
+                                    .split(",")
+                                    .map((t) => t.trim())
+                                    .filter(Boolean),
                                   privacy: meta.privacy,
                                 });
                               }}
@@ -646,8 +716,14 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                                   : "text-slate-400 hover:text-white"
                               }`}
                             >
-                              {fmt === "landscape" ? <Tv className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
-                              <span className="capitalize">{fmt.replace("_", " ")}</span>
+                              {fmt === "landscape" ? (
+                                <Tv className="w-3 h-3" />
+                              ) : (
+                                <Smartphone className="w-3 h-3" />
+                              )}
+                              <span className="capitalize">
+                                {fmt.replace("_", " ")}
+                              </span>
                             </button>
                           ));
                         })()}
@@ -661,14 +737,24 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                         <div className="space-y-1">
                           <label className="text-[11px] font-semibold text-violet-300 flex items-center justify-between">
                             <span>Hero Identity</span>
-                            <span className="text-[10px] text-slate-500 font-normal">Used in AI & Deterministic Copy</span>
+                            <span className="text-[10px] text-slate-500 font-normal">
+                              Used in AI & Deterministic Copy
+                            </span>
                           </label>
                           <input
                             type="text"
                             list="marvel-rivals-heroes-list"
                             value={meta.hero_name || ""}
-                            onChange={(e) => handleFieldChange(render.clip_id, "hero_name", e.target.value)}
-                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                            onChange={(e) =>
+                              handleFieldChange(
+                                render.clip_id,
+                                "hero_name",
+                                e.target.value,
+                              )
+                            }
+                            onBlur={() =>
+                              handleSaveClipMetadata(render.clip_id)
+                            }
                             placeholder="e.g. Magneto, Luna Snow, Spider-Man..."
                             className="w-full px-2.5 py-1.5 bg-slate-950 border border-white/10 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 text-xs"
                           />
@@ -676,13 +762,23 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                         <div className="space-y-1">
                           <label className="text-[11px] font-semibold text-violet-300 flex items-center justify-between">
                             <span>Clip Context / Notes</span>
-                            <span className="text-[10px] text-slate-500 font-normal">Kills, point, choke</span>
+                            <span className="text-[10px] text-slate-500 font-normal">
+                              Kills, point, choke
+                            </span>
                           </label>
                           <input
                             type="text"
                             value={meta.clip_context || ""}
-                            onChange={(e) => handleFieldChange(render.clip_id, "clip_context", e.target.value)}
-                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                            onChange={(e) =>
+                              handleFieldChange(
+                                render.clip_id,
+                                "clip_context",
+                                e.target.value,
+                              )
+                            }
+                            onBlur={() =>
+                              handleSaveClipMetadata(render.clip_id)
+                            }
                             placeholder="e.g. 5K streak holding point B..."
                             className="w-full px-2.5 py-1.5 bg-slate-950 border border-white/10 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 text-xs"
                           />
@@ -697,20 +793,28 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                         <input
                           type="text"
                           value={meta.title}
-                          onChange={(e) => handleFieldChange(render.clip_id, "title", e.target.value)}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              render.clip_id,
+                              "title",
+                              e.target.value,
+                            )
+                          }
                           onBlur={() => handleSaveClipMetadata(render.clip_id)}
                           placeholder="Video or Short Title..."
                           className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
                         />
                         {previousCopies[render.clip_id] && (
                           <p className="text-[10px] text-slate-500">
-                            Previous ({
-                              previousCopies[render.clip_id].metadata_source === "llm"
-                                ? "AI"
-                                : "deterministic"
-                            }):{" "}
+                            Previous (
+                            {previousCopies[render.clip_id].metadata_source ===
+                            "llm"
+                              ? "AI"
+                              : "deterministic"}
+                            ):{" "}
                             <span className="line-through decoration-slate-600">
-                              {previousCopies[render.clip_id].title || "(no title)"}
+                              {previousCopies[render.clip_id].title ||
+                                "(no title)"}
                             </span>
                           </p>
                         )}
@@ -725,7 +829,11 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           rows={2}
                           value={meta.description}
                           onChange={(e) =>
-                            handleFieldChange(render.clip_id, "description", e.target.value)
+                            handleFieldChange(
+                              render.clip_id,
+                              "description",
+                              e.target.value,
+                            )
                           }
                           onBlur={() => handleSaveClipMetadata(render.clip_id)}
                           placeholder="Video description, timestamps, and hashtags..."
@@ -743,9 +851,15 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             type="text"
                             value={meta.tags}
                             onChange={(e) =>
-                              handleFieldChange(render.clip_id, "tags", e.target.value)
+                              handleFieldChange(
+                                render.clip_id,
+                                "tags",
+                                e.target.value,
+                              )
                             }
-                            onBlur={() => handleSaveClipMetadata(render.clip_id)}
+                            onBlur={() =>
+                              handleSaveClipMetadata(render.clip_id)
+                            }
                             placeholder="Gaming, MarvelRivals, Shorts..."
                             className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
                           />
@@ -765,7 +879,10 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                                 preferred_format: meta.format,
                                 title: meta.title,
                                 description: meta.description,
-                                tags: meta.tags.split(",").map((t) => t.trim()).filter(Boolean),
+                                tags: meta.tags
+                                  .split(",")
+                                  .map((t) => t.trim())
+                                  .filter(Boolean),
                                 privacy: val,
                               });
                             }}
@@ -796,7 +913,9 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           disabled={savingId === render.clip_id}
                           className="px-3 py-1.5 rounded-lg bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 border border-rose-500/30 font-medium transition-colors"
                         >
-                          {savingId === render.clip_id ? "Saving..." : "Save Staging"}
+                          {savingId === render.clip_id
+                            ? "Saving..."
+                            : "Save Staging"}
                         </button>
 
                         {/* Regenerate title/description/tags without re-rendering */}
@@ -823,7 +942,12 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                           </span>
                         </button>
                         {previousCopies[render.clip_id]?.description && (
-                          <span className="text-[10px] text-slate-500 max-w-[26ch] truncate" title={previousCopies[render.clip_id].description || ""}>
+                          <span
+                            className="text-[10px] text-slate-500 max-w-[26ch] truncate"
+                            title={
+                              previousCopies[render.clip_id].description || ""
+                            }
+                          >
                             <History className="w-3 h-3 inline -mt-0.5 mr-1" />
                             Previous description kept for comparison
                           </span>
@@ -836,17 +960,24 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             (render.youtube_upload
                               ? {
                                   clip_id: render.clip_id,
-                                  youtube_video_id: render.youtube_upload.video_id,
+                                  youtube_video_id:
+                                    render.youtube_upload.video_id,
                                   youtube_url: render.youtube_upload.url,
                                   is_short: render.youtube_upload.is_short,
                                   status: "completed",
                                 }
                               : null);
 
-                          const isUploading = uploadingClipIds.has(render.clip_id);
+                          const isUploading = uploadingClipIds.has(
+                            render.clip_id,
+                          );
                           const isShort = chosenFormat !== "landscape";
 
-                          if (uploadRes && uploadRes.status === "completed" && uploadRes.youtube_url) {
+                          if (
+                            uploadRes &&
+                            uploadRes.status === "completed" &&
+                            uploadRes.youtube_url
+                          ) {
                             return (
                               <a
                                 href={uploadRes.youtube_url}
@@ -855,7 +986,10 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 font-medium transition-colors"
                               >
                                 <YoutubeIcon className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>View on YouTube {uploadRes.is_short ? "(Short)" : ""}</span>
+                                <span>
+                                  View on YouTube{" "}
+                                  {uploadRes.is_short ? "(Short)" : ""}
+                                </span>
                                 <ExternalLink className="w-3 h-3" />
                               </a>
                             );
@@ -865,7 +999,9 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                             <button
                               type="button"
                               onClick={() => handleUploadSingle(render.clip_id)}
-                              disabled={!ytAuth?.is_authenticated || isUploading}
+                              disabled={
+                                !ytAuth?.is_authenticated || isUploading
+                              }
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 text-red-300 hover:bg-red-600/30 border border-red-500/40 font-medium transition-colors disabled:opacity-40"
                               title={
                                 !ytAuth?.is_authenticated
@@ -882,7 +1018,8 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
                                 <>
                                   <UploadCloud className="w-3.5 h-3.5 text-red-400" />
                                   <span>
-                                    Upload to YouTube ({isShort ? "Short" : "Video"})
+                                    Upload to YouTube (
+                                    {isShort ? "Short" : "Video"})
                                   </span>
                                 </>
                               )}
@@ -928,9 +1065,17 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
             </button>
             <button
               onClick={handleUploadAllToYouTube}
-              disabled={!ytAuth?.is_authenticated || selectedRenders.length === 0 || isUploadingBatch}
+              disabled={
+                !ytAuth?.is_authenticated ||
+                selectedRenders.length === 0 ||
+                isUploadingBatch
+              }
               className="flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-red-900/30 transition-all cursor-pointer whitespace-nowrap active:scale-95"
-              title={!ytAuth?.is_authenticated ? "Connect YouTube account first" : "Upload all selected renders"}
+              title={
+                !ytAuth?.is_authenticated
+                  ? "Connect YouTube account first"
+                  : "Upload all selected renders"
+              }
             >
               {isUploadingBatch ? (
                 <>
@@ -966,14 +1111,61 @@ export const UploadQueueModal: React.FC<UploadQueueModalProps> = ({
       </div>
       <datalist id="marvel-rivals-heroes-list">
         {[
-          "Adam Warlock", "Angela", "Black Cat", "Black Panther", "Black Widow", "Blade",
-          "Captain America", "Cloak & Dagger", "Cyclops", "Daredevil", "Deadpool",
-          "Doctor Strange", "Emma Frost", "Groot", "Hawkeye", "Hela", "Hulk",
-          "Human Torch", "Invisible Woman", "Iron Fist", "Iron Man", "Jeff the Land Shark",
-          "Loki", "Luna Snow", "Magik", "Magneto", "Mantis", "Mister Fantastic",
-          "Moon Knight", "Namor", "Peni Parker", "Psylocke", "Punisher", "Rocket Raccoon",
-          "Scarlet Witch", "Spider-Man", "Star-Lord", "Storm", "The Thing", "Thor",
-          "Venom", "Winter Soldier", "Wolverine",
+          "Adam Warlock",
+          "Angela",
+          "Black Cat",
+          "Black Panther",
+          "Black Widow",
+          "Blade",
+          "Captain America",
+          "Cloak & Dagger",
+          "Cyclops",
+          "Daredevil",
+          "Deadpool",
+          "Devil Dinosaur",
+          "Doctor Strange",
+          "Elsa Bloodstone",
+          "Emma Frost",
+          "Gambit",
+          "Gorr The God Butcher",
+          "Groot",
+          "Hawkeye",
+          "Hela",
+          "Hulk",
+          "Human Torch",
+          "Invisible Woman",
+          "Iron Fist",
+          "Iron Man",
+          "Jeff the Land Shark",
+          "Jubilee",
+          "Loki",
+          "Luna Snow",
+          "Magik",
+          "Magneto",
+          "Mantis",
+          "Mister Fantastic",
+          "Moon Knight",
+          "Namor",
+          "Nightcrawler",
+          "Peni Parker",
+          "Phoenix",
+          "Psylocke",
+          "Punisher",
+          "Rocket Raccoon",
+          "Rogue",
+          "Scarlet Witch",
+          "Spider-Man",
+          "Squirrel Girl",
+          "Star-Lord",
+          "Storm",
+          "The Hood",
+          "The Thing",
+          "Thor",
+          "Ultron",
+          "Venom",
+          "White Fox",
+          "Winter Soldier",
+          "Wolverine",
         ].map((hero) => (
           <option key={hero} value={hero} />
         ))}

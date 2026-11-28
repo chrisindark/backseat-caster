@@ -750,6 +750,8 @@ export interface SetupSettings {
   watch_dir?: string | null;
   watch_poll_interval_minutes: number;
   watch_delete_after_ingest: boolean;
+  highlight_min_clip_duration?: number;
+  highlight_max_clip_duration?: number;
 }
 
 export interface UpdateSetupSettingsPayload {
@@ -767,6 +769,8 @@ export interface UpdateSetupSettingsPayload {
   watch_dir?: string | null;
   watch_poll_interval_minutes?: number | null;
   watch_delete_after_ingest?: boolean | null;
+  highlight_min_clip_duration?: number | null;
+  highlight_max_clip_duration?: number | null;
 }
 
 export interface WatchIngestItem {

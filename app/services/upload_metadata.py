@@ -9,6 +9,7 @@ and metadata regeneration callers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -18,6 +19,66 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _BASE_TAGS = ["Gaming", "Highlights", "Gameplay"]
+
+# Rich gaming adjective pools for deterministic title/description generation
+TIER_PEAK_ADJECTIVES: list[str] = [
+    "Insane",
+    "Unreal",
+    "Godlike",
+    "Legendary",
+    "Unbelievable",
+    "Mindblowing",
+    "Dominant",
+    "Flawless",
+    "Outrageous",
+    "Sensational",
+]
+
+TIER_HIGH_ADJECTIVES: list[str] = [
+    "Crazy",
+    "Wild",
+    "Savage",
+    "Unstoppable",
+    "Ridiculous",
+    "Monstrous",
+    "Epic",
+    "Electrifying",
+    "Masterclass",
+    "Fierce",
+]
+
+TIER_PRECISION_ADJECTIVES: list[str] = [
+    "Clean",
+    "Crisp",
+    "Clutch",
+    "Huge",
+    "Smooth",
+    "Clinical",
+    "Lethal",
+    "Peak",
+    "Calculated",
+    "Fast",
+]
+
+ALL_TITLE_ADJECTIVES: list[str] = list(
+    dict.fromkeys(
+        TIER_PEAK_ADJECTIVES
+        + TIER_HIGH_ADJECTIVES
+        + TIER_PRECISION_ADJECTIVES
+        + ["Insane", "Unreal", "Crazy", "Clean", "Huge", "Unstoppable", "Clutch"]
+    )
+)
+
+
+def pick_adjective(pool: list[str], *seed_keys: Any) -> str:
+    """Deterministically pick an adjective from a pool using seed values."""
+    if not pool:
+        return "Epic"
+    combined = "_".join(str(k) for k in seed_keys if k is not None)
+    if not combined:
+        return pool[0]
+    idx = int(hashlib.md5(combined.encode("utf-8")).hexdigest(), 16) % len(pool)
+    return pool[idx]
 
 
 def _clean(value: Any) -> str | None:
@@ -222,45 +283,24 @@ def build_title(
 
     game_tag = f"#{game_name.replace(' ', '')}" if game_name else ""
 
-    # Check for pre-existing suggested_title from highlight candidate
-    sugg_title = _clean(
-        getattr(candidate, "suggested_title", None) if candidate else None
+    # Derive deterministic seed for consistent, diverse adjective selection
+    seed = (
+        getattr(candidate, "id", None)
+        or (
+            candidate.get("id") or candidate.get("candidate_id")
+            if isinstance(candidate, dict)
+            else None
+        )
+        or getattr(job, "id", None)
+        or getattr(job, "clip_id", None)
+        or (getattr(job, "start_seconds", None) if job else None)
+        or (getattr(candidate, "start_seconds", None) if candidate else None)
+        or (candidate.get("start_seconds") if isinstance(candidate, dict) else None)
+        or clip_id
+        or hero
+        or "default_seed"
     )
-    if not sugg_title and isinstance(candidate, dict):
-        sugg_title = _clean(candidate.get("suggested_title"))
 
-    if sugg_title:
-        title = sugg_title
-        # If hero is specified and not already in suggested title, integrate it
-        if hero and hero.lower() not in title.lower():
-            adjectives = [
-                "Insane",
-                "Unreal",
-                "Crazy",
-                "Clean",
-                "Huge",
-                "Unstoppable",
-                "Clutch",
-            ]
-            matched_adj = None
-            for adj in adjectives:
-                if title.startswith(adj + " "):
-                    matched_adj = adj
-                    break
-            if matched_adj:
-                remainder = title[len(matched_adj) + 1 :]
-                title = f"{matched_adj} {hero} {remainder}"
-            else:
-                title = f"{hero}: {title}"
-
-        # Add game hashtag if space permits and not already included
-        if game_tag and game_tag.lower() not in title.lower():
-            if len(title) + len(game_tag) + 1 <= 95:
-                title = f"{title} {game_tag}"
-
-        return _truncate_title(title)
-
-    # If no suggested_title, build deterministically from event / hero / context
     event_type = _clean(getattr(candidate, "event_type", None) if candidate else None)
     if not event_type and isinstance(candidate, dict):
         event_type = _clean(candidate.get("event_type"))
@@ -273,38 +313,178 @@ def build_title(
     hero_prefix = f"{hero} " if hero else ""
     tag_suffix = f" {game_tag}" if game_tag else ""
 
+    # Check for pre-existing suggested_title from highlight candidate
+    sugg_title = _clean(
+        getattr(candidate, "suggested_title", None) if candidate else None
+    )
+    if not sugg_title and isinstance(candidate, dict):
+        sugg_title = _clean(candidate.get("suggested_title"))
+
+    # Select dynamic adjective by tier for title generation
+    sugg_lower = sugg_title.lower() if sugg_title else ""
+    is_peak = (
+        is_team_wipe
+        or event_type in ("team_wipe", "penta_ko", "crown_victory")
+        or streak_count == 5
+        or any(
+            w in sugg_lower
+            for w in (
+                "wipe",
+                "penta",
+                "5-player",
+                "crown",
+                "climax",
+                "legendary",
+                "champion",
+            )
+        )
+    )
+    is_high = (
+        event_type in ("quad_ko", "kill_streak", "round_qualified")
+        or streak_count == 4
+        or any(
+            w in sugg_lower
+            for w in (
+                "quad",
+                "4-player",
+                "streak",
+                "savage",
+                "wild",
+                "intense",
+                "qualified",
+                "qualification",
+            )
+        )
+    )
+    is_prec = (
+        event_type in ("triple_ko", "double_ko", "shutdown", "objective_clutch")
+        or streak_count in (2, 3)
+        or is_ot
+        or any(
+            w in sugg_lower
+            for w in (
+                "triple",
+                "3-player",
+                "double",
+                "shutdown",
+                "clutch",
+                "clean",
+                "defense",
+                "overtime",
+            )
+        )
+    )
+
+    if is_peak:
+        new_adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed, "title_peak")
+    elif is_high:
+        new_adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "title_high")
+    elif is_prec:
+        new_adj = pick_adjective(TIER_PRECISION_ADJECTIVES, seed, "title_prec")
+    else:
+        new_adj = pick_adjective(
+            TIER_PEAK_ADJECTIVES + TIER_HIGH_ADJECTIVES, seed, "title_gen"
+        )
+
+    if sugg_title:
+        title = sugg_title
+        matched_adj: str | None = None
+        for adj in sorted(ALL_TITLE_ADJECTIVES, key=len, reverse=True):
+            m = re.match(rf"^{re.escape(adj)}\b", title, re.IGNORECASE)
+            if m:
+                matched_adj = title[: m.end()]
+                break
+
+        if matched_adj:
+            # Upgrade repetitive adjectives to dynamic ones, while preserving existing varied ones
+            is_overused = matched_adj.lower() in ("insane", "unreal", "crazy")
+            if is_overused:
+                chosen_adj = new_adj.upper() if matched_adj.isupper() else new_adj
+            else:
+                chosen_adj = matched_adj
+
+            remainder = title[len(matched_adj) :].strip()
+            if hero and hero.lower() not in remainder.lower():
+                title = f"{chosen_adj} {hero} {remainder}"
+            else:
+                title = f"{chosen_adj} {remainder}"
+        else:
+            # Title had no recognized leading adjective (e.g. 'Magneto Penta Kill' or 'Team Wipe Ultimate! 💥')
+            if hero and title.lower().startswith(hero.lower()):
+                remainder = title[len(hero) :].lstrip(": -").strip()
+                title = f"{new_adj} {hero} {remainder}"
+            elif (
+                hero
+                and hero.lower() not in title.lower()
+                and not any(
+                    title.lower().startswith(p) for p in ("heartbreaking", "fall guys")
+                )
+            ):
+                title = f"{new_adj} {hero} {title}"
+            elif not hero and any(
+                title.lower().startswith(p)
+                for p in (
+                    "team wipe",
+                    "penta",
+                    "quad",
+                    "triple",
+                    "double",
+                    "kill streak",
+                    "5-player",
+                    "4-player",
+                    "3-player",
+                )
+            ):
+                title = f"{new_adj} {title}"
+
+        # Add game hashtag if space permits and not already included
+        if game_tag and game_tag.lower() not in title.lower():
+            if len(title) + len(game_tag) + 1 <= 95:
+                title = f"{title} {game_tag}"
+
+        return _truncate_title(title)
+
+    # If no suggested_title, build deterministically from event / hero / context
     if is_team_wipe:
+        adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed, "wipe")
         title = (
-            f"Insane {hero_prefix}Team Wipe in Overtime! 💥{tag_suffix}"
+            f"{adj} {hero_prefix}Team Wipe in Overtime! 💥{tag_suffix}"
             if is_ot
-            else f"Insane {hero_prefix}Team Wipe Ultimate! 💥{tag_suffix}"
+            else f"{adj} {hero_prefix}Team Wipe Ultimate! 💥{tag_suffix}"
         )
     elif event_type == "penta_ko" or streak_count == 5:
+        adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed, "penta")
         title = (
-            f"Unreal {hero_prefix}5-Player KO Streak in Overtime! 🔥{tag_suffix}"
+            f"{adj} {hero_prefix}5-Player KO Streak in Overtime! 🔥{tag_suffix}"
             if is_ot
-            else f"Unreal {hero_prefix}5-Player KO Streak! 🔥{tag_suffix}"
+            else f"{adj} {hero_prefix}5-Player KO Streak! 🔥{tag_suffix}"
         )
     elif event_type == "quad_ko" or streak_count == 4:
+        adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "quad")
         title = (
-            f"Crazy {hero_prefix}Quad KO in Overtime! ⚡{tag_suffix}"
+            f"{adj} {hero_prefix}Quad KO in Overtime! ⚡{tag_suffix}"
             if is_ot
-            else f"Crazy {hero_prefix}Quad KO Chain! ⚡{tag_suffix}"
+            else f"{adj} {hero_prefix}Quad KO Chain! ⚡{tag_suffix}"
         )
     elif event_type == "triple_ko" or streak_count == 3:
+        adj = pick_adjective(TIER_PRECISION_ADJECTIVES, seed, "triple")
         title = (
-            f"Clean {hero_prefix}Triple KO in Overtime! 🔥{tag_suffix}"
+            f"{adj} {hero_prefix}Triple KO in Overtime! 🔥{tag_suffix}"
             if is_ot
-            else f"Clean {hero_prefix}Triple KO Highlight! 🔥{tag_suffix}"
+            else f"{adj} {hero_prefix}Triple KO Highlight! 🔥{tag_suffix}"
         )
     elif event_type == "shutdown":
-        title = f"Huge {hero_prefix}Ultimate Shutdown Denied! 🛑{tag_suffix}"
+        adj = pick_adjective(TIER_PRECISION_ADJECTIVES, seed, "shutdown")
+        title = f"{adj} {hero_prefix}Ultimate Shutdown Denied! 🛑{tag_suffix}"
     elif event_type == "objective_clutch" or is_ot:
-        title = f"Clutch {hero_prefix}Overtime Defense! ⚡{tag_suffix}"
+        adj = pick_adjective(TIER_PRECISION_ADJECTIVES, seed, "clutch")
+        title = f"{adj} {hero_prefix}Overtime Defense! ⚡{tag_suffix}"
     elif event_type == "crown_victory":
-        title = f"Unreal Fall Guys Crown Victory! 👑{tag_suffix}"
+        adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed, "crown")
+        title = f"{adj} Fall Guys Crown Victory! 👑{tag_suffix}"
     elif event_type == "round_qualified":
-        title = f"Insane Fall Guys Round Qualification! ⚡{tag_suffix}"
+        adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "qualified")
+        title = f"{adj} Fall Guys Round Qualification! ⚡{tag_suffix}"
     elif event_type == "final_round":
         title = f"Fall Guys Final Round Intensity! 🔥{tag_suffix}"
     elif event_type == "eliminated":
@@ -312,11 +492,14 @@ def build_title(
     elif event_type == "round_over":
         title = f"Fall Guys Round Over Chaos! 🏃{tag_suffix}"
     elif hero and context:
-        title = f"{hero}: {context} 🔥{tag_suffix}"
+        adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "hero_context")
+        title = f"{adj} {hero} Play: {context}! 🔥{tag_suffix}"
     elif hero:
-        title = f"Unstoppable {hero} Gameplay Highlight! 🔥{tag_suffix}"
+        adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "hero")
+        title = f"{adj} {hero} Gameplay Highlight! 🔥{tag_suffix}"
     elif context:
-        title = f"{context} - Gameplay Highlight 🔥{tag_suffix}"
+        adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "context")
+        title = f"{adj} Play: {context}! 🔥{tag_suffix}"
     else:
         # Parent video timing fallback
         parent_title = _clean(getattr(video, "title", None) if video else None)
@@ -324,10 +507,13 @@ def build_title(
         dur_raw = getattr(job, "duration_seconds", None) if job else None
         dur_s = _as_int(dur_raw, 15) if dur_raw is not None else 15
         end_s = start_s + dur_s
+        adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed, "fallback")
         if parent_title:
-            title = f"{parent_title[:55]} - Highlight ({start_s}s-{end_s}s){tag_suffix}"
+            title = f"{adj} Highlight ({start_s}s-{end_s}s) - {parent_title[:55]}{tag_suffix}"
+        elif clip_id:
+            title = f"{adj} Gaming Highlight - {clip_id}{tag_suffix}"
         else:
-            title = f"Gameplay Highlight - {clip_id}{tag_suffix}"
+            title = f"{adj} Gaming Highlight ({start_s}s-{end_s}s) 🔥{tag_suffix}"
 
     return _truncate_title(title)
 
@@ -534,19 +720,40 @@ def build_description(
 
     lines: list[str] = []
 
+    desc_seed = (
+        getattr(candidate, "id", None)
+        or (
+            candidate.get("id") or candidate.get("candidate_id")
+            if isinstance(candidate, dict)
+            else None
+        )
+        or getattr(job, "id", None)
+        or (getattr(job, "start_seconds", None) if job else None)
+        or hero
+        or "desc_seed"
+    )
+    desc_adj = pick_adjective(
+        TIER_PEAK_ADJECTIVES + TIER_HIGH_ADJECTIVES, desc_seed, "desc"
+    )
+    article = "an" if desc_adj[0].lower() in "aeiou" else "a"
+
     # 1. Hook Line
     if hero and context:
-        lines.append(f"🔥 {hero} with an insane play: {context}!")
+        lines.append(f"🔥 {hero} with {article} {desc_adj.lower()} play: {context}!")
     elif context:
         lines.append(f"🔥 {context}!")
     elif hero and event_label:
-        lines.append(f"🔥 Epic {hero} {event_label} in {game_name or 'the match'}!")
+        lines.append(
+            f"🔥 {desc_adj} {hero} {event_label} in {game_name or 'the match'}!"
+        )
     elif hero:
         lines.append(
-            f"🔥 Unreal {hero} gameplay highlight in {game_name or 'the stream'}!"
+            f"🔥 {desc_adj} {hero} gameplay highlight in {game_name or 'the stream'}!"
         )
     elif event_label:
-        lines.append(f"🔥 Insane {event_label} moment in {game_name or 'the game'}!")
+        lines.append(
+            f"🔥 {desc_adj} {event_label} moment in {game_name or 'the game'}!"
+        )
     else:
         lines.append("Gameplay highlight rendered with BackseatCaster AI Clip Engine.")
 

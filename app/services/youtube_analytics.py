@@ -112,12 +112,16 @@ class YouTubeAnalyticsService:
                 "message": "No active uploaded videos found to poll.",
             }
 
-        job_map: dict[str, RenderJob] = {j.youtube_video_id: j for j in jobs if j.youtube_video_id}
+        job_map: dict[str, RenderJob] = {
+            j.youtube_video_id: j for j in jobs if j.youtube_video_id
+        }
         video_ids = list(job_map.keys())
 
         # Batch into chunks of 50 (YouTube API cap, 1 unit per batch)
         batch_size = max(1, int(getattr(settings, "YOUTUBE_ANALYTICS_BATCH_LIMIT", 50)))
-        batches = [video_ids[i : i + batch_size] for i in range(0, len(video_ids), batch_size)]
+        batches = [
+            video_ids[i : i + batch_size] for i in range(0, len(video_ids), batch_size)
+        ]
 
         total_snapshots = 0
         updated_jobs = 0
@@ -140,14 +144,18 @@ class YouTubeAnalyticsService:
                 max(1, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3))) + 1
             ):
                 try:
-                    request = youtube.videos().list(part="statistics", id=",".join(batch))
+                    request = youtube.videos().list(
+                        part="statistics", id=",".join(batch)
+                    )
                     response = request.execute()
                     break
                 except Exception as exc:
                     parsed = parse_youtube_api_error(
                         exc, quota_reset_at=YouTubeQuotaService.resets_at()
                     )
-                    max_attempts = max(1, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3)))
+                    max_attempts = max(
+                        1, int(getattr(settings, "YOUTUBE_BACKOFF_MAX_ATTEMPTS", 3))
+                    )
                     if parsed.retryable and attempt < max_attempts:
                         YouTubeQuotaService.backoff_sleep(attempt)
                         continue
@@ -187,7 +195,9 @@ class YouTubeAnalyticsService:
                     )
                     hours_elapsed = 0.0
                     if pub_dt:
-                        hours_elapsed = max(0.0, (now_utc - pub_dt).total_seconds() / 3600.0)
+                        hours_elapsed = max(
+                            0.0, (now_utc - pub_dt).total_seconds() / 3600.0
+                        )
 
                     # Create snapshot record
                     snapshot = VideoAnalyticsSnapshot(
@@ -374,8 +384,12 @@ class YouTubeAnalyticsService:
             data = stats_by_slot[slot_key]
             data["videos_count"] += 1
             data["total_views"] += int(job.latest_view_count or 0)
-            data["total_velocity_3h"] += int(job.velocity_3h or job.latest_view_count or 0)
-            data["total_velocity_24h"] += int(job.velocity_24h or job.latest_view_count or 0)
+            data["total_velocity_3h"] += int(
+                job.velocity_3h or job.latest_view_count or 0
+            )
+            data["total_velocity_24h"] += int(
+                job.velocity_24h or job.latest_view_count or 0
+            )
             data["total_velocity_72h"] += int(
                 getattr(job, "velocity_72h", 0) or job.latest_view_count or 0
             )
@@ -394,7 +408,11 @@ class YouTubeAnalyticsService:
             avg_vel_72h = round(data["total_velocity_72h"] / cnt, 1) if cnt > 0 else 0.0
             avg_vel_7d = round(data["total_velocity_7d"] / cnt, 1) if cnt > 0 else 0.0
             eng_rate = (
-                round((data["total_likes"] + data["total_comments"]) / max(1, data["total_views"]), 4)
+                round(
+                    (data["total_likes"] + data["total_comments"])
+                    / max(1, data["total_views"]),
+                    4,
+                )
                 if data["total_views"] > 0
                 else 0.0
             )
@@ -425,7 +443,9 @@ class YouTubeAnalyticsService:
             )
 
         # Sort by performance score descending
-        slot_results.sort(key=lambda s: (s["performance_score"], s["avg_views"]), reverse=True)
+        slot_results.sort(
+            key=lambda s: (s["performance_score"], s["avg_views"]), reverse=True
+        )
         for rank, item in enumerate(slot_results, start=1):
             item["rank"] = rank
             item["recommended"] = rank <= 4 and item["performance_score"] > 0
@@ -453,13 +473,19 @@ class YouTubeAnalyticsService:
         }
 
     @classmethod
-    def apply_optimal_slots(cls, db: Session, top_n: int | None = None) -> dict[str, Any]:
+    def apply_optimal_slots(
+        cls, db: Session, top_n: int | None = None
+    ) -> dict[str, Any]:
         """Update ChannelProfile upload_slots to the highest-performing daily slots."""
         analytics = cls.get_slot_analytics(db)
         slots_ranked = [s["slot"] for s in analytics["slots"] if s["videos_count"] > 0]
         count = top_n or len(analytics.get("recommended_slots", [])) or 4
 
-        target_slots = slots_ranked[:count] if len(slots_ranked) >= 2 else analytics["recommended_slots"][:count]
+        target_slots = (
+            slots_ranked[:count]
+            if len(slots_ranked) >= 2
+            else analytics["recommended_slots"][:count]
+        )
         target_slots = sorted(list(set(target_slots)))
 
         profile = ChannelProfileService.get_or_create(db)
@@ -515,10 +541,14 @@ class YouTubeAnalyticsService:
 def execute_sync_analytics_job(max_age_days: int = 14) -> dict[str, Any]:
     """Execute YouTube statistics polling within a standalone DB session."""
     with get_task_db_session() as db:
-        return YouTubeAnalyticsService.poll_video_statistics(db, max_age_days=max_age_days)
+        return YouTubeAnalyticsService.poll_video_statistics(
+            db, max_age_days=max_age_days
+        )
 
 
-@celery_app.task(name="app.services.youtube_analytics.sync_video_analytics_task", rate_limit="10/m")
+@celery_app.task(
+    name="app.services.youtube_analytics.sync_video_analytics_task", rate_limit="10/m"
+)
 def sync_video_analytics_celery_task(max_age_days: int = 14) -> dict[str, Any]:
     """Celery task entry point for YouTube view statistics polling."""
     return execute_sync_analytics_job(max_age_days=max_age_days)

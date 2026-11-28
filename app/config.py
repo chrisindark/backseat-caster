@@ -123,6 +123,12 @@ class Settings(BaseSettings):
     # Upload ceiling: clip window + branded bookends (seeds the channel profile)
     MAX_CLIP_SECONDS: float = 90.0
 
+    # Highlight candidate duration bounds & cinematic padding
+    HIGHLIGHT_MIN_CLIP_DURATION: float = 45.0
+    HIGHLIGHT_MAX_CLIP_DURATION: float = 60.0
+    HIGHLIGHT_PRE_ROLL_SECONDS: float = 10.0
+    HIGHLIGHT_POST_ROLL_SECONDS: float = 8.0
+
     # Phase 10: zero-input ingest pipeline (auto-mine on download/upload)
     AUTO_MINE_ON_INGEST: bool = False
     AUTO_MINE_GAME: str | None = None

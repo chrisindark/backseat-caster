@@ -8,6 +8,7 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 from app.rendering.probe import probe_media
@@ -21,6 +22,12 @@ from app.services.highlight.cluster_engine import (
 from app.services.highlight.detectors.base import (
     BaseHighlightDetector,
     DetectionMetrics,
+)
+from app.services.upload_metadata import (
+    TIER_HIGH_ADJECTIVES,
+    TIER_PEAK_ADJECTIVES,
+    TIER_PRECISION_ADJECTIVES,
+    pick_adjective,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,12 +157,14 @@ class GenericHighlightDetector(BaseHighlightDetector):
             else:
                 event_type = "gameplay_highlight"
 
-            title, tags = self._generate_title_and_tags(event_type, final_score)
-
             cid_hash = hashlib.md5(
                 f"{video_id}_{raw_start:.1f}_{raw_end:.1f}_{self.game_id}".encode()
             ).hexdigest()[:6]
             candidate_id = f"cand_gen_{cid_hash}"
+
+            title, tags = self._generate_title_and_tags(
+                event_type, final_score, seed=candidate_id
+            )
 
             # Extract climax preview thumbnail
             thumb_path_str: str | None = None
@@ -289,20 +298,24 @@ class GenericHighlightDetector(BaseHighlightDetector):
         return deduped
 
     def _generate_title_and_tags(
-        self, event_type: str, score: float
+        self, event_type: str, score: float, seed: Any = None
     ) -> tuple[str, list[str]]:
         """Generate catchy YouTube Shorts titles and hashtags."""
         clean_tag = re.sub(r"[^a-zA-Z0-9]", "", self.game_display_name)
         game_label = (
             f" #{clean_tag}" if clean_tag and clean_tag.lower() != "generic" else ""
         )
+        seed_val = seed or f"{event_type}_{score}"
+        peak_adj = pick_adjective(TIER_PEAK_ADJECTIVES, seed_val, "climax")
+        high_adj = pick_adjective(TIER_HIGH_ADJECTIVES, seed_val, "action")
+        prec_adj = pick_adjective(TIER_PRECISION_ADJECTIVES, seed_val, "highlight")
 
         if event_type == "epic_climax":
-            title = f"Unbelievable Gaming Moment! 🔥{game_label} #Gaming #Shorts"
+            title = f"{peak_adj} Gaming Moment! 🔥{game_label} #Gaming #Shorts"
         elif event_type == "intense_action":
-            title = f"Insane Intense Gameplay! ⚡{game_label} #Shorts #Gaming"
+            title = f"{high_adj} Intense Gameplay! ⚡{game_label} #Shorts #Gaming"
         else:
-            title = f"Epic Gaming Highlight! 🎮{game_label} #Shorts #Clips"
+            title = f"{prec_adj} Gaming Highlight! 🎮{game_label} #Shorts #Clips"
 
         tags = ["Gaming", "Shorts", "Gameplay", "Clips", "Highlight"]
         if clean_tag and clean_tag.lower() != "generic":

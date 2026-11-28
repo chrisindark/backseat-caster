@@ -50,7 +50,9 @@ Extra context: {clip_context}
 
 Rules:
 - title: at most 60-70 characters, punchy and specific. Feature the hero and key action
-  (kills/streak/ultimate/objective play) prominently when known. Include 1-2 relevant gaming action emojis
+  (kills/streak/ultimate/objective play) prominently when known. Avoid repetitive adjectives like "Insane",
+  "Unreal", or "Crazy"; instead use diverse gaming adjectives (such as Godlike, Legendary, Unstoppable,
+  Flawless, Savage, Wild, Masterclass, Clean, Clutch, Sensational). Include 1-2 relevant gaming action emojis
   (such as 🔥, ⚡️, 💥, 🎯, 🛑, 🚀, 👑, 🏆) to make the title stand out on mobile feeds. No clickbait
   that contradicts the facts, no quotes around it. Do not include #Shorts.
 - description: 2-4 short lines. First line is an engaging hook highlighting the hero or play.
@@ -129,6 +131,7 @@ def get_known_heroes() -> list[str]:
             "The Thing",
             "Black Widow",
             "Blade",
+            "White Fox",
         ]
     _KNOWN_HEROES_CACHE = heroes
     return _KNOWN_HEROES_CACHE
